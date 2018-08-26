@@ -140,14 +140,6 @@ defaultBlocks =
                 elements
         )
         |> Custom.styled
-    , Custom.block "=>"
-        (\elements styling ->
-            Element.paragraph
-                -- (Element.Region.heading 1 ::
-                (styling.header Three)
-                elements
-        )
-        |> Custom.styled
     , Custom.block "header"
         (\elements styling ->
             Element.paragraph
