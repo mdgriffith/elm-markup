@@ -13,6 +13,7 @@ module Mark exposing (Options, Styling, defaultBlocks, defaultOptions, defaultSt
 import Element exposing (Element)
 import Element.Background as Background
 import Element.Border as Border
+import Element.Font as Font
 import Internal.Model as Internal
 import Mark.Custom as Custom
 import Parser exposing ((|.), (|=), Parser)
@@ -30,6 +31,8 @@ parseWith :
         { a
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
+            , list : List (Element.Attribute msg)
+            , blockSpacing : Int
         }
         msg
     -> String
@@ -46,7 +49,9 @@ type alias Options styling msg =
 {-| -}
 type alias Styling msg =
     { link : List (Element.Attribute msg)
+    , blockSpacing : Int
     , token : List (Element.Attribute msg)
+    , list : List (Element.Attribute msg)
     , listIcons : Cursor -> ListIcon -> Element msg
     , header : Level -> List (Element.Attribute msg)
     }
@@ -59,41 +64,121 @@ defaultOptions =
         defaultStyling
     , blocks =
         defaultBlocks
+    , inlines =
+        []
     }
 
 
 {-| -}
 defaultStyling : Styling msg
 defaultStyling =
-    { link = []
+    { blockSpacing = 24
+    , list =
+        [ Element.spacing 8
+        ]
+    , link =
+        [ Font.color
+            (Element.rgb
+                (17 / 255)
+                (132 / 255)
+                (206 / 255)
+            )
+        , Element.mouseOver
+            [ Font.color
+                (Element.rgb
+                    (234 / 255)
+                    (21 / 255)
+                    (122 / 255)
+                )
+
+            -- , Font.underline
+            ]
+        ]
     , token =
-        [ Background.color (Element.rgb 0.92 0.92 0.92)
-        , Border.rounded 3
-        , Element.paddingXY 4 2
+        [ Background.color
+            (Element.rgba 0 0 0 0.04)
+        , Border.rounded 2
+        , Element.paddingXY 5 3
+        , Font.size 16
+        , Font.family
+            [ Font.external
+                { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
+                , name = "Source Code Pro"
+                }
+            , Font.sansSerif
+            ]
         ]
     , listIcons = defaultListToken
-    , header = always []
+    , header =
+        \level ->
+            case level of
+                One ->
+                    [ Font.size 48 ]
+
+                Two ->
+                    [ Font.size 36 ]
+
+                Three ->
+                    [ Font.size 20 ]
+    }
+
+
+edges =
+    { top = 0
+    , left = 0
+    , right = 0
+    , bottom = 0
     }
 
 
 {-| -}
 defaultListToken : Cursor -> ListIcon -> Element msg
 defaultListToken cursor symbol =
+    let
+        pad =
+            Element.paddingEach
+                { edges
+                    | left =
+                        case cursor.level of
+                            One ->
+                                28
+
+                            Two ->
+                                56
+
+                            Three ->
+                                84
+                }
+    in
     case symbol of
         Arrow ->
-            Element.el [] (Element.text "➙")
+            Element.el
+                [ pad ]
+                (Element.text "➙")
 
-        Dash ->
-            Element.el [] (Element.text "•")
+        Bullet ->
+            let
+                icon =
+                    case cursor.level of
+                        One ->
+                            "•"
 
-        Plus ->
+                        Two ->
+                            "◦"
+
+                        Three ->
+                            "◦"
+            in
+            Element.el [ pad ] (Element.text icon)
+
+        Number ->
             case cursor.level of
                 One ->
-                    Element.el []
-                        (Element.text (String.fromInt cursor.one))
+                    Element.el [ pad ]
+                        (Element.text (String.fromInt cursor.one ++ "."))
 
                 Two ->
-                    Element.el []
+                    Element.el [ pad ]
                         (Element.text
                             (String.fromInt cursor.one
                                 ++ "."
@@ -102,7 +187,7 @@ defaultListToken cursor symbol =
                         )
 
                 Three ->
-                    Element.el []
+                    Element.el [ pad ]
                         (Element.text
                             (String.fromInt cursor.one
                                 ++ "."
@@ -119,6 +204,8 @@ defaultBlocks :
             { a
                 | header : Level -> List (Element.Attribute msg)
                 , link : List (Element.Attribute msg)
+                , list : List (Element.Attribute msg)
+                , blockSpacing : Int
                 , listIcons :
                     { level : Level
                     , one : Int
@@ -210,8 +297,8 @@ movement current target =
 
 
 type ListIcon
-    = Dash
-    | Plus
+    = Bullet
+    | Number
     | Arrow
 
 
@@ -246,7 +333,7 @@ levelToInt level =
             3
 
 
-list styling =
+list options =
     Parser.loop
         ( emptyCursor, [] )
         (\( cursor, existing ) ->
@@ -261,7 +348,7 @@ list styling =
                             ( newCursor
                             , Element.paragraph
                                 []
-                                (styling.listIcons newCursor token :: el)
+                                (options.styling.listIcons newCursor token :: el)
                                 :: existing
                             )
                     )
@@ -270,23 +357,23 @@ list styling =
                         [ Parser.token "->"
                             |> Parser.map (always Arrow)
                         , Parser.token "-"
-                            |> Parser.map (always Dash)
-                        , Parser.succeed Plus
+                            |> Parser.map (always Bullet)
+                        , Parser.succeed Number
                             |. Parser.chompIf Char.isDigit
                             |. Parser.chompWhile Char.isDigit
                             |. Parser.chompIf (\c -> c == '.')
                         ]
                     |. Parser.token " "
-                    |= Internal.text styling
+                    |= Internal.text options
                 , Parser.end
                     |> Parser.map
                         (\_ ->
-                            Parser.Done (\_ -> Element.column [] (List.reverse existing))
+                            Parser.Done (\_ -> Element.column options.styling.list (List.reverse existing))
                         )
                 , Parser.token "\n\n"
                     |> Parser.map
                         (\_ ->
-                            Parser.Done (\_ -> Element.column [] (List.reverse existing))
+                            Parser.Done (\_ -> Element.column options.styling.list (List.reverse existing))
                         )
                 , Parser.token "\n"
                     |> Parser.map (always (Parser.Loop ( cursor, existing )))

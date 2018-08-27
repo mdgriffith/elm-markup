@@ -1,6 +1,7 @@
 module Mark.Custom
     exposing
-        ( block
+        ( Custom
+        , block
         , bool
         , done
         , float
@@ -12,7 +13,7 @@ module Mark.Custom
 
 {-|
 
-@docs block
+@docs Custom, block
 
 @docs bool, int, float, string
 
@@ -27,6 +28,11 @@ import Internal.Model as Internal
 import Parser exposing ((|.), (|=), Parser)
 
 
+type alias Block style msg =
+    Internal.Block style msg
+
+
+{-| -}
 type Custom block
     = Custom String (Parser block)
 
@@ -108,10 +114,7 @@ float =
 done : Custom (style -> Element msg) -> Internal.Block style msg
 done (Custom name actualParser) =
     Internal.Block name
-        (actualParser
-         -- |. Parser.chompWhile (\c -> c == '\n')
-         -- |. Parser.token "|"
-        )
+        actualParser
 
 
 {-| -}
@@ -122,6 +125,7 @@ styled :
             { a
                 | link : List (Element.Attribute msg)
                 , token : List (Element.Attribute msg)
+                , blockSpacing : Int
             }
          -> Element msg
         )
@@ -130,29 +134,26 @@ styled :
             { a
                 | link : List (Element.Attribute msg)
                 , token : List (Element.Attribute msg)
+                , blockSpacing : Int
             }
             msg
 styled (Custom name customParser) =
     Internal.Parse name
-        (\style ->
+        (\options ->
             customParser
                 |. Parser.chompWhile (\c -> c == '\n')
-                |= Internal.text style
-         -- |. Parser.chompWhile (\c -> c == '\n' || c == ' ')
-         -- |. Parser.token "|"
+                |= Internal.text options
         )
 
 
 {-| -}
-parser : String -> (style -> Parser (style -> Element msg)) -> Internal.Block style msg
+parser : String -> (Internal.Options style msg -> Parser (style -> Element msg)) -> Internal.Block style msg
 parser name actualParser =
     Internal.Parse name
-        (\style ->
+        (\options ->
             Parser.succeed identity
                 |. Parser.chompWhile (\c -> c == '\n')
-                |= actualParser style
-         -- |. Parser.chompWhile (\c -> c == '\n')
-         -- |. Parser.token "|"
+                |= actualParser options
         )
 
 
