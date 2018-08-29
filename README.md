@@ -57,7 +57,7 @@ There are only a very limited set of characters for formatting text.
 - `/italic/` _italic_
 - `*bold*` **bold**
 - `~strike~` ~~strike~~
-- `&grave;code&grave;` `code`
+- `` `code` `` `code`
 - `[link text](http://fruits.com)` to create a link.
 
 
