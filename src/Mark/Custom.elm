@@ -294,7 +294,7 @@ paragraph name renderer =
 
 {-| Like `Custom.paragraph`, but parses many styled paragraphs.
 
-Parsing ends when there are two consecutive newlines.
+**Note** Parsing ends when there are two consecutive newlines.
 
 -}
 section :

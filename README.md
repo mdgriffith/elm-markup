@@ -9,6 +9,45 @@ This is a solution to an intersection between two problems I've had when conside
 
 In that way, this isn't really a replacement for Markdown or Asciidoc.  It just solves the above problems for my usecases.
 
+Here's a taste:
+
+```
+| title
+    My fancy cat blog article
+
+Welcome!  Have you hear about /cats/?  They're great.
+
+| image http://placekitten/200/500
+    Here's a great picture of my cat, pookie.
+
+How much do I like cats?  A bunch.
+
+```
+
+Which you can parse using `Mark.parse`.
+
+## Principles
+
+Here are the ideas I used to put this library together:
+
+- There is _one_, unambiguous way to construct a given element.
+
+- This library inherits Elm's wariness of infix or symbol based operators.  Instead of having a bunch of symbols and custom syntax rules to denote concepts, we can usually just use real words.
+
+- This library is strict about whitespace.  This is to ensure that a valid markup file will always look aestetically pleasing and approachable.  
+
+- The following should _always_ be easy:
+
+    - Writing markup
+    - Reading markup
+    - Modifying markup
+
+- In order to do this, the parser needs to be strict about form.  This means that invalid markup will make the parser fail with a nice error message instead of rendering half correct and half wonky.  Think of this as "No runtime errors" but for elm-markup and layout.
+
+- You can add custom blocks and inline elements, which you'll see later. This library is about letting you be expressive in creating content, just with some ground rules about the form it will take.
+
+- On the flip side, we avoid directly embedding any other langauges like `Html`. My current feeling is that a document like this benefits hugely from being **high level** and embedding code can get really messy with weird details.  Fortunately custom blocks are convenient, so I don't forsee this being a problem.
+
 
 
 ## Basic Text Markup
