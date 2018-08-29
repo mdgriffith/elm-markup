@@ -1,12 +1,17 @@
-module Mark exposing (Options, Styling, defaultBlocks, defaultOptions, defaultStyling, parse, parseWith)
+module Mark exposing
+    ( parse, parseWith
+    , Options, defaultOptions, defaultStyling
+    , Styling, Cursor, ListIcon(..)
+    , defaultBlocks
+    )
 
 {-|
 
 @docs parse, parseWith
 
-@docs Options, defaultOptions
+@docs Options, defaultOptions, defaultStyling
 
-@docs Styling, Cursor, ListIcon, defaultStyling
+@docs Styling, Cursor, ListIcon
 
 -}
 
@@ -14,6 +19,8 @@ import Element exposing (Element)
 import Element.Background as Background
 import Element.Border as Border
 import Element.Font as Font
+import Element.Region
+import Html.Attributes
 import Internal.Model as Internal
 import Mark.Custom as Custom
 import Parser exposing ((|.), (|=), Parser)
@@ -32,7 +39,8 @@ parseWith :
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
             , list : List (Element.Attribute msg)
-            , blockSpacing : Int
+            , root : List (Element.Attribute msg)
+            , block : List (Element.Attribute msg)
         }
         msg
     -> String
@@ -49,11 +57,14 @@ type alias Options styling msg =
 {-| -}
 type alias Styling msg =
     { link : List (Element.Attribute msg)
-    , blockSpacing : Int
     , token : List (Element.Attribute msg)
     , list : List (Element.Attribute msg)
     , listIcons : Cursor -> ListIcon -> Element msg
-    , header : Level -> List (Element.Attribute msg)
+    , title : List (Element.Attribute msg)
+    , header : List (Element.Attribute msg)
+    , monospace : List (Element.Attribute msg)
+    , root : List (Element.Attribute msg)
+    , block : List (Element.Attribute msg)
     }
 
 
@@ -72,9 +83,27 @@ defaultOptions =
 {-| -}
 defaultStyling : Styling msg
 defaultStyling =
-    { blockSpacing = 24
-    , list =
-        [ Element.spacing 8
+    { root =
+        [ Element.spacing 24
+        , Element.width (Element.px 700)
+        , Element.centerX
+        , Element.padding 100
+        ]
+    , block = []
+    , monospace =
+        [ Element.spacing 5
+        , Element.padding 24
+        , Background.color
+            (Element.rgba 0 0 0 0.04)
+        , Border.rounded 2
+        , Font.size 16
+        , Font.family
+            [ Font.external
+                { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
+                , name = "Source Code Pro"
+                }
+            , Font.sansSerif
+            ]
         ]
     , link =
         [ Font.color
@@ -109,17 +138,13 @@ defaultStyling =
             ]
         ]
     , listIcons = defaultListToken
+    , list =
+        [ Element.spacing 8
+        ]
+    , title =
+        [ Font.size 48 ]
     , header =
-        \level ->
-            case level of
-                One ->
-                    [ Font.size 48 ]
-
-                Two ->
-                    [ Font.size 36 ]
-
-                Three ->
-                    [ Font.size 20 ]
+        [ Font.size 36 ]
     }
 
 
@@ -131,6 +156,14 @@ edges =
     }
 
 
+cursorLevel ( current, nested ) =
+    List.length nested + 1
+
+
+mapCursor fn ( head, tail ) =
+    List.map fn (head :: tail)
+
+
 {-| -}
 defaultListToken : Cursor -> ListIcon -> Element msg
 defaultListToken cursor symbol =
@@ -139,15 +172,19 @@ defaultListToken cursor symbol =
             Element.paddingEach
                 { edges
                     | left =
-                        case cursor.level of
-                            One ->
+                        case cursorLevel cursor of
+                            1 ->
                                 28
 
-                            Two ->
+                            2 ->
                                 56
 
-                            Three ->
+                            3 ->
                                 84
+
+                            _ ->
+                                84
+                    , right = 12
                 }
     in
     case symbol of
@@ -159,83 +196,67 @@ defaultListToken cursor symbol =
         Bullet ->
             let
                 icon =
-                    case cursor.level of
-                        One ->
+                    case cursorLevel cursor of
+                        1 ->
                             "•"
 
-                        Two ->
-                            "◦"
-
-                        Three ->
+                        _ ->
                             "◦"
             in
             Element.el [ pad ] (Element.text icon)
 
         Number ->
-            case cursor.level of
-                One ->
-                    Element.el [ pad ]
-                        (Element.text (String.fromInt cursor.one ++ "."))
-
-                Two ->
-                    Element.el [ pad ]
-                        (Element.text
-                            (String.fromInt cursor.one
-                                ++ "."
-                                ++ String.fromInt cursor.two
-                            )
-                        )
-
-                Three ->
-                    Element.el [ pad ]
-                        (Element.text
-                            (String.fromInt cursor.one
-                                ++ "."
-                                ++ String.fromInt cursor.two
-                                ++ "."
-                                ++ String.fromInt cursor.three
-                            )
-                        )
+            Element.el [ pad ]
+                (Element.text
+                    (String.join "."
+                        (mapCursor String.fromInt cursor)
+                    )
+                )
 
 
 defaultBlocks :
     List
         (Internal.Block
             { a
-                | header : Level -> List (Element.Attribute msg)
+                | title : List (Element.Attribute msg)
+                , header : List (Element.Attribute msg)
                 , link : List (Element.Attribute msg)
                 , list : List (Element.Attribute msg)
-                , blockSpacing : Int
-                , listIcons :
-                    { level : Level
-                    , one : Int
-                    , three : Int
-                    , two : Int
-                    }
-                    -> ListIcon
-                    -> Element msg
+                , root : List (Element.Attribute msg)
+                , monospace : List (Element.Attribute msg)
+                , block : List (Element.Attribute msg)
+                , listIcons : Cursor -> ListIcon -> Element msg
                 , token : List (Element.Attribute msg)
             }
             msg
         )
 defaultBlocks =
-    [ Custom.block "title"
+    [ Custom.paragraph "title"
         (\elements styling ->
             Element.paragraph
-                -- (Element.Region.heading 1 ::
-                (styling.header One)
+                (Element.Region.heading 1
+                    :: styling.title
+                )
                 elements
         )
-        |> Custom.styled
-    , Custom.block "header"
+    , Custom.paragraph "header"
         (\elements styling ->
             Element.paragraph
-                -- (Element.Region.heading 1 ::
-                (styling.header Two)
+                (Element.Region.heading 2
+                    :: styling.header
+                )
                 elements
         )
-        |> Custom.styled
-    , Custom.block "image"
+    , Custom.indented "monospace"
+        (\string styling ->
+            Element.paragraph
+                (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
+                    :: Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
+                    :: styling.monospace
+                )
+                [ Element.text string ]
+        )
+    , Custom.block2 "image"
         (\src description styling ->
             Element.image
                 []
@@ -243,9 +264,8 @@ defaultBlocks =
                 , description = String.trim description
                 }
         )
-        |> Custom.string
-        |> Custom.string
-        |> Custom.done
+        Custom.string
+        Custom.string
     , Custom.parser "list"
         list
     ]
@@ -255,82 +275,37 @@ defaultBlocks =
 {- LIST -}
 
 
-{-| -}
+{-| A Cursor which represents a position in a nested list.
+
+`Level`
+
+-}
 type alias Cursor =
-    { level : Level
-    , one : Int
-    , two : Int
-    , three : Int
-    }
+    ( Int, List Int )
 
 
 emptyCursor : Cursor
 emptyCursor =
-    { level = One
-    , one = 0
-    , two = 0
-    , three = 0
-    }
+    ( 1, [] )
 
 
-type LevelMovement
-    = Indenting
-    | Dedenting
-    | Holding
-
-
-movement : Level -> Level -> LevelMovement
-movement current target =
-    let
-        currentI =
-            levelToInt current
-
-        targetI =
-            levelToInt target
-    in
-    if targetI > currentI then
-        Indenting
-    else if targetI < currentI then
-        Dedenting
-    else
-        Holding
-
-
+{-| -}
 type ListIcon
     = Bullet
     | Number
     | Arrow
 
 
-type Level
-    = One
-    | Two
-    | Three
-
-
-indentLevel : Parser Level
+indentLevel : Parser Int
 indentLevel =
     Parser.oneOf
         [ Parser.token (String.repeat 12 " ")
-            |> Parser.map (always Three)
+            |> Parser.map (always 3)
         , Parser.token (String.repeat 8 " ")
-            |> Parser.map (always Two)
+            |> Parser.map (always 2)
         , Parser.token (String.repeat 4 " ")
-            |> Parser.map (always One)
+            |> Parser.map (always 1)
         ]
-
-
-levelToInt : Level -> Int
-levelToInt level =
-    case level of
-        One ->
-            1
-
-        Two ->
-            2
-
-        Three ->
-            3
 
 
 list options =
@@ -381,73 +356,17 @@ list options =
         )
 
 
-advanceCursor cursor indent =
-    case movement cursor.level indent of
-        Holding ->
-            case indent of
-                One ->
-                    { level = indent
-                    , one = cursor.one + 1
-                    , two = cursor.two
-                    , three = cursor.three
-                    }
+advanceCursor ( current, nested ) indent =
+    if indent == List.length nested + 1 then
+        ( current + 1, nested )
 
-                Two ->
-                    { level = indent
-                    , one = cursor.one
-                    , two = cursor.two + 1
-                    , three = cursor.three
-                    }
+    else if indent > List.length nested + 1 then
+        ( 1, current :: nested )
 
-                Three ->
-                    { level = indent
-                    , one = cursor.one
-                    , two = cursor.two
-                    , three = cursor.three + 1
-                    }
+    else
+        case nested of
+            [] ->
+                ( current, nested )
 
-        Indenting ->
-            case indent of
-                One ->
-                    { level = indent
-                    , one = 1
-                    , two = 0
-                    , three = 0
-                    }
-
-                Two ->
-                    { level = indent
-                    , one = cursor.one
-                    , two = 1
-                    , three = 0
-                    }
-
-                Three ->
-                    { level = indent
-                    , one = cursor.one
-                    , two = cursor.two
-                    , three = 1
-                    }
-
-        Dedenting ->
-            case indent of
-                One ->
-                    { level = indent
-                    , one = cursor.one + 1
-                    , two = 0
-                    , three = 0
-                    }
-
-                Two ->
-                    { level = indent
-                    , one = cursor.one
-                    , two = cursor.two + 1
-                    , three = 0
-                    }
-
-                Three ->
-                    { level = indent
-                    , one = cursor.one
-                    , two = cursor.two
-                    , three = cursor.three + 1
-                    }
+            lower :: remaining ->
+                ( lower + 1, remaining )

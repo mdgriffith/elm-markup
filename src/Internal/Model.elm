@@ -1,17 +1,8 @@
 module Internal.Model exposing
     ( Block(..)
-    , InlineStyle(..)
+    , Inline(..)
     , Options
-    , StyledText(..)
-    , blockToParser
-    , blocks
-    , changeStyle
-    , customBlock
-    , doubleQuote
-    , finalize
     , markup
-    , notReservedInline
-    , renderStyledText
     , styledText
     , text
     )
@@ -27,25 +18,11 @@ import Internal.Flag as Flag
 import Parser exposing ((|.), (|=), Parser)
 
 
-
-{-
-
-   -- Side Notes
-
-       -> Tokens will ignore styling that is started or resolved in the token block
-           -> This is to avoid clashes with things tha are likely embedded code.
-           -> They will still inherit stying if it's within the space.
-
-
-
-
--}
-
-
+{-| -}
 type alias Options styling msg =
     { styling : styling
     , blocks : List (Block styling msg)
-    , inlines : List (Block styling msg)
+    , inlines : List (Inline styling msg)
     }
 
 
@@ -55,12 +32,18 @@ type Block style msg
     | Parse String (Options style msg -> Parser (style -> Element msg))
 
 
+{-| -}
+type Inline style msg
+    = Inline String (String -> style -> List (Element msg))
+
+
 markup :
     Options
         { styles
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
-            , blockSpacing : Int
+            , root : List (Element.Attribute msg)
+            , block : List (Element.Attribute msg)
         }
         msg
     -> Parser (Element msg)
@@ -75,7 +58,7 @@ blocks options existing =
             |> Parser.map
                 (\_ ->
                     Parser.Done
-                        (Element.textColumn [ Element.spacing options.styling.blockSpacing ] (List.reverse existing))
+                        (Element.textColumn options.styling.root (List.reverse existing))
                 )
         , Parser.token "\n"
             |> Parser.map
@@ -83,7 +66,15 @@ blocks options existing =
                     Parser.Loop
                         existing
                 )
-        , customBlock options
+        , Parser.succeed identity
+            |. Parser.token "|"
+            |. Parser.chompIf (\c -> c == ' ')
+            |= Parser.oneOf
+                (List.map
+                    (blockToParser options)
+                    options.blocks
+                )
+            |> Parser.andThen identity
             |> Parser.map
                 (\found ->
                     Parser.Loop
@@ -92,13 +83,9 @@ blocks options existing =
         , text options
             |> Parser.map
                 (\found ->
-                    let
-                        _ =
-                            Debug.log "p" found
-                    in
                     if found == [] then
                         Parser.Done
-                            (Element.column []
+                            (Element.textColumn options.styling.root
                                 (List.reverse existing)
                             )
 
@@ -116,17 +103,12 @@ blocks options existing =
 {- Custom Blocks -}
 
 
-customBlock options =
-    Parser.succeed identity
-        |. Parser.token "|"
-        |. Parser.chompIf (\c -> c == ' ')
-        |= Parser.oneOf
-            (List.map
-                (blockToParser options)
-                options.blocks
-            )
-        |> Parser.andThen
-            identity
+inlineToParser blockable =
+    case blockable of
+        Inline name fn ->
+            Parser.keyword name
+                |> Parser.map
+                    (always fn)
 
 
 blockToParser options blockable =
@@ -189,7 +171,8 @@ text :
         { styles
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
-            , blockSpacing : Int
+            , root : List (Element.Attribute msg)
+            , block : List (Element.Attribute msg)
         }
         msg
     -> Parser (List (Element msg))
@@ -197,26 +180,13 @@ text options =
     Parser.loop emptyText (styledText options)
 
 
-{-| **Reclaimed typography**
-
-This function will replace certain characters with improved typographical ones.
-Escaping a character will skip the replacement.
-
-    -> "<>" -> a non-breaking space.
-        - This can be used to glue words together so that they don't break
-        - It also avoids being used for spacing like `&nbsp;` because multiple instances will collapse down to one.
-    -> "--" -> "en-dash"
-    -> "---" -> "em-dash".
-    -> Quotation marks will be replaced with curly quotes.
-    -> "..." -> ellipses
-
--}
 styledText :
     Options
         { styles
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
-            , blockSpacing : Int
+            , root : List (Element.Attribute msg)
+            , block : List (Element.Attribute msg)
         }
         msg
     -> StyledText msg
@@ -227,178 +197,78 @@ styledText options existing =
             existing
     in
     Parser.oneOf
-        [ Parser.succeed
-            (\escaped ->
+        [ Parser.oneOf (typography existing styles)
+
+        -- Custom inline block
+        , Parser.succeed
+            (\fn txt ->
                 existing
-                    |> addText escaped
+                    |> addElements (List.reverse (fn txt options.styling))
                     |> Parser.Loop
             )
-            |. Parser.token "\\"
-            |= Parser.getChompedString
-                (Parser.chompIf (always True))
-
-        -- Non breaking space
-        , Parser.token "<>"
-            |. Parser.chompWhile (\c -> c == '<' || c == '>' || c == ' ')
-            |> Parser.map
-                (\_ ->
-                    existing
-                        |> addText "\u{00A0}"
-                        |> Parser.Loop
-                )
-        , Parser.succeed identity
-            |. Parser.token "|"
-            |. Parser.chompIf (\c -> c == ' ')
+            |. Parser.token "{"
+            |. Parser.chompWhile (\c -> c == ' ')
             |= Parser.oneOf
-                (List.map
-                    (blockToParser options)
-                    options.inlines
-                )
-            |> Parser.andThen
-                (\inlineParser ->
-                    case changeStyle options.styling existing NoStyleChange of
-                        StyledText newTxt newStyles newEls newLinkEls ->
-                            inlineParser
-                                |> Parser.map
-                                    (\customElement ->
-                                        Parser.Loop
-                                            (StyledText
-                                                newTxt
-                                                newStyles
-                                                (newEls ++ [ customElement ])
-                                                newLinkEls
-                                            )
-                                    )
-                )
+                (List.map inlineToParser options.inlines)
+            |. Parser.chompWhile (\c -> c == ' ')
+            |. Parser.token "|"
+            |= typographyText styles [ '}' ]
+            |. Parser.token "}"
 
-        -- , Parser.succeed
-        --     (\token ->
-        --         let
-        --             previous =
-        --             String.trim token
-        --         in
-        --         case changeStyle options.styling existing of
-        --             StyledText updatedTxt updatedstyles updatedEls ->
-        --                 StyledText updatedTxt updatedstyles updatedEls
-        --         if
-        --             String.length dots
-        --                 == 2
-        --                 && not (Flag.present Flag.token styles)
-        --         then
-        --             Parser.Loop
-        --                 (StyledText (txt ++ "…")
-        --                     styles
-        --                     els
-        --                 )
-        --         else
-        --             Parser.Loop
-        --                 (StyledText (txt ++ "." ++ dots)
-        --                     styles
-        --                     els
-        --                 )
-        --     )
-        --     -- consume at least one dot
-        --     |. Parser.token "{"
-        --     |= Parser.getChompedString
-        --         (Parser.chompWhile (\c -> c /= '}'))
+        -- Code/Token inline
         , Parser.succeed
-            (\dots ->
-                if
-                    String.length dots
-                        == 2
-                        && not (Flag.present Flag.token styles)
-                then
-                    existing
-                        |> addText "…"
-                        |> Parser.Loop
-
-                else
-                    existing
-                        |> addText ("." ++ dots)
-                        |> Parser.Loop
+            (\tokenText ->
+                case changeStyle options.styling existing NoStyleChange of
+                    new ->
+                        new
+                            |> addElements
+                                [ Element.el
+                                    options.styling.token
+                                    (Element.text tokenText)
+                                ]
+                            |> Parser.Loop
             )
-            -- consume at least one dot
-            |. Parser.token "."
+            -- consume at least one grave accent
+            |. Parser.token "`"
             |= Parser.getChompedString
-                (Parser.chompWhile (\c -> c == '.'))
+                (Parser.chompWhile (\c -> c /= '`'))
+            |. Parser.token "`"
+
+        -- Link
         , Parser.succeed
-            (\dashes ->
-                if Flag.present Flag.token styles then
-                    existing
-                        |> addText ("-" ++ dashes)
-                        |> Parser.Loop
-
-                else if String.length dashes == 1 then
-                    existing
-                        |> addText "–"
-                        |> Parser.Loop
-
-                else if String.length dashes == 2 then
-                    existing
-                        |> addText "—"
-                        |> Parser.Loop
-
-                else
-                    existing
-                        |> addText ("-" ++ dashes)
-                        |> Parser.Loop
-            )
-            -- consume at least one dash
-            |. Parser.token "-"
-            |= Parser.getChompedString
-                (Parser.chompWhile (\c -> c == '-'))
-        , Parser.token "\""
-            |> Parser.map
-                (\_ ->
-                    if Flag.present Flag.token styles then
-                        existing
-                            |> addText "\""
-                            |> Parser.Loop
-
-                    else if Flag.present Flag.doubleQuote styles then
-                        existing
-                            |> addText "”"
-                            |> mapStyle (Flag.flip Flag.doubleQuote)
-                            |> Parser.Loop
-
-                    else
-                        existing
-                            |> addText "“"
-                            |> mapStyle (Flag.flip Flag.doubleQuote)
-                            |> Parser.Loop
-                )
-        , Parser.token "'"
-            |> Parser.map
-                (\_ ->
-                    existing
-                        |> addText "’"
-                        |> Parser.Loop
-                )
-        , Parser.succeed
-            (\txt url ->
+            (\asToken txt url ->
                 changeStyle options.styling existing NoStyleChange
-                    |> addElements [ renderStyledText options.styling styles txt (Just url) ]
+                    |> addElements
+                        [ renderStyledText options.styling
+                            (if asToken == "" then
+                                styles
+
+                             else
+                                Flag.add Flag.token styles
+                            )
+                            txt
+                            (Just url)
+                        ]
                     |> Parser.Loop
             )
             |. Parser.token "["
             |= Parser.getChompedString
-                (Parser.chompWhile (\c -> c /= ']' && c /= '\n'))
+                (Parser.chompWhile (\c -> c == '`'))
+            |= typographyText styles [ ']', '`' ]
+            |. Parser.chompWhile (\c -> c == '`')
             |. Parser.token "]"
             |. Parser.token "("
             |= Parser.getChompedString
                 (Parser.chompWhile (\c -> c /= ')' && c /= '\n' && c /= ' '))
             |. Parser.token ")"
+
+        -- Capture styling
         , Parser.succeed
             (Parser.Loop << changeStyle options.styling existing)
             |= Parser.oneOf
                 [ Parser.map (always Italic) (Parser.token "/")
                 , Parser.map (always Strike) (Parser.token "~")
                 , Parser.map (always Bold) (Parser.token "*")
-                , if Flag.present Flag.token styles then
-                    Parser.map (always Token) (Parser.token "}")
-
-                  else
-                    Parser.map (always Token) (Parser.token "{")
                 ]
         , Parser.token "\n"
             |> Parser.map
@@ -409,10 +279,6 @@ styledText options existing =
             (Parser.chompWhile (notReservedInline styles))
             |> Parser.map
                 (\new ->
-                    let
-                        _ =
-                            Debug.log "chomped" new
-                    in
                     if new == "" then
                         finalize options.styling existing
 
@@ -424,26 +290,216 @@ styledText options existing =
         ]
 
 
+typographyText styles until =
+    let
+        done found =
+            case found of
+                StyledText txt _ _ _ ->
+                    Parser.Done txt
+    in
+    Parser.loop emptyText
+        (\found ->
+            Parser.oneOf
+                [ Parser.oneOf (typography found styles)
+                , Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c ->
+                            c
+                                /= '\n'
+                                && not (List.member c until)
+                                && not (List.member c typographyChars)
+                        )
+                    )
+                    |> Parser.map
+                        (\new ->
+                            if new == "" then
+                                done found
+
+                            else
+                                found
+                                    |> addText new
+                                    |> Parser.Loop
+                        )
+                , Parser.oneOf
+                    (List.map
+                        (\c ->
+                            Parser.token (String.fromChar c)
+                                |> Parser.map (always (done found))
+                        )
+                        until
+                    )
+                ]
+        )
+
+
+{-| **Reclaimed typography**
+
+This function will replace certain characters with improved typographical ones.
+Escaping a character will skip the replacement.
+
+    -> "+" -> a non-breaking space.
+        - This can be used to glue words together so that they don't break
+        - It also avoids being used for spacing like `&nbsp;` because multiple instances will collapse down to one.
+    -> "--" -> "en-dash"
+    -> "---" -> "em-dash".
+    -> Quotation marks will be replaced with curly quotes.
+    -> "..." -> ellipses
+
+-}
+typography existing styles =
+    [ -- Escaped characters are captured as-is
+      Parser.succeed
+        (\escaped ->
+            existing
+                |> addText escaped
+                |> Parser.Loop
+        )
+        |. Parser.token "\\"
+        |= Parser.getChompedString
+            (Parser.chompIf (always True))
+
+    -- Non breaking space
+    , Parser.token "+"
+        |. Parser.chompWhile (\c -> c == '+' || c == ' ')
+        |> Parser.map
+            (\_ ->
+                existing
+                    |> addText "\u{00A0}"
+                    |> Parser.Loop
+            )
+
+    -- replace ellipses
+    , Parser.succeed
+        (\dots ->
+            if
+                String.length dots
+                    == 2
+                    && not (Flag.present Flag.token styles)
+            then
+                existing
+                    |> addText "…"
+                    |> Parser.Loop
+
+            else
+                existing
+                    |> addText ("." ++ dots)
+                    |> Parser.Loop
+        )
+        -- consume at least one dot
+        |. Parser.token "."
+        |= Parser.getChompedString
+            (Parser.chompWhile (\c -> c == '.'))
+
+    -- replace dashes with en or emdash
+    , Parser.succeed
+        (\dashes ->
+            if Flag.present Flag.token styles then
+                existing
+                    |> addText ("-" ++ dashes)
+                    |> Parser.Loop
+
+            else if String.length dashes == 1 then
+                existing
+                    |> addText "–"
+                    |> Parser.Loop
+
+            else if String.length dashes == 2 then
+                existing
+                    |> addText "—"
+                    |> Parser.Loop
+
+            else
+                existing
+                    |> addText ("-" ++ dashes)
+                    |> Parser.Loop
+        )
+        -- consume at least one dash
+        |. Parser.token "-"
+        |= Parser.getChompedString
+            (Parser.chompWhile (\c -> c == '-'))
+
+    -- Auto curly quotes
+    , Parser.token "\""
+        |> Parser.map
+            (\_ ->
+                if Flag.present Flag.token styles then
+                    existing
+                        |> addText "\""
+                        |> Parser.Loop
+
+                else if Flag.present Flag.doubleQuote styles then
+                    existing
+                        |> addText "”"
+                        |> mapStyle (Flag.flip Flag.doubleQuote)
+                        |> Parser.Loop
+
+                else
+                    existing
+                        |> addText "“"
+                        |> mapStyle (Flag.flip Flag.doubleQuote)
+                        |> Parser.Loop
+            )
+
+    -- replace appostrophe
+    , Parser.token "'"
+        |> Parser.map
+            (\_ ->
+                existing
+                    |> addText "’"
+                    |> Parser.Loop
+            )
+    ]
+
+
+typographyChars =
+    [ doubleQuote
+    , '\''
+    , '.'
+    , '\\'
+    , '/'
+    , '-'
+    , '+'
+    ]
+
+
+stylingChars =
+    [ '~'
+    , '/'
+    , '*'
+    , '['
+    , '\n'
+    , '{'
+    , '`'
+    ]
+
+
+allControl =
+    typographyChars ++ stylingChars
+
+
 notReservedInline styles char =
     not
-        (List.member char
-            [ '-'
-            , '~'
-            , '\\'
-            , '/'
-            , '*'
-            , '['
-            , ']'
-            , '\n'
-            , '\''
-            , '.'
-            , doubleQuote
-            , if Flag.present Flag.token styles then
-                '}'
-
-              else
-                '{'
-            ]
+        (List.member char allControl
+         -- [ '-'
+         -- , '~'
+         -- , '\\'
+         -- , '/'
+         -- , '*'
+         -- , '['
+         -- , ']'
+         -- , '\n'
+         -- , '`'
+         -- , '\''
+         -- , '.'
+         -- -- , '<'
+         -- , '{'
+         -- -- , '}'
+         -- , doubleQuote
+         -- -- , if Flag.present Flag.token styles then
+         -- --     '}'
+         -- --   else
+         -- --     '{'
+         -- ]
         )
 
 
@@ -575,30 +631,35 @@ changeStyle styling (StyledText txt styles els linkEls) styleToken =
 renderStyledText styleOptions styled txt maybeLink =
     let
         styles =
-            List.filterMap identity
+            List.concat
                 [ if Flag.present Flag.bold styled then
-                    Just Font.bold
+                    [ Font.bold ]
 
                   else
-                    Nothing
+                    []
                 , if Flag.present Flag.italic styled then
-                    Just Font.italic
+                    [ Font.italic ]
 
                   else
-                    Nothing
+                    []
                 , if
                     Flag.present Flag.strike styled
                         && Flag.present Flag.underline styled
                   then
-                    Just Font.underline
+                    [ Font.underline ]
 
                   else
-                    Nothing
+                    []
                 , if Flag.present Flag.strike styled then
-                    Just Font.strike
+                    [ Font.strike ]
 
                   else
-                    Nothing
+                    []
+                , if Flag.present Flag.token styled then
+                    styleOptions.token
+
+                  else
+                    []
                 ]
     in
     case maybeLink of
@@ -608,12 +669,11 @@ renderStyledText styleOptions styled txt maybeLink =
 
             else
                 Element.el
-                    (if Flag.present Flag.token styled then
-                        styleOptions.token ++ styles
-
-                     else
-                        styles
-                    )
+                    -- (if Flag.present Flag.token styled then
+                    --     styleOptions.token ++ styles
+                    --  else
+                    styles
+                    -- )
                     (Element.text txt)
 
         Just link ->
