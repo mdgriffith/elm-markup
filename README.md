@@ -44,7 +44,7 @@ Here are the ideas I used to put this library together:
 
 - In order to do this, the parser needs to be strict about form.  This means that invalid markup will make the parser fail with a nice error message instead of rendering half correct and half wonky.  Think of this as "No runtime errors" but for elm-markup and layout.
 
-- You can add custom blocks and inline elements, which you'll see later. This library is about letting you be expressive in creating content, just with some ground rules about the form it will take.
+- You can add custom blocks and inline elements, which means embedding whatever elm `view` you'd like. This library is about letting you be expressive in creating content, just with some ground rules about the form it will take.
 
 - On the flip side, we avoid directly embedding any other langauges like `Html`. My current feeling is that a document like this benefits hugely from being **high level** and embedding code can get really messy with weird details.  Fortunately custom blocks are convenient, so I don't forsee this being a problem.
 
@@ -109,13 +109,13 @@ We can also reclaim some useful typography that is a bit awkward to handle other
 - `...` is converted to the ellipses unicode character.
 - `"` Straight double quotes are [replaced with curly quotes](https://practicaltypography.com/straight-and-curly-quotes.html)
 - `'` Single Quotes are replaced with apostrophes.  In the future we might differentiate between curly single quotes and apostrophes.
-- `--` is replaced with an en dash `–`
-- `---` is replaced with an em dash: `—`
+- `--` is replaced with an en dash –
+- `---` is replaced with an em dash —
 - `<>` - will create a non-breaking space (`&nbsp;`).  This is not for manually increasing space(sequential `<>` tokens will only render as one `&nbsp;`), but to signify that the space between two words shouldn't break when wrapping.  Think of this like glueing two words together.
 
 Escaping the start of any of these characters will cause the transformation to be skipped in that instance.
 
-These transformations also don't apply inside inline `\`code\`` or inside the `monospace` block.
+These transformations also don't apply inside inline `` `code` `` or inside the `monospace` block.
 
 **Note** If you're not familiar with `en-dash` or `em-dash`, I definitely [recommend reading a small bit about it](https://practicaltypography.com/hyphens-and-dashes.html)—they're incredibly useful.
 

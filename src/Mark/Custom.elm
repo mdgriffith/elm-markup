@@ -111,7 +111,10 @@ The element you defined will show up there.
 block : String -> (style -> Element msg) -> Internal.Block style msg
 block name renderer =
     Internal.Block name
-        (Parser.succeed renderer)
+        (Parser.succeed renderer
+            |. Parser.chompWhile (\c -> c == ' ')
+            |. Parser.token "|"
+        )
 
 
 {-| Same as `block`, but you can parse one parameter as well.
@@ -129,7 +132,16 @@ For example, here's how the builtin block, `image`, using `block2` and two `Cust
         Custom.string
         Custom.string
 
-Which can then be used in your markup
+Which can then be used in your markup:
+
+    | image http://placekitten/200/500
+        Here's a great picture of my cat, pookie.
+
+or as
+
+    | image
+        http://placekitten/200/500
+        Here's a great picture of my cat, pookie.
 
 -}
 block1 :
