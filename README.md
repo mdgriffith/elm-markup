@@ -22,9 +22,14 @@ Welcome!  Have you hear about /cats/?  They're great.
 
 How much do I like cats?  A bunch.
 
+
+| mycatwidget |
+
 ```
 
 Which you can parse using `Mark.parse`.
+
+`mycatwidget` is a custom block where I define the view function that is placed there.
 
 ## Principles
 
@@ -83,7 +88,10 @@ How much do I like cats?  Let's make a list.
     - Seriously, so great.
         - But, lists are pretty good too.
 
+
 ```
+
+
 
 Blocks that come with the library are:
 
