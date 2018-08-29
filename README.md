@@ -52,12 +52,12 @@ Here are the ideas I used to put this library together:
 
 ## Basic Text Markup
 
-There are only a very limited set of formatting characters.
+There are only a very limited set of characters for formatting text.
 
 - `/italic/` _italic_
 - `*bold*` **bold**
 - `~strike~` ~~strike~~
-- `\`code\`` `code`
+- `&grave;code&grave;` `code`
 - `[link text](http://fruits.com)` to create a link.
 
 
