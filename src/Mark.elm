@@ -1,7 +1,7 @@
 module Mark exposing
     ( parse, parseWith
-    , Options, defaultOptions, defaultStyling
-    , Styling, Cursor, ListIcon(..)
+    , Options, Styling, default, defaultStyling
+    , Cursor, ListIcon(..)
     , defaultBlocks
     )
 
@@ -9,9 +9,9 @@ module Mark exposing
 
 @docs parse, parseWith
 
-@docs Options, defaultOptions, defaultStyling
+@docs Options, Styling, default, defaultStyling
 
-@docs Styling, Cursor, ListIcon
+@docs Cursor, ListIcon
 
 -}
 
@@ -28,13 +28,14 @@ import Parser exposing ((|.), (|=), Parser)
 
 {-| -}
 parse : String -> Result (List Parser.DeadEnd) (Element msg)
-parse =
-    parseWith defaultOptions
+parse source =
+    parseWith default source
+        |> Result.map (\x -> x ())
 
 
 {-| -}
 parseWith :
-    Options
+    Options model
         { a
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
@@ -44,17 +45,21 @@ parseWith :
         }
         msg
     -> String
-    -> Result (List Parser.DeadEnd) (Element msg)
+    -> Result (List Parser.DeadEnd) (model -> Element msg)
 parseWith options source =
     Parser.run (Internal.markup options) source
 
 
 {-| -}
-type alias Options styling msg =
-    Internal.Options styling msg
+type alias Options model styling msg =
+    Internal.Options model styling msg
 
 
-{-| -}
+{-| Styling options for the default blocks.
+
+If you add custom `blocks` or `inlines`, you'll probably want to define a new `Styling` type.
+
+-}
 type alias Styling msg =
     { link : List (Element.Attribute msg)
     , token : List (Element.Attribute msg)
@@ -68,11 +73,12 @@ type alias Styling msg =
     }
 
 
-{-| -}
-defaultOptions : Options (Styling msg) msg
-defaultOptions =
+{-| A default set of block and inline elements as well as some `defaultStyling` to style them.
+-}
+default : Options model (Styling msg) msg
+default =
     { styling =
-        defaultStyling
+        always defaultStyling
     , blocks =
         defaultBlocks
     , inlines =
@@ -80,7 +86,9 @@ defaultOptions =
     }
 
 
-{-| -}
+{-| 
+
+-}
 defaultStyling : Styling msg
 defaultStyling =
     { root =
@@ -216,7 +224,7 @@ defaultListToken cursor symbol =
 
 defaultBlocks :
     List
-        (Internal.Block
+        (Internal.Block model
             { a
                 | title : List (Element.Attribute msg)
                 , header : List (Element.Attribute msg)
@@ -232,7 +240,7 @@ defaultBlocks :
         )
 defaultBlocks =
     [ Custom.paragraph "title"
-        (\elements styling ->
+        (\elements styling model ->
             Element.paragraph
                 (Element.Region.heading 1
                     :: styling.title
@@ -240,7 +248,7 @@ defaultBlocks =
                 elements
         )
     , Custom.paragraph "header"
-        (\elements styling ->
+        (\elements styling model ->
             Element.paragraph
                 (Element.Region.heading 2
                     :: styling.header
@@ -248,7 +256,7 @@ defaultBlocks =
                 elements
         )
     , Custom.indented "monospace"
-        (\string styling ->
+        (\string styling model ->
             Element.paragraph
                 (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
                     :: Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
@@ -257,7 +265,7 @@ defaultBlocks =
                 [ Element.text string ]
         )
     , Custom.block2 "image"
-        (\src description styling ->
+        (\src description styling model ->
             Element.image
                 []
                 { src = String.trim src
@@ -308,22 +316,24 @@ indentLevel =
         ]
 
 
-list options =
+list inlines =
     Parser.loop
         ( emptyCursor, [] )
         (\( cursor, existing ) ->
             Parser.oneOf
                 [ Parser.succeed
-                    (\indent token el ->
+                    (\indent token styledText ->
                         let
                             newCursor =
                                 advanceCursor cursor indent
                         in
                         Parser.Loop
                             ( newCursor
-                            , Element.paragraph
-                                []
-                                (options.styling.listIcons newCursor token :: el)
+                            , (\styling model ->
+                                Element.paragraph
+                                    []
+                                    (styling.listIcons newCursor token :: styledText styling model)
+                              )
                                 :: existing
                             )
                     )
@@ -339,16 +349,36 @@ list options =
                             |. Parser.chompIf (\c -> c == '.')
                         ]
                     |. Parser.token " "
-                    |= Internal.text options
+                    |= inlines
                 , Parser.end
                     |> Parser.map
                         (\_ ->
-                            Parser.Done (\_ -> Element.column options.styling.list (List.reverse existing))
+                            Parser.Done
+                                (\styling model ->
+                                    Element.column styling.list
+                                        (List.foldl
+                                            (\fn els ->
+                                                fn styling model :: els
+                                            )
+                                            []
+                                            existing
+                                        )
+                                )
                         )
                 , Parser.token "\n\n"
                     |> Parser.map
                         (\_ ->
-                            Parser.Done (\_ -> Element.column options.styling.list (List.reverse existing))
+                            Parser.Done
+                                (\styling model ->
+                                    Element.column styling.list
+                                        (List.foldl
+                                            (\fn els ->
+                                                fn styling model :: els
+                                            )
+                                            []
+                                            existing
+                                        )
+                                )
                         )
                 , Parser.token "\n"
                     |> Parser.map (always (Parser.Loop ( cursor, existing )))

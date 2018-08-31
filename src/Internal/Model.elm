@@ -3,8 +3,6 @@ module Internal.Model exposing
     , Inline(..)
     , Options
     , markup
-    , styledText
-    , text
     )
 
 {-| -}
@@ -19,26 +17,27 @@ import Parser exposing ((|.), (|=), Parser)
 
 
 {-| -}
-type alias Options styling msg =
-    { styling : styling
-    , blocks : List (Block styling msg)
-    , inlines : List (Inline styling msg)
+type alias Options model styling msg =
+    { styling : model -> styling
+    , blocks : List (Block model styling msg)
+    , inlines : List (Inline model styling msg)
     }
 
 
 {-| -}
-type Block style msg
-    = Block String (Parser (style -> Element msg))
-    | Parse String (Options style msg -> Parser (style -> Element msg))
+type Block model style msg
+    = Block String (Parser (style -> model -> Element msg))
+    | Parse String (Parser (style -> model -> List (Element msg)) -> Parser (style -> model -> Element msg))
 
 
 {-| -}
-type Inline style msg
-    = Inline String (String -> style -> List (Element msg))
+type Inline model style msg
+    = Inline String (String -> style -> model -> List (Element msg))
 
 
+{-| -}
 markup :
-    Options
+    Options model
         { styles
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
@@ -46,19 +45,42 @@ markup :
             , block : List (Element.Attribute msg)
         }
         msg
-    -> Parser (Element msg)
+    ->
+        Parser
+            (model
+             -> Element msg
+            )
 markup options =
-    Parser.loop []
-        (blocks options)
+    Parser.map
+        (\view ->
+            \model ->
+                view (options.styling model) model
+        )
+        (Parser.loop []
+            (blocks options)
+        )
 
 
 blocks options existing =
+    let
+        done _ =
+            Parser.Done
+                (\styling model ->
+                    Element.textColumn styling.root
+                        (List.foldl
+                            (\fn els ->
+                                fn styling model :: els
+                            )
+                            []
+                            existing
+                        )
+                )
+    in
     Parser.oneOf
         [ Parser.end
             |> Parser.map
                 (\_ ->
-                    Parser.Done
-                        (Element.textColumn options.styling.root (List.reverse existing))
+                    done ()
                 )
         , Parser.token "\n"
             |> Parser.map
@@ -71,7 +93,7 @@ blocks options existing =
             |. Parser.chompIf (\c -> c == ' ')
             |= Parser.oneOf
                 (List.map
-                    (blockToParser options)
+                    (blockToParser options.inlines)
                     options.blocks
                 )
             |> Parser.andThen identity
@@ -80,21 +102,16 @@ blocks options existing =
                     Parser.Loop
                         (found :: existing)
                 )
-        , text options
+        , inline options.inlines
             |> Parser.map
                 (\found ->
-                    if found == [] then
-                        Parser.Done
-                            (Element.textColumn options.styling.root
-                                (List.reverse existing)
-                            )
-
-                    else
-                        Parser.Loop
-                            (Element.paragraph []
-                                found
-                                :: existing
-                            )
+                    Parser.Loop
+                        ((\styling model ->
+                            Element.paragraph []
+                                (found styling model)
+                         )
+                            :: existing
+                        )
                 )
         ]
 
@@ -111,16 +128,13 @@ inlineToParser blockable =
                     (always fn)
 
 
-blockToParser options blockable =
+blockToParser inlines blockable =
     case blockable of
         Block name arguments ->
             Parser.keyword name
                 |> Parser.map
                     (\_ ->
-                        Parser.succeed
-                            (\fn ->
-                                fn options.styling
-                            )
+                        Parser.succeed identity
                             |= arguments
                     )
 
@@ -128,23 +142,8 @@ blockToParser options blockable =
             Parser.keyword name
                 |> Parser.map
                     (\_ ->
-                        parser options
-                            |> Parser.map
-                                (\fn ->
-                                    fn options.styling
-                                )
+                        parser (inline inlines)
                     )
-
-
-type StyledText msg
-    = StyledText
-        -- Accumulator string
-        String
-        -- Keep track of styles that are active
-        Flag.Field
-        (List (Element msg))
-        --
-        (Maybe (List (Element msg)))
 
 
 
@@ -158,42 +157,87 @@ type InlineStyle
     | Strike
     | Underline
     | Token
-    | LinkStart
-    | Link String
+
+
+type Text styling model msg
+    = Text
+        -- Accumulator string
+        String
+        -- A bitfield of styles that are active
+        Flag.Field
+        -- Accumulator of element constructors
+        (List (styling -> model -> List (Element msg)))
 
 
 emptyText =
-    StyledText "" Flag.none [] Nothing
+    Text "" Flag.none []
 
 
-text :
-    Options
-        { styles
-            | link : List (Element.Attribute msg)
-            , token : List (Element.Attribute msg)
-            , root : List (Element.Attribute msg)
-            , block : List (Element.Attribute msg)
-        }
-        msg
-    -> Parser (List (Element msg))
-text options =
-    Parser.loop emptyText (styledText options)
+inline :
+    List
+        (Inline model
+            { a
+                | link : List (Element.Attribute msg)
+                , token : List (Element.Attribute msg)
+            }
+            msg
+        )
+    ->
+        Parser
+            ({ a
+                | link : List (Element.Attribute msg)
+                , token : List (Element.Attribute msg)
+             }
+             -> model
+             -> List (Element msg)
+            )
+inline inlines =
+    Parser.loop emptyText (inlineLoop inlines)
 
 
-styledText :
-    Options
-        { styles
-            | link : List (Element.Attribute msg)
-            , token : List (Element.Attribute msg)
-            , root : List (Element.Attribute msg)
-            , block : List (Element.Attribute msg)
-        }
-        msg
-    -> StyledText msg
-    -> Parser (Parser.Step (StyledText msg) (List (Element msg)))
-styledText options existing =
+
+-- type alias MinimumStyle
+
+
+inlineLoop :
+    List
+        (Inline model
+            { a
+                | link : List (Element.Attribute msg)
+                , token : List (Element.Attribute msg)
+            }
+            msg
+        )
+    ->
+        Text
+            { a
+                | link : List (Element.Attribute msg)
+                , token : List (Element.Attribute msg)
+            }
+            model
+            msg
+    ->
+        Parser
+            (Parser.Step
+                (Text
+                    { a
+                        | link : List (Element.Attribute msg)
+                        , token : List (Element.Attribute msg)
+                    }
+                    model
+                    msg
+                )
+                ({ a
+                    | link : List (Element.Attribute msg)
+                    , token : List (Element.Attribute msg)
+                 }
+                 -> model
+                 -> List (Element msg)
+                )
+            )
+inlineLoop inlines existing =
     let
-        (StyledText _ styles _ _) =
+        (Text _ styles _) =
             existing
     in
     Parser.oneOf
@@ -203,13 +247,14 @@ styledText options existing =
         , Parser.succeed
             (\fn txt ->
                 existing
-                    |> addElements (List.reverse (fn txt options.styling))
+                    |> addElement
+                        (fn txt)
                     |> Parser.Loop
             )
             |. Parser.token "{"
             |. Parser.chompWhile (\c -> c == ' ')
             |= Parser.oneOf
-                (List.map inlineToParser options.inlines)
+                (List.map inlineToParser inlines)
             |. Parser.chompWhile (\c -> c == ' ')
             |. Parser.token "|"
             |= typographyText styles [ '}' ]
@@ -218,14 +263,16 @@ styledText options existing =
         -- Code/Token inline
         , Parser.succeed
             (\tokenText ->
-                case changeStyle options.styling existing NoStyleChange of
+                case changeStyle existing NoStyleChange of
                     new ->
                         new
-                            |> addElements
-                                [ Element.el
-                                    options.styling.token
-                                    (Element.text tokenText)
-                                ]
+                            |> addElement
+                                (\styling _ ->
+                                    [ Element.el
+                                        styling.token
+                                        (Element.text tokenText)
+                                    ]
+                                )
                             |> Parser.Loop
             )
             -- consume at least one grave accent
@@ -237,9 +284,9 @@ styledText options existing =
         -- Link
         , Parser.succeed
             (\asToken txt url ->
-                changeStyle options.styling existing NoStyleChange
-                    |> addElements
-                        [ renderStyledText options.styling
+                changeStyle existing NoStyleChange
+                    |> addElement
+                        (renderLink
                             (if asToken == "" then
                                 styles
 
@@ -247,8 +294,8 @@ styledText options existing =
                                 Flag.add Flag.token styles
                             )
                             txt
-                            (Just url)
-                        ]
+                            url
+                        )
                     |> Parser.Loop
             )
             |. Parser.token "["
@@ -264,23 +311,27 @@ styledText options existing =
 
         -- Capture styling
         , Parser.succeed
-            (Parser.Loop << changeStyle options.styling existing)
+            (Parser.Loop << changeStyle existing)
             |= Parser.oneOf
                 [ Parser.map (always Italic) (Parser.token "/")
                 , Parser.map (always Strike) (Parser.token "~")
                 , Parser.map (always Bold) (Parser.token "*")
                 ]
+
+        -- end on newline
         , Parser.token "\n"
             |> Parser.map
                 (\_ ->
-                    finalize options.styling existing
+                    finalize existing
                 )
+
+        -- chomp until a meaningful character
         , Parser.getChompedString
             (Parser.chompWhile (notReservedInline styles))
             |> Parser.map
                 (\new ->
                     if new == "" then
-                        finalize options.styling existing
+                        finalize existing
 
                     else
                         existing
@@ -290,11 +341,36 @@ styledText options existing =
         ]
 
 
+finalize (Text txt styles els) =
+    if els == [] && txt == "" then
+        Parser.Done (\styling model -> [])
+
+    else if txt == "" then
+        Parser.Done <|
+            \styling model ->
+                List.foldl
+                    (\fn elems ->
+                        fn styling model ++ elems
+                    )
+                    []
+                    els
+
+    else
+        Parser.Done <|
+            \styling model ->
+                List.foldl
+                    (\fn elems ->
+                        fn styling model ++ elems
+                    )
+                    []
+                    (renderText styles txt :: els)
+
+
 typographyText styles until =
     let
         done found =
             case found of
-                StyledText txt _ _ _ ->
+                Text txt _ _ ->
                     Parser.Done txt
     in
     Parser.loop emptyText
@@ -479,112 +555,28 @@ allControl =
 
 notReservedInline styles char =
     not
-        (List.member char allControl
-         -- [ '-'
-         -- , '~'
-         -- , '\\'
-         -- , '/'
-         -- , '*'
-         -- , '['
-         -- , ']'
-         -- , '\n'
-         -- , '`'
-         -- , '\''
-         -- , '.'
-         -- -- , '<'
-         -- , '{'
-         -- -- , '}'
-         -- , doubleQuote
-         -- -- , if Flag.present Flag.token styles then
-         -- --     '}'
-         -- --   else
-         -- --     '{'
-         -- ]
-        )
+        (List.member char allControl)
 
 
-finalize styling (StyledText txt styles els linkEls) =
-    if els == [] && txt == "" then
-        Parser.Done []
-
-    else if txt == "" then
-        Parser.Done <|
-            List.reverse
-                els
-
-    else
-        Parser.Done <|
-            List.reverse
-                (renderStyledText styling styles txt Nothing :: els)
+addText newTxt (Text txt styles els) =
+    Text (txt ++ newTxt) styles els
 
 
-addText newTxt (StyledText txt styles els linkEls) =
-    StyledText (txt ++ newTxt)
-        styles
-        els
-        linkEls
+{-| If we accumulating a link style, accumulate it there.
+-}
+addElement newElements (Text txt styles els) =
+    Text txt styles (newElements :: els)
 
 
-addElements newElements (StyledText txt styles els maybeLinkEls) =
-    case maybeLinkEls of
-        Nothing ->
-            StyledText txt
-                styles
-                (newElements ++ els)
-                maybeLinkEls
-
-        Just linkEls ->
-            StyledText txt
-                styles
-                els
-                (Just
-                    (newElements ++ linkEls)
-                )
-
-
-mapStyle fn (StyledText txt styles els linkEls) =
-    StyledText txt
-        (fn styles)
-        els
-        linkEls
-
-
-startLink styleOptions styled =
-    case changeStyle styleOptions styled NoStyleChange of
-        StyledText txt styles els _ ->
-            StyledText txt (Flag.add Flag.link styles) els (Just [])
-
-
-captureLink styleOptions url styled =
-    case changeStyle styleOptions styled NoStyleChange of
-        StyledText txt styles els maybeLinkElements ->
-            StyledText txt
-                (Flag.remove Flag.link styles)
-                (els
-                    ++ (case maybeLinkElements of
-                            Nothing ->
-                                []
-
-                            Just linkEls ->
-                                [ Element.link
-                                    styleOptions.link
-                                    { url = url
-                                    , label =
-                                        Element.paragraph
-                                            [ Element.width Element.shrink ]
-                                            linkEls
-                                    }
-                                ]
-                       )
-                )
-                Nothing
+mapStyle fn (Text txt styles els) =
+    Text txt (fn styles) els
 
 
 
 {- Inline -}
 
 
-changeStyle styling (StyledText txt styles els linkEls) styleToken =
+changeStyle (Text txt styles els) styleToken =
     let
         newStyles =
             case styleToken of
@@ -605,83 +597,62 @@ changeStyle styling (StyledText txt styles els linkEls) styleToken =
 
                 Token ->
                     Flag.flip Flag.token styles
-
-                LinkStart ->
-                    Flag.add Flag.link styles
-
-                Link _ ->
-                    Flag.remove Flag.link styles
-
-        link =
-            case styleToken of
-                Link to ->
-                    Just to
-
-                _ ->
-                    Nothing
     in
     if txt == "" then
-        StyledText "" newStyles els linkEls
+        Text "" newStyles els
 
     else
-        StyledText "" newStyles els linkEls
-            |> addElements [ renderStyledText styling styles txt link ]
+        Text "" newStyles els
+            |> addElement (renderText styles txt)
 
 
-renderStyledText styleOptions styled txt maybeLink =
-    let
-        styles =
-            List.concat
-                [ if Flag.present Flag.bold styled then
-                    [ Font.bold ]
+toStyles styleField styling =
+    List.concat
+        [ if Flag.present Flag.bold styleField then
+            [ Font.bold ]
 
-                  else
-                    []
-                , if Flag.present Flag.italic styled then
-                    [ Font.italic ]
+          else
+            []
+        , if Flag.present Flag.italic styleField then
+            [ Font.italic ]
 
-                  else
-                    []
-                , if
-                    Flag.present Flag.strike styled
-                        && Flag.present Flag.underline styled
-                  then
-                    [ Font.underline ]
+          else
+            []
+        , if
+            Flag.present Flag.strike styleField
+                && Flag.present Flag.underline styleField
+          then
+            [ Font.underline ]
 
-                  else
-                    []
-                , if Flag.present Flag.strike styled then
-                    [ Font.strike ]
+          else
+            []
+        , if Flag.present Flag.strike styleField then
+            [ Font.strike ]
 
-                  else
-                    []
-                , if Flag.present Flag.token styled then
-                    styleOptions.token
+          else
+            []
+        , if Flag.present Flag.token styleField then
+            styling.token
 
-                  else
-                    []
-                ]
-    in
-    case maybeLink of
-        Nothing ->
-            if List.isEmpty styles && not (Flag.present Flag.token styled) then
-                Element.text txt
+          else
+            []
+        ]
 
-            else
-                Element.el
-                    -- (if Flag.present Flag.token styled then
-                    --     styleOptions.token ++ styles
-                    --  else
-                    styles
-                    -- )
-                    (Element.text txt)
 
-        Just link ->
-            Element.link
-                (styleOptions.link ++ styles)
-                { url = link
-                , label = Element.text txt
-                }
+renderLink styleField txt url styling _ =
+    [ Element.link (styling.link ++ toStyles styleField styling)
+        { url = url
+        , label = Element.text txt
+        }
+    ]
+
+
+renderText styleField txt styling _ =
+    if Flag.none == styleField then
+        [ Element.text txt ]
+
+    else
+        [ Element.el (toStyles styleField styling) (Element.text txt) ]
 
 
 doubleQuote =

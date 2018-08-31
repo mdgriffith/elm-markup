@@ -1,6 +1,11 @@
 module Main exposing (main, myParser, source)
 
-{-| -}
+{-| A simple blog post with a custom inline element for some cool text formatting.
+
+**Note** the blogpost flashes when rendering because it's loading a `font` using `Font.external` from `Elm UI`.  To get rid of that, you can add a `link` to the font file directly in the head of your html.
+
+
+-}
 
 import Element
 import Element.Font as Font
@@ -48,12 +53,12 @@ What does a list look like?
 myParser =
     Mark.parseWith
         { styling =
-            Mark.defaultStyling
+            \model -> Mark.defaultStyling
         , blocks =
             Mark.defaultBlocks
         , inlines =
             [ Custom.inline "drop"
-                (\string styling ->
+                (\string styling model ->
                     let
                         txt =
                             String.trim string
@@ -79,11 +84,11 @@ myParser =
 
 main =
     case myParser source of
-        Ok html ->
+        Ok element ->
             Element.layout
                 [ Font.family [ Font.typeface "EB Garamond" ]
                 ]
-                html
+                (element ())
 
         Err errors ->
             let
