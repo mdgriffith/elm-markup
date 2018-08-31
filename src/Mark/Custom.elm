@@ -103,7 +103,7 @@ inline name renderer =
 
 Which can then be used in your markup like so:
 
-    | red |
+    | red
 
 The element you defined will show up there.
 
@@ -112,8 +112,8 @@ block : String -> (style -> model -> Element msg) -> Block model style msg
 block name renderer =
     Internal.Block name
         (Parser.succeed renderer
-            |. Parser.chompWhile (\c -> c == ' ')
-            |. Parser.token "|"
+            |. Parser.token "\n"
+            |. Parser.token "\n"
         )
 
 
@@ -134,14 +134,14 @@ For example, here's how the builtin block, `image`, using `block2` and two `Cust
 
 Which can then be used in your markup:
 
-    | image http://placekitten/200/500
-        Here's a great picture of my cat, pookie.
+    | image "http://placekitten/200/500"
+        "Here's a great picture of my cat, pookie.""
 
 or as
 
     | image
-        http://placekitten/200/500
-        Here's a great picture of my cat, pookie.
+        "http://placekitten/200/500"
+        "Here's a great picture of my cat, pookie.""
 
 -}
 block1 :
@@ -153,6 +153,8 @@ block1 name renderer (Param param) =
     Internal.Block name
         (Parser.succeed renderer
             |= param
+            |. Parser.token "\n"
+            |. Parser.token "\n"
         )
 
 
@@ -168,6 +170,8 @@ block2 name renderer (Param param1) (Param param2) =
         (Parser.succeed renderer
             |= param1
             |= param2
+            |. Parser.token "\n"
+            |. Parser.token "\n"
         )
 
 
@@ -185,25 +189,49 @@ block3 name renderer (Param param1) (Param param2) (Param param3) =
             |= param1
             |= param2
             |= param3
+            |. Parser.token "\n"
+            |. Parser.token "\n"
         )
 
 
-{-| Either parse a double quote and wait for another double quote
-Or parse the rest of the line
+{-| Parse a double quoted string.
 -}
 string : Param String
 string =
     Param
         (Parser.succeed identity
             |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
-            |= Parser.oneOf
-                [ Parser.succeed identity
-                    |. Parser.token "\""
+            |. Parser.token "\""
+            |= quotedString
+        )
+
+
+quotedString =
+    Parser.loop
+        ""
+        (\found ->
+            Parser.oneOf
+                [ Parser.succeed
+                    (\new ->
+                        Parser.Loop (found ++ new)
+                    )
+                    |. Parser.token "\\"
                     |= Parser.getChompedString
-                        (Parser.chompWhile (\c -> c /= doubleQuote))
-                    |. Parser.token "\""
+                        (Parser.chompIf (always True))
+                , Parser.map (\_ -> Parser.Done found) (Parser.token "\"")
                 , Parser.getChompedString
-                    (Parser.chompWhile (\c -> c /= '\n'))
+                    (Parser.chompWhile
+                        (\c ->
+                            c
+                                /= doubleQuote
+                                && c
+                                /= '\\'
+                        )
+                    )
+                    |> Parser.map
+                        (\new ->
+                            Parser.Loop (found ++ new)
+                        )
                 ]
         )
 
@@ -302,9 +330,10 @@ paragraph name renderer =
                 (\almostElements style model ->
                     renderer (almostElements style model) style model
                 )
-                |. Parser.chompWhile (\c -> c == '\n')
+                |. Parser.token "\n"
                 |. Parser.token "    "
                 |= inlineParser
+                |. Parser.token "\n"
         )
 
 
@@ -343,7 +372,7 @@ section name renderer =
                 (\almostElements style model ->
                     renderer (almostElements style model) style model
                 )
-                |. Parser.chompWhile (\c -> c == '\n')
+                |. Parser.token "\n"
                 |. Parser.token "    "
                 |= Parser.loop []
                     (\els ->
