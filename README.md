@@ -23,7 +23,7 @@ Welcome!  Have you hear about /cats/?  They're great.
 How much do I like cats?  A bunch.
 
 
-| mycatwidget |
+| mycatwidget
 
 ```
 
