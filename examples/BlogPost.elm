@@ -2,8 +2,7 @@ module Main exposing (main, myParser, source)
 
 {-| A simple blog post with a custom inline element for some cool text formatting.
 
-**Note** the blogpost flashes when rendering because it's loading a `font` using `Font.external` from `Elm UI`.  To get rid of that, you can add a `link` to the font file directly in the head of your html.
-
+**Note** the blogpost flashes when rendering because it's loading a `font` using `Font.external` from `Elm UI`. To get rid of that, you can add a `link` to the font file directly in the head of your html.
 
 -}
 

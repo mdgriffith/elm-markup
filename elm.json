@@ -1,7 +1,7 @@
 {
     "type": "package",
     "name": "mdgriffith/elm-markup",
-    "summary": "Elm-friendly markup parser.",
+    "summary": "An Elm-friendly markup parser. Write articles and embed Elm views!",
     "license": "BSD-3-Clause",
     "version": "1.0.0",
     "exposed-modules": [
@@ -13,7 +13,7 @@
         "elm/core": "1.0.0 <= v < 2.0.0",
         "elm/html": "1.0.0 <= v < 2.0.0",
         "elm/parser": "1.0.0 <= v < 2.0.0",
-        "mdgriffith/stylish-elephants": "8.1.0 <= v < 9.0.0"
+        "mdgriffith/elm-ui": "1.0.0 <= v < 2.0.0"
     },
     "test-dependencies": {}
 }
