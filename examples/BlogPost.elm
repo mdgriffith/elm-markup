@@ -25,9 +25,10 @@ source =
 But, for real, here's a kitten.
 
 
-| image http://placekitten.com/g/200/300
-    What a cute kitten.
+| image "http://placekitten.com/g/200/300"
+    "What a cute kitten."
 
+What does a list look like?
 
 | header
     My section on lists
@@ -42,8 +43,6 @@ What does a list look like?
         - sublist
         - more sublist
             - and yet, another
-
-
 
 
 """
