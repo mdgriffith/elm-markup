@@ -17,8 +17,8 @@ Here's a taste:
 
 Welcome!  Have you hear about /cats/?  They're great.
 
-| image http://placekitten/200/500
-    Here's a great picture of my cat, pookie.
+| image "http://placekitten/200/500"
+    "Here's a great picture of my cat, pookie."
 
 How much do I like cats?  A bunch.
 
@@ -82,8 +82,8 @@ Here's the beginning of a blog post with a `title` block, which will render as a
 
 Welcome.  Have you heard about /cats/?  They're great.
 
-| image http://placekitten/200/500
-    Here's a great picture of my cat, pookie.
+| image "http://placekitten/200/500"
+    "Here's a great picture of my cat, pookie."
 
 How much do I like cats?  Let's make a list.
 
@@ -122,9 +122,9 @@ We can also reclaim some useful typography that is a bit awkward to handle other
 - `'` Single Quotes are replaced with apostrophes.  In the future we might differentiate between curly single quotes and apostrophes.
 - `--` is replaced with an en dash –
 - `---` is replaced with an em dash —
-- `<>` - will create a non-breaking space (`&nbsp;`).  This is not for manually increasing space(sequential `<>` tokens will only render as one `&nbsp;`), but to signify that the space between two words shouldn't break when wrapping.  Think of this like glueing two words together.
+- `+` - will create a non-breaking space (`&nbsp;`).  This is not for manually increasing space(sequential `+` tokens will only render as one `&nbsp;`), but to signify that the space between two words shouldn't break when wrapping.  Think of this like glueing two words together.
 
-Escaping the start of any of these characters will cause the transformation to be skipped in that instance.
+**Note** Escaping the start of any of these characters will cause the transformation to be skipped in that instance.
 
 These transformations also don't apply inside inline `` `code` `` or inside the `monospace` block.
 
