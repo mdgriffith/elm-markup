@@ -16,7 +16,7 @@ Here's a taste:
     My fancy cat blog article
 
 
-Welcome!  Have you hear about /cats/?  They're great.
+Welcome!  Have you heard about /cats/?  They're great.
 
 | image "http://placekitten/200/500"
     "Here's a great picture of my cat, pookie."
