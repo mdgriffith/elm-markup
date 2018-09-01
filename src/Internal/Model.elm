@@ -417,7 +417,7 @@ typographyText styles until =
 This function will replace certain characters with improved typographical ones.
 Escaping a character will skip the replacement.
 
-    -> "+" -> a non-breaking space.
+    -> "<>" -> a non-breaking space.
         - This can be used to glue words together so that they don't break
         - It also avoids being used for spacing like `&nbsp;` because multiple instances will collapse down to one.
     -> "--" -> "en-dash"
@@ -439,12 +439,21 @@ typography existing styles =
             (Parser.chompIf (always True))
 
     -- Non breaking space
-    , Parser.token "+"
-        |. Parser.chompWhile (\c -> c == '+' || c == ' ')
+    , Parser.succeed
+        (\_ ->
+            existing
+                |> addText "\u{00A0}"
+                |> Parser.Loop
+        )
+        |. Parser.token "<>"
+        |= Parser.chompWhile (\c -> c == '<' || c == ' ' || c == '>')
+
+    -- capture the opening character if it wasn't chomped previously
+    , Parser.token "<"
         |> Parser.map
             (\_ ->
                 existing
-                    |> addText "\u{00A0}"
+                    |> addText "<"
                     |> Parser.Loop
             )
 
@@ -538,7 +547,7 @@ typographyChars =
     , '\\'
     , '/'
     , '-'
-    , '+'
+    , '<'
     ]
 
 

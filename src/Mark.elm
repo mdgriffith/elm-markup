@@ -1,15 +1,14 @@
 module Mark exposing
     ( parse, parseWith
-    , Options, Styling, default, defaultStyling
+    , Options, Styling, default, defaultStyling, defaultBlocks
     , Cursor, ListIcon(..)
-    , defaultBlocks
     )
 
 {-|
 
 @docs parse, parseWith
 
-@docs Options, Styling, default, defaultStyling
+@docs Options, Styling, default, defaultStyling, defaultBlocks
 
 @docs Cursor, ListIcon
 
@@ -86,9 +85,7 @@ default =
     }
 
 
-{-| 
-
--}
+{-| -}
 defaultStyling : Styling msg
 defaultStyling =
     { root =
@@ -222,6 +219,20 @@ defaultListToken cursor symbol =
                 )
 
 
+{-| A set of common default blocks.
+
+  - `title` - The title of your document. This is equivalent to an `h1`. You should only have one of them.
+  - `header` - A header in your document, which is equivalent to `h2`.
+  - `list` - A nested list with an expected indentation of 4 spaces per level. As far as icons:
+      - `-` indicates a bullet
+      - `->` indicates an arrow
+      - `1.` indicates it should be numbered. Any number can work.
+  - `image` - Expects two strings, first the src, and then a description of the image.
+  - `monospace` - Basically a code block without syntax highlighting.
+
+**Note** none of these are special, they're all defined in terms of `Mark.Custom`.
+
+-}
 defaultBlocks :
     List
         (Internal.Block model
