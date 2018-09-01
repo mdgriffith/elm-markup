@@ -30,6 +30,7 @@ But, for real, here's a kitten.
 
 What does a list look like?
 
+
 | header
     My section on lists
 
@@ -38,6 +39,7 @@ What does a list look like?
 
 
 | list
+
     - This is definitely the first thing.
     - Another thing.
         - sublist

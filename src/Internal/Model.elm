@@ -88,6 +88,8 @@ blocks options existing =
                     Parser.Loop
                         existing
                 )
+
+        -- custom blocks
         , Parser.succeed identity
             |. Parser.token "|"
             |. Parser.chompIf (\c -> c == ' ')
@@ -102,6 +104,8 @@ blocks options existing =
                     Parser.Loop
                         (found :: existing)
                 )
+
+        -- inlines
         , inline options.inlines
             |> Parser.map
                 (\found ->
