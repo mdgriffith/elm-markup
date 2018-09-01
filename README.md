@@ -30,7 +30,7 @@ How much do I like cats?  A bunch.
 
 `mycatwidget` is a custom block that can be defined in the config.  You can choose what it actually means.
 
-**Note** Why aren't `title` and `header` given special syntax? They're just like any other block, nothing special.  I imagine some syntax highlighting will help with the aesthetic differences compared to markdown though.
+**Note** Why aren't `title` and `header` given special syntax? They're just like any other block!  I imagine some syntax highlighting will help with the aesthetic differences compared to markdown though.
 
 ## Principles
 
