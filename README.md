@@ -38,6 +38,8 @@ Here are the ideas I used to put this library together:
 
 - There is _one_ unambiguous way to construct a given element.
 
+- Block names are explicit.
+
 - This library inherits Elm's wariness of infix or symbol based operators.  Instead of having a bunch of symbols and custom syntax rules to denote concepts, we can usually just use real words.
 
 - The following should _always_ be easy:
@@ -52,13 +54,13 @@ Here are the ideas I used to put this library together:
 
 - On the flip side, we avoid directly embedding any other langauges like HTML. My current feeling is that a document like this benefits hugely from being **high level** and embedding code can get really messy with weird details. Fortunately custom blocks are pretty convenient.
 
-    - Unless you're putting it in the document as a code example!
+    - Unless you're embedding it as a code example!
 
 
 
 ## Basic Text Markup
 
-There are only a very limited set of characters for formatting text.
+There is only a very limited set of characters for formatting text.
 
 - `/italic/` _italic_
 - `*bold*` **bold**
