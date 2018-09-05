@@ -18,6 +18,8 @@ module Mark.Custom exposing
 
 ## Parameters
 
+`block1`-`block3` can take parameters specified in the markup. Here are the parameter types you can use:
+
 @docs Param, bool, int, float, string, oneOf
 
 
@@ -50,7 +52,7 @@ type alias Inline model style msg =
 {-| Create a custom inline styler.
 
     Custom.inline "intro"
-        (\string styling ->
+        (\string styling model ->
             let
                 txt =
                     String.trim string
@@ -68,7 +70,7 @@ type alias Inline model style msg =
 
 When applied via `parseWith`, can then be used in markup like the following
 
-    {drop| Lorem Ipsum is simply dummy text } of the printing and...
+    {intro| Lorem Ipsum is simply dummy text } of the printing and...
 
 It will turn the first letter into a [dropped capital](https://en.wikipedia.org/wiki/Initial) and lead in with [small caps](https://practicaltypography.com/small-caps.html)
 
@@ -122,7 +124,7 @@ block name renderer =
 For example, here's how the builtin block, `image`, using `block2` and two `Custom.string` parameters.
 
     Custom.block2 "image"
-        (\src description styling ->
+        (\src description styling model ->
             Element.image
                 []
                 { src = String.trim src
