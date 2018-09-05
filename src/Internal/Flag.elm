@@ -1,4 +1,20 @@
-module Internal.Flag exposing (..)
+module Internal.Flag exposing
+    ( Field(..)
+    , Flag(..)
+    , add
+    , bold
+    , doubleQuote
+    , flag
+    , flip
+    , italic
+    , link
+    , none
+    , present
+    , remove
+    , strike
+    , token
+    , underline
+    )
 
 {-| -}
 
@@ -53,6 +69,7 @@ flip : Flag -> Field -> Field
 flip myFlag field =
     if present myFlag field then
         remove myFlag field
+
     else
         add myFlag field
 
