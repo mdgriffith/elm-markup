@@ -1,7 +1,7 @@
 module Mark exposing
     ( parse, parseWith
     , Options, Styling, default, defaultStyling, defaultBlocks
-    , Cursor, ListIcon(..)
+    , Cursor, ListIcon(..), defaultListIcon
     )
 
 {-|
@@ -10,7 +10,7 @@ module Mark exposing
 
 @docs Options, Styling, default, defaultStyling, defaultBlocks
 
-@docs Cursor, ListIcon
+@docs Cursor, ListIcon, defaultListIcon
 
 -}
 
@@ -142,7 +142,7 @@ defaultStyling =
             , Font.sansSerif
             ]
         ]
-    , listIcons = defaultListToken
+    , listIcons = defaultListIcon
     , list =
         [ Element.spacing 8
         ]
@@ -170,8 +170,8 @@ mapCursor fn ( head, tail ) =
 
 
 {-| -}
-defaultListToken : Cursor -> ListIcon -> Element msg
-defaultListToken cursor symbol =
+defaultListIcon : Cursor -> ListIcon -> Element msg
+defaultListIcon cursor symbol =
     let
         pad =
             Element.paddingEach
