@@ -213,8 +213,9 @@ defaultListIcon cursor symbol =
         Number ->
             Element.el [ pad ]
                 (Element.text
-                    (String.join "."
-                        (mapCursor String.fromInt cursor)
+                    (mapCursor String.fromInt cursor
+                        |> List.reverse
+                        |> String.join "."
                     )
                 )
 
@@ -305,7 +306,7 @@ type alias Cursor =
 
 emptyCursor : Cursor
 emptyCursor =
-    ( 1, [] )
+    ( 0, [] )
 
 
 {-| -}
