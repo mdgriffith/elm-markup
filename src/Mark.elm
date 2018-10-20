@@ -1,7 +1,7 @@
 module Mark exposing
     ( parse, parseWith
     , Options, Styling, default, defaultStyling, defaultBlocks
-    , Cursor, ListIcon(..), defaultListIcon
+    , Index, ListIcon(..), defaultListIcon
     )
 
 {-|
@@ -10,7 +10,7 @@ module Mark exposing
 
 @docs Options, Styling, default, defaultStyling, defaultBlocks
 
-@docs Cursor, ListIcon, defaultListIcon
+@docs Index, ListIcon, defaultListIcon
 
 -}
 
@@ -63,7 +63,7 @@ type alias Styling msg =
     { link : List (Element.Attribute msg)
     , token : List (Element.Attribute msg)
     , list : List (Element.Attribute msg)
-    , listIcons : Cursor -> ListIcon -> Element msg
+    , listIcons : List Index -> ListIcon -> Element msg
     , title : List (Element.Attribute msg)
     , header : List (Element.Attribute msg)
     , monospace : List (Element.Attribute msg)
@@ -165,19 +165,19 @@ cursorLevel ( current, nested ) =
     List.length nested + 1
 
 
-mapCursor fn ( head, tail ) =
-    List.map fn (head :: tail)
+mapCursor fn cursor =
+    List.map fn (cursor.current :: cursor.stack)
 
 
 {-| -}
-defaultListIcon : Cursor -> ListIcon -> Element msg
+defaultListIcon : List Index -> ListIcon -> Element msg
 defaultListIcon cursor symbol =
     let
         pad =
             Element.paddingEach
                 { edges
                     | left =
-                        case cursorLevel cursor of
+                        case List.length cursor of
                             1 ->
                                 28
 
@@ -201,7 +201,7 @@ defaultListIcon cursor symbol =
         Bullet ->
             let
                 icon =
-                    case cursorLevel cursor of
+                    case List.length cursor of
                         1 ->
                             "•"
 
@@ -213,11 +213,23 @@ defaultListIcon cursor symbol =
         Number ->
             Element.el [ pad ]
                 (Element.text
-                    (mapCursor String.fromInt cursor
-                        |> List.reverse
-                        |> String.join "."
-                    )
+                    (List.foldl formatIndex "" cursor)
                 )
+
+
+formatIndex index formatted =
+    if index.show then
+        formatted ++ String.fromInt index.index ++ index.decoration
+
+    else
+        formatted
+
+
+type alias Index =
+    { decoration : String
+    , index : Int
+    , show : Bool
+    }
 
 
 {-| A set of common default blocks.
@@ -245,7 +257,7 @@ defaultBlocks :
                 , root : List (Element.Attribute msg)
                 , monospace : List (Element.Attribute msg)
                 , block : List (Element.Attribute msg)
-                , listIcons : Cursor -> ListIcon -> Element msg
+                , listIcons : List Index -> ListIcon -> Element msg
                 , token : List (Element.Attribute msg)
             }
             msg
@@ -295,27 +307,33 @@ defaultBlocks =
 {- LIST -}
 
 
-{-| A Cursor which represents a position in a nested list.
-
-`Level`
-
--}
+{-| -}
 type alias Cursor =
-    ( Int, List Int )
+    { current : Int
+    , stack : List Int
+    }
 
 
 emptyCursor : Cursor
 emptyCursor =
-    ( 0, [] )
+    { current = 0
+    , stack = []
+    }
 
 
 {-| -}
 type ListIcon
     = Bullet
-    | Number
     | Arrow
+    | Number
 
 
+{-| -}
+type CursorReset
+    = CursorReset (List (Maybe Int))
+
+
+{-| -}
 indentLevel : Parser Int
 indentLevel =
     Parser.oneOf
@@ -331,84 +349,209 @@ indentLevel =
 list inlines =
     Parser.loop
         ( emptyCursor, [] )
-        (\( cursor, existing ) ->
-            Parser.oneOf
-                [ Parser.succeed
-                    (\indent token styledText ->
-                        let
-                            newCursor =
-                                advanceCursor cursor indent
-                        in
-                        Parser.Loop
-                            ( newCursor
-                            , (\styling model ->
-                                Element.paragraph
-                                    []
-                                    (styling.listIcons newCursor token :: styledText styling model)
-                              )
-                                :: existing
-                            )
+        (listItem inlines)
+
+
+listItem inlines ( cursor, existing ) =
+    Parser.oneOf
+        [ Parser.succeed
+            (\indent ( reset, decorations, token ) styledText ->
+                let
+                    newCursor =
+                        cursor
+                            |> advanceCursor indent
+                            |> resetCursor reset
+
+                    indexedDecorations =
+                        decorate decorations newCursor
+                in
+                Parser.Loop
+                    ( newCursor
+                    , (\styling model ->
+                        Element.paragraph
+                            []
+                            (styling.listIcons indexedDecorations token :: styledText styling model)
+                      )
+                        :: existing
                     )
-                    |= indentLevel
-                    |= Parser.oneOf
-                        [ Parser.token "->"
-                            |> Parser.map (always Arrow)
-                        , Parser.token "-"
-                            |> Parser.map (always Bullet)
-                        , Parser.succeed Number
-                            |. Parser.chompIf Char.isDigit
-                            |. Parser.chompWhile Char.isDigit
-                            |. Parser.chompIf (\c -> c == '.')
-                        ]
-                    |. Parser.token " "
-                    |= inlines
-                , Parser.end
-                    |> Parser.map
-                        (\_ ->
-                            Parser.Done
-                                (\styling model ->
-                                    Element.column styling.list
-                                        (List.foldl
-                                            (\fn els ->
-                                                fn styling model :: els
-                                            )
-                                            []
-                                            existing
-                                        )
-                                )
-                        )
-                , Parser.token "\n\n"
-                    |> Parser.map
-                        (\_ ->
-                            Parser.Done
-                                (\styling model ->
-                                    Element.column styling.list
-                                        (List.foldl
-                                            (\fn els ->
-                                                fn styling model :: els
-                                            )
-                                            []
-                                            existing
-                                        )
-                                )
-                        )
-                , Parser.token "\n"
-                    |> Parser.map (always (Parser.Loop ( cursor, existing )))
+            )
+            |= indentLevel
+            |= Parser.oneOf
+                [ Parser.token "->"
+                    |> Parser.map (always ( [], [], Arrow ))
+                , Parser.token "-"
+                    |> Parser.map (always ( [], [], Bullet ))
+                , Parser.succeed
+                    (\( reset, decorations ) ->
+                        ( reset, decorations, Number )
+                    )
+                    |= Parser.loop ( [], [] ) listIndex
                 ]
-        )
+            |. Parser.token " "
+            |= inlines
+        , Parser.end
+            |> Parser.map
+                (\_ ->
+                    Parser.Done
+                        (\styling model ->
+                            Element.column styling.list
+                                (List.foldl
+                                    (\fn els ->
+                                        fn styling model :: els
+                                    )
+                                    []
+                                    existing
+                                )
+                        )
+                )
+        , Parser.token "\n\n"
+            |> Parser.map
+                (\_ ->
+                    Parser.Done
+                        (\styling model ->
+                            Element.column styling.list
+                                (List.foldl
+                                    (\fn els ->
+                                        fn styling model :: els
+                                    )
+                                    []
+                                    existing
+                                )
+                        )
+                )
+        , Parser.token "\n"
+            |> Parser.map (always (Parser.Loop ( cursor, existing )))
+        ]
 
 
-advanceCursor ( current, nested ) indent =
-    if indent == List.length nested + 1 then
-        ( current + 1, nested )
+listIndex ( cursorReset, decorations ) =
+    Parser.oneOf
+        [ Parser.succeed
+            (\reset decoration ->
+                Parser.Loop
+                    ( reset :: cursorReset
+                    , decoration :: decorations
+                    )
+            )
+            |= Parser.oneOf
+                [ Parser.succeed
+                    (\lead remaining ->
+                        case ( String.toInt lead, String.toInt remaining ) of
+                            ( Just l, Just r ) ->
+                                Just <| (l * 10 * String.length remaining) + r
 
-    else if indent > List.length nested + 1 then
-        ( 1, current :: nested )
+                            ( Just l, Nothing ) ->
+                                Just l
+
+                            _ ->
+                                Nothing
+                    )
+                    |= Parser.getChompedString (Parser.chompIf Char.isDigit)
+                    |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
+                , Parser.succeed Nothing
+                    |. Parser.chompIf Char.isAlpha
+                    |. Parser.chompWhile Char.isAlpha
+                ]
+            |= Parser.getChompedString
+                (Parser.chompWhile
+                    (\c ->
+                        c
+                            /= ' '
+                            && not (Char.isAlpha c)
+                            && not (Char.isDigit c)
+                    )
+                )
+        , Parser.succeed
+            (Parser.Done
+                ( List.reverse cursorReset
+                , List.reverse decorations
+                )
+            )
+        ]
+
+
+decorate : List String -> Cursor -> List { index : Int, decoration : String, show : Bool }
+decorate decorations cursor =
+    let
+        cursorList =
+            mapCursor identity cursor
+    in
+    cursorList
+        |> List.foldl applyDecoration ( List.reverse decorations, [] )
+        |> Tuple.second
+
+
+applyDecoration index ( decs, decorated ) =
+    case decs of
+        [] ->
+            -- If there are no decorations, skip.
+            ( decs
+            , { index = index
+              , decoration = ""
+              , show = False
+              }
+                :: decorated
+            )
+
+        currentDec :: remaining ->
+            ( remaining
+            , { index = index
+              , decoration = currentDec
+              , show = True
+              }
+                :: decorated
+            )
+
+
+resetCursor reset cursor =
+    case List.reverse reset of
+        [] ->
+            cursor
+
+        top :: remaining ->
+            { current =
+                Maybe.withDefault cursor.current top
+            , stack =
+                cursor.stack
+                    |> List.foldr resetStack ( remaining, [] )
+                    |> Tuple.second
+            }
+
+
+resetStack index ( reset, found ) =
+    case reset of
+        [] ->
+            ( reset, index :: found )
+
+        Nothing :: remain ->
+            ( remain, index :: found )
+
+        (Just new) :: remain ->
+            ( remain, new :: found )
+
+
+advanceCursor indent cursor =
+    if indent == List.length cursor.stack + 1 then
+        { current = cursor.current + 1
+        , stack = cursor.stack
+        }
+
+    else if indent > List.length cursor.stack + 1 then
+        { current = 1
+        , stack = cursor.current :: cursor.stack
+        }
 
     else
-        case nested of
+        let
+            indentDelta =
+                List.length cursor.stack
+                    - indent
+        in
+        case List.drop (abs indentDelta) cursor.stack of
             [] ->
-                ( current, nested )
+                cursor
 
             lower :: remaining ->
-                ( lower + 1, remaining )
+                { current = lower + 1
+                , stack = remaining
+                }
