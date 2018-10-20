@@ -106,7 +106,8 @@ Blocks that come with the library are:
 - `list` - A nested list with an expected indentation of 4 spaces per level. As far as icons:
   - `-` indicates a bullet
   - `->` indicates an arrow
-  - `1.` indicates it should be numbered.  Any number can work.
+  - `x.` indicates means it will be auto-numbered.  Any punctuation can come after the `x`.  So, `x)` will format as `1)` and `x.` will format as `1.`
+  - `1.` will reset the auto numbering to that literal number.
 
 - `image` - Expects two strings, first the src, and then a description of the image.
 - `monospace` - Basically a code block without syntax highlighting.
