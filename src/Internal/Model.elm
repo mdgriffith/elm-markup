@@ -98,7 +98,8 @@ blocks options existing =
                     (blockToParser options.inlines)
                     options.blocks
                 )
-            |> Parser.andThen identity
+            |> Parser.andThen
+                identity
             |> Parser.map
                 (\found ->
                     Parser.Loop
@@ -140,6 +141,8 @@ blockToParser inlines blockable =
                     (\_ ->
                         Parser.succeed identity
                             |= arguments
+                            |. Parser.token "\n"
+                            |. Parser.token "\n"
                     )
 
         Parse name parser ->

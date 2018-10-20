@@ -113,10 +113,7 @@ The element you defined will show up there.
 block : String -> (style -> model -> Element msg) -> Block model style msg
 block name renderer =
     Internal.Block name
-        (Parser.succeed renderer
-            |. Parser.token "\n"
-            |. Parser.token "\n"
-        )
+        (Parser.succeed renderer)
 
 
 {-| Same as `block`, but you can parse one parameter as well.
@@ -155,8 +152,6 @@ block1 name renderer (Param param) =
     Internal.Block name
         (Parser.succeed renderer
             |= param
-            |. Parser.token "\n"
-            |. Parser.token "\n"
         )
 
 
@@ -172,8 +167,6 @@ block2 name renderer (Param param1) (Param param2) =
         (Parser.succeed renderer
             |= param1
             |= param2
-            |. Parser.token "\n"
-            |. Parser.token "\n"
         )
 
 
@@ -191,8 +184,6 @@ block3 name renderer (Param param1) (Param param2) (Param param3) =
             |= param1
             |= param2
             |= param3
-            |. Parser.token "\n"
-            |. Parser.token "\n"
         )
 
 
