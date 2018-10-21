@@ -39,6 +39,7 @@ parseWith :
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
             , list : List (Element.Attribute msg)
+            , listSection : List (Element.Attribute msg)
             , root : List (Element.Attribute msg)
             , block : List (Element.Attribute msg)
         }
@@ -63,6 +64,7 @@ type alias Styling msg =
     { link : List (Element.Attribute msg)
     , token : List (Element.Attribute msg)
     , list : List (Element.Attribute msg)
+    , listSection : List (Element.Attribute msg)
     , listIcons : List Index -> ListIcon -> Element msg
     , title : List (Element.Attribute msg)
     , header : List (Element.Attribute msg)
@@ -124,8 +126,6 @@ defaultStyling =
                     (21 / 255)
                     (122 / 255)
                 )
-
-            -- , Font.underline
             ]
         ]
     , token =
@@ -142,10 +142,10 @@ defaultStyling =
             , Font.sansSerif
             ]
         ]
+    , list = [ Element.spacing 64 ]
     , listIcons = defaultListIcon
-    , list =
-        [ Element.spacing 8
-        ]
+    , listSection =
+        [ Element.spacing 16 ]
     , title =
         [ Font.size 48 ]
     , header =
@@ -238,8 +238,9 @@ type alias Index =
   - `header` - A header in your document, which is equivalent to `h2`.
   - `list` - A nested list with an expected indentation of 4 spaces per level. As far as icons:
       - `-` indicates a bullet
-      - `->` indicates an arrow
-      - `1.` indicates it should be numbered. Any number can work.
+      - `->` or `-->` indicates an arrow
+      - `-x.` means auto numbering. Any lowercase letter can work.
+      - `-1.` means start autonumbering at this exact number. Any number can work.
   - `image` - Expects two strings, first the src, and then a description of the image.
   - `monospace` - Basically a code block without syntax highlighting.
 
@@ -254,6 +255,7 @@ defaultBlocks :
                 , header : List (Element.Attribute msg)
                 , link : List (Element.Attribute msg)
                 , list : List (Element.Attribute msg)
+                , listSection : List (Element.Attribute msg)
                 , root : List (Element.Attribute msg)
                 , monospace : List (Element.Attribute msg)
                 , block : List (Element.Attribute msg)
@@ -346,82 +348,242 @@ indentLevel =
         ]
 
 
+{-| = indentLevel icon space content
+| indentLevel content
+
+Where the second variation can only occur if the indentation is larger than the previous one.
+
+-}
+type ListBuilder styling model msg
+    = ListBuilder
+        { previousIndent : Int
+        , previousLineEmpty : Bool
+        , currentContent :
+            Maybe
+                { icon :
+                    { token : ListIcon
+                    , decorations :
+                        List
+                            { decoration : String
+                            , index : Int
+                            , show : Bool
+                            }
+                    }
+                , sections :
+                    List ({ styling | list : List (Element.Attribute msg) } -> model -> List (Element msg))
+                }
+        , items : List ({ styling | list : List (Element.Attribute msg) } -> model -> Element msg)
+        }
+
+
+emptyListBuilder : ListBuilder styling model msg
+emptyListBuilder =
+    ListBuilder
+        { previousIndent = 0
+        , previousLineEmpty = False
+        , currentContent = Nothing
+        , items = []
+        }
+
+
 list inlines =
     Parser.loop
-        ( emptyCursor, [] )
+        ( emptyCursor, emptyListBuilder )
         (listItem inlines)
 
 
-listItem inlines ( cursor, existing ) =
-    Parser.oneOf
-        [ Parser.succeed
-            (\indent ( reset, decorations, token ) styledText ->
-                let
-                    newCursor =
-                        cursor
-                            |> advanceCursor indent
-                            |> resetCursor reset
+finalizeList (ListBuilder builder) styling model =
+    Element.column
+        styling.list
+        (ListBuilder builder
+            |> addCurrentContent
+            |> List.map (\fn -> fn styling model)
+            |> List.reverse
+        )
 
-                    indexedDecorations =
-                        decorate decorations newCursor
-                in
-                Parser.Loop
-                    ( newCursor
-                    , (\styling model ->
-                        Element.paragraph
-                            []
-                            (styling.listIcons indexedDecorations token :: styledText styling model)
-                      )
-                        :: existing
-                    )
+
+renderParagraph styling model styledText =
+    Element.paragraph
+        []
+        (styledText styling model)
+
+
+addCurrentContent (ListBuilder builder) =
+    case builder.currentContent of
+        Nothing ->
+            builder.items
+
+        Just content ->
+            (\styling model ->
+                Element.row []
+                    [ Element.el [ Element.alignTop ] <|
+                        styling.listIcons content.icon.decorations content.icon.token
+                    , Element.textColumn styling.listSection
+                        (content.sections
+                            |> List.reverse
+                            |> List.map (renderParagraph styling model)
+                        )
+                    ]
             )
+                :: builder.items
+
+
+listItem inlines ( cursor, ListBuilder builder ) =
+    Parser.oneOf
+        [ Parser.succeed identity
             |= indentLevel
-            |= Parser.oneOf
+            |> Parser.andThen
+                (indentedListItem inlines cursor (ListBuilder builder))
+        , Parser.end
+            |> Parser.map
+                (\_ ->
+                    Parser.Done (finalizeList (ListBuilder builder))
+                )
+        , if builder.previousLineEmpty then
+            Parser.token "\n"
+                |> Parser.map
+                    (\_ ->
+                        Parser.Done (finalizeList (ListBuilder builder))
+                    )
+
+          else
+            Parser.token "\n"
+                |> Parser.map
+                    (always
+                        (Parser.Loop ( cursor, ListBuilder { builder | previousLineEmpty = True } ))
+                    )
+        ]
+
+
+indentedListItem inlines cursor (ListBuilder builder) indent =
+    Parser.oneOf <|
+        List.filterMap identity
+            [ Just
+                (Parser.succeed (startItem cursor indent (ListBuilder builder))
+                    |= listIcon
+                    |. Parser.chompWhile (\c -> c == ' ')
+                    |= inlines
+                )
+            , if indent == builder.previousIndent + 1 && builder.currentContent /= Nothing then
+                Just
+                    (Parser.succeed
+                        (continueItem cursor (ListBuilder builder))
+                        |= inlines
+                    )
+
+              else
+                Nothing
+            , if builder.previousLineEmpty then
+                Nothing
+
+              else
+                Just
+                    (Parser.succeed
+                        (Parser.Loop
+                            ( cursor
+                            , ListBuilder
+                                { builder | previousLineEmpty = True }
+                            )
+                        )
+                        |. Parser.token "\n"
+                    )
+            ]
+
+
+{-| A list Item started with a list icon.
+-}
+startItem cursor indent (ListBuilder builder) ( reset, decorations, token ) styledParagraphs =
+    let
+        newCursor =
+            cursor
+                |> advanceCursor indent
+                |> resetCursor reset
+
+        indexedDecorations =
+            decorate decorations newCursor
+    in
+    Parser.Loop
+        ( newCursor
+        , ListBuilder
+            { builder
+                | previousLineEmpty = False
+                , previousIndent = indent
+                , currentContent =
+                    Just
+                        { sections =
+                            [ styledParagraphs
+                            ]
+                        , icon =
+                            { token = token
+                            , decorations = indexedDecorations
+                            }
+                        }
+                , items =
+                    addCurrentContent (ListBuilder builder)
+            }
+        )
+
+
+continueItem cursor (ListBuilder builder) newContent =
+    Parser.Loop
+        ( cursor
+        , ListBuilder
+            { builder
+                | previousLineEmpty = False
+                , currentContent =
+                    case builder.currentContent of
+                        Nothing ->
+                            -- This should never happen
+                            Nothing
+
+                        Just content ->
+                            Just { content | sections = newContent :: content.sections }
+            }
+        )
+
+
+listIcon =
+    Parser.oneOf
+        [ Parser.succeed ( [], [], Arrow )
+            |. Parser.oneOf
                 [ Parser.token "->"
-                    |> Parser.map (always ( [], [], Arrow ))
-                , Parser.token "-"
-                    |> Parser.map (always ( [], [], Bullet ))
+                , Parser.token "-->"
+                ]
+            |. Parser.chompWhile (\c -> c == ' ')
+        , Parser.succeed identity
+            |. Parser.token "-"
+            |= Parser.oneOf
+                [ Parser.succeed ( [], [], Bullet )
+                    |. Parser.oneOf
+                        [ Parser.token " "
+                        , Parser.token "-"
+                        ]
+                    |. Parser.chompWhile (\c -> c == ' ' || c == '-')
                 , Parser.succeed
                     (\( reset, decorations ) ->
                         ( reset, decorations, Number )
                     )
                     |= Parser.loop ( [], [] ) listIndex
+                    |. Parser.token " "
+                    |. Parser.chompWhile (\c -> c == ' ')
                 ]
-            |. Parser.token " "
-            |= inlines
-        , Parser.end
-            |> Parser.map
-                (\_ ->
-                    Parser.Done
-                        (\styling model ->
-                            Element.column styling.list
-                                (List.foldl
-                                    (\fn els ->
-                                        fn styling model :: els
-                                    )
-                                    []
-                                    existing
-                                )
-                        )
-                )
-        , Parser.token "\n\n"
-            |> Parser.map
-                (\_ ->
-                    Parser.Done
-                        (\styling model ->
-                            Element.column styling.list
-                                (List.foldl
-                                    (\fn els ->
-                                        fn styling model :: els
-                                    )
-                                    []
-                                    existing
-                                )
-                        )
-                )
-        , Parser.token "\n"
-            |> Parser.map (always (Parser.Loop ( cursor, existing )))
         ]
+
+
+indentedInlines indent inlines alreadyFound =
+    case alreadyFound of
+        [] ->
+            Parser.succeed (\new -> Parser.Loop (new :: alreadyFound))
+                |= inlines
+
+        _ ->
+            Parser.oneOf
+                [ Parser.succeed (\new -> Parser.Loop (new :: alreadyFound))
+                    |. Parser.token (String.repeat (4 * (indent + 1)) " ")
+                    |= inlines
+                , Parser.succeed
+                    (Parser.Done (List.reverse alreadyFound))
+                ]
 
 
 listIndex ( cursorReset, decorations ) =
