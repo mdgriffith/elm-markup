@@ -202,10 +202,6 @@ inline inlines =
     Parser.loop emptyText (inlineLoop inlines)
 
 
-
--- type alias MinimumStyle
-
-
 inlineLoop :
     List
         (Inline model
