@@ -104,10 +104,14 @@ Blocks that come with the library are:
 - `title` - The title of your document.  This is equivalent to an `h1`.  You should only have one of them.
 - `header` - A header in your document, which is equivalent to `h2`.
 - `list` - A nested list with an expected indentation of 4 spaces per level. As far as icons:
-  - `-` indicates a bullet
-  - `->` indicates an arrow
-  - `x.` indicates means it will be auto-numbered.  Any punctuation can come after the `x`.  So, `x)` will format as `1)` and `x.` will format as `1.`
-  - `1.` will reset the auto numbering to that literal number.
+  - `-` indicates a bullet.  You can have any number of dashes.
+  - `->` or `-->` indicates an arrow
+  - Any alphabetic character after the dash is considered part of a formatting string for numbered items.
+    - `-x.` will be auto-numbered as and renderd `1.`, or `2.` or whatever number you're at.
+    - Any punctuation that comes after the alpha character will be maintained.  So, `x)` will format as `1)` and `x.` will format as `1.`
+    - Nested numbers can be rendered if they're in the right place.  So `-x.y)` would render as `1.2)`
+    - A literal number instead of an alpha will reset the auto numbering to that literal number.  So, `-9.` means start counting up from 9 from here on out.
+    - This can also applied in a nested manner as `-x.9`, which will reset the inner number.
 
 - `image` - Expects two strings, first the src, and then a description of the image.
 - `monospace` - Basically a code block without syntax highlighting.
