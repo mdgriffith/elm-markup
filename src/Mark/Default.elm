@@ -31,8 +31,7 @@ If you add custom `blocks` or `inlines`, you'll probably want to define a new `S
 type alias Styling msg =
     { link : List (Element.Attribute msg)
     , token : List (Element.Attribute msg)
-    , list : List (Element.Attribute msg)
-    , listSection : List (Element.Attribute msg)
+    , list : List Index -> List (Element.Attribute msg)
     , listIcons : List Index -> ListIcon -> Element msg
     , title : List (Element.Attribute msg)
     , header : List (Element.Attribute msg)
@@ -46,7 +45,7 @@ type alias Styling msg =
 styling : Styling msg
 styling =
     { root =
-        [ Element.spacing 24
+        [ Element.spacing 64
         , Element.width (Element.px 700)
         , Element.centerX
         , Element.padding 100
@@ -97,10 +96,8 @@ styling =
             , Font.sansSerif
             ]
         ]
-    , list = [ Element.spacing 64 ]
+    , list = listStyles
     , listIcons = listIcons
-    , listSection =
-        [ Element.spacing 16 ]
     , title =
         [ Font.size 48 ]
     , header =
@@ -138,12 +135,13 @@ blocks :
                 | title : List (Element.Attribute msg)
                 , header : List (Element.Attribute msg)
                 , link : List (Element.Attribute msg)
-                , list : List (Element.Attribute msg)
-                , listSection : List (Element.Attribute msg)
+                , list : List Index -> List (Element.Attribute msg)
+                , listIcons : List Index -> ListIcon -> Element msg
+
+                -- , listSection : List (Element.Attribute msg)
                 , root : List (Element.Attribute msg)
                 , monospace : List (Element.Attribute msg)
                 , block : List (Element.Attribute msg)
-                , listIcons : List Index -> ListIcon -> Element msg
                 , token : List (Element.Attribute msg)
             }
             msg
@@ -194,25 +192,31 @@ blocks =
 
 
 {-| -}
+listStyles : List Index -> List (Element.Attribute msg)
+listStyles cursor =
+    case List.length cursor of
+        0 ->
+            -- top level element
+            [ Element.spacing 64 ]
+
+        1 ->
+            [ Element.spacing 16 ]
+
+        2 ->
+            [ Element.spacing 16 ]
+
+        _ ->
+            [ Element.spacing 8 ]
+
+
+{-| -}
 listIcons : List Index -> ListIcon -> Element msg
 listIcons cursor symbol =
     let
         pad =
             Element.paddingEach
                 { edges
-                    | left =
-                        case List.length cursor of
-                            1 ->
-                                28
-
-                            2 ->
-                                56
-
-                            3 ->
-                                84
-
-                            _ ->
-                                84
+                    | left = 28
                     , right = 12
                 }
     in
@@ -308,26 +312,133 @@ indentLevel =
 
 Where the second variation can only occur if the indentation is larger than the previous one.
 
+A list item started with a list icon.
+
+    If indent stays the same
+    -> add to items at the current stack
+
+    if ident increases
+    -> create a new level in the stack
+
+    if ident decreases
+    -> close previous group
+    ->
+
+    <list>
+        <*item>
+            <txt> -> add to head sections
+            <txt> -> add to head sections
+            <item> -> add to head sections
+            <item> -> add to head sections
+                <txt> -> add to content
+                <txt> -> add to content
+                <item> -> add to content
+                <item> -> add to content
+            <item> -> add to content
+
+        <*item>
+        <*item>
+
+    Section
+        [ IconSection
+            { icon = *
+            , sections =
+                [ Text
+                , Text
+                , IconSection Text
+                , IconSection
+                    [ Text
+                    , Text
+                    , item
+                    , item
+                    ]
+                ]
+            }
+        , Icon -> Content
+        , Icon -> Content
+        ]
+
 -}
 type ListBuilder styling model msg
     = ListBuilder
         { previousIndent : Int
         , previousLineEmpty : Bool
-        , currentContent :
+        , levels :
+            -- (mostRecent :: remaining)
+            List (Level styling model msg)
+        }
+
+
+
+{-
+   1 Icon
+        1.1 Content
+        1.2 Icon
+        1.3 Icon
+           1.3.1 Icon
+
+        1.4
+
+    2 Icon
+
+
+
+    Steps =
+    []
+
+    [ Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.3, Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.3.1 ]
+    , Level [ Item 1.3, Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+
+    [ Level [ Item 1.4, Item 1.3([ Item 1.3.1 ]), Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 2., Item 1. (Level [ Item 1.4, Item 1.3([ Item 1.3.1 ]), Item 1.2, Item 1.1 ]) ]
+    ]
+
+
+-}
+
+
+type Level styling model msg
+    = Level (List (ListItem styling model msg))
+
+
+{-| -}
+type ListItem styling model msg
+    = ListItem
+        { icon :
             Maybe
-                { icon :
-                    { token : ListIcon
-                    , decorations :
-                        List
-                            { decoration : String
-                            , index : Int
-                            , show : Bool
-                            }
-                    }
-                , sections :
-                    List ({ styling | list : List (Element.Attribute msg) } -> model -> List (Element msg))
+                { token : ListIcon
+                , decorations :
+                    List
+                        { decoration : String
+                        , index : Int
+                        , show : Bool
+                        }
                 }
-        , items : List ({ styling | list : List (Element.Attribute msg) } -> model -> Element msg)
+        , content : styling -> model -> List (Element msg)
+        , children :
+            -- (mostRecent :: remaining)
+            List (ListItem styling model msg)
         }
 
 
@@ -336,8 +447,7 @@ emptyListBuilder =
     ListBuilder
         { previousIndent = 0
         , previousLineEmpty = False
-        , currentContent = Nothing
-        , items = []
+        , levels = []
         }
 
 
@@ -349,38 +459,141 @@ list inlines =
 
 finalizeList (ListBuilder builder) myStyling model =
     Element.column
-        myStyling.list
-        (ListBuilder builder
-            |> addCurrentContent
-            |> List.map (\fn -> fn myStyling model)
-            |> List.reverse
-        )
+        (myStyling.list [])
+        (renderLevels myStyling model builder.levels)
 
 
-renderParagraph myStyling model styledText =
+renderLevels myStyling model levels =
+    case levels of
+        [] ->
+            []
+
+        _ ->
+            case collapseLevel (List.length levels - 1) levels of
+                [] ->
+                    []
+
+                (Level top) :: ignore ->
+                    -- We just collapsed everything down to the top level.
+                    top
+                        |> List.reverse
+                        |> List.map (renderListItem myStyling model)
+
+
+renderListItem myStyling model (ListItem item) =
+    case item.icon of
+        Nothing ->
+            case item.children of
+                [] ->
+                    renderParagraph myStyling model item.content
+
+                _ ->
+                    Element.column (myStyling.list [])
+                        (renderParagraph myStyling model item.content
+                            :: (item.children
+                                    |> List.reverse
+                                    |> List.map (renderListItem myStyling model)
+                               )
+                        )
+
+        Just actualIcon ->
+            Element.row []
+                [ Element.el [ Element.alignTop ] <|
+                    myStyling.listIcons actualIcon.decorations actualIcon.token
+                , Element.textColumn (myStyling.list actualIcon.decorations)
+                    (renderParagraph myStyling model item.content
+                        :: (item.children
+                                |> List.reverse
+                                |> List.map (renderListItem myStyling model)
+                           )
+                    )
+                ]
+
+
+renderParagraph myStyling model content =
     Element.paragraph
         []
-        (styledText myStyling model)
+        (content myStyling model)
 
 
-addCurrentContent (ListBuilder builder) =
-    case builder.currentContent of
-        Nothing ->
-            builder.items
+{-| Parses a single line item (with multiple paragraps)
+| a newline if there wasn't one before
+| end of file
 
-        Just content ->
-            (\myStyling model ->
-                Element.row []
-                    [ Element.el [ Element.alignTop ] <|
-                        myStyling.listIcons content.icon.decorations content.icon.token
-                    , Element.textColumn myStyling.listSection
-                        (content.sections
-                            |> List.reverse
-                            |> List.map (renderParagraph myStyling model)
-                        )
-                    ]
-            )
-                :: builder.items
+    root [spacing 1]
+        [ -- spacing 2
+            [ first
+
+            With an additional space before it.
+
+            -> [inner item]
+
+            -> spacing 3:
+                [ other inner item
+                -> embedded item
+                -> embedded again
+                ]
+            ]
+        ]
+
+
+
+        [ -- spacing 2[second and some other content]
+
+        ]
+
+
+
+    So, to do this:
+
+        -> each line item needs to be grouped in its entirity.
+        -> More to recursion
+            -> listItem -> itemContent -> listItem
+            -> ensure we only recurse if we've made progress
+
+-}
+
+
+
+-- listItem :
+--     Parser
+--         ({ styling
+--             | list : List Index -> List (Element.Attribute msg)
+--             , listIcons : List Index -> ListIcon -> Element msg
+--          }
+--          -> model
+--          -> List (Element msg)
+--         )
+--     ->
+--         ( Cursor
+--         , ListBuilder
+-- { styling
+--     | list : List Index -> List (Element.Attribute msg)
+--     , listIcons : List Index -> ListIcon -> Element msg
+-- }
+-- model
+-- msg
+--         )
+--     ->
+--         Parser.Parser
+--             (Parser.Step
+--                 ( Cursor
+--                 , ListBuilder
+--                     { styling
+--                         | list : List Index -> List (Element.Attribute msg)
+--                         , listIcons : List Index -> ListIcon -> Element msg
+--                     }
+--                     model
+--                     msg
+--                 )
+-- ({ styling
+--     | list : List Index -> List (Element.Attribute msg)
+--     , listIcons : List Index -> ListIcon -> Element msg
+--  }
+--  -> model
+--  -> Element msg
+-- )
+--             )
 
 
 listItem inlines ( cursor, ListBuilder builder ) =
@@ -388,7 +601,10 @@ listItem inlines ( cursor, ListBuilder builder ) =
         [ Parser.succeed identity
             |= indentLevel
             |> Parser.andThen
-                (indentedListItem inlines cursor (ListBuilder builder))
+                (\indent ->
+                    Parser.map Parser.Loop
+                        (indentedListItem inlines cursor (ListBuilder builder) indent)
+                )
         , Parser.end
             |> Parser.map
                 (\_ ->
@@ -410,91 +626,271 @@ listItem inlines ( cursor, ListBuilder builder ) =
         ]
 
 
+
+-- indentedListItem :
+--     Parser
+--         (ListStyling styling msg
+--          -> model
+--          -> List (Element msg)
+--         )
+--     -> Cursor
+--     ->
+--         ListBuilder
+--             (ListStyling styling msg)
+--             model
+--             msg
+--     -> Int
+--     ->
+--         Parser.Parser
+--             (Parser.Step
+--                 ( Cursor
+--                 , ListBuilder
+--                     (ListStyling styling msg)
+--                     model
+--                     msg
+--                 )
+--                 (ListStyling styling msg
+--                  -> model
+--                  -> Element msg
+--                 )
+--             )
+
+
+{-| Parse a complete list item.
+
+    -> start of item
+
+    -> newline
+        -> if previousLineEmpty -> done
+
+We already know the indent.
+
+-}
 indentedListItem inlines cursor (ListBuilder builder) indent =
     Parser.oneOf <|
         List.filterMap identity
             [ Just
-                (Parser.succeed (startItem cursor indent (ListBuilder builder))
-                    |= listIcon
+                (Parser.succeed (addItem cursor indent (ListBuilder builder))
+                    |= Parser.map Just listIcon
                     |. Parser.chompWhile (\c -> c == ' ')
                     |= inlines
                 )
-            , if indent == builder.previousIndent + 1 && builder.currentContent /= Nothing then
-                Just
-                    (Parser.succeed
-                        (continueItem cursor (ListBuilder builder))
-                        |= inlines
-                    )
-
-              else
-                Nothing
+            , Just
+                (Parser.succeed (addItem cursor indent (ListBuilder builder) Nothing)
+                    |= inlines
+                )
             , if builder.previousLineEmpty then
                 Nothing
 
               else
                 Just
                     (Parser.succeed
-                        (Parser.Loop
-                            ( cursor
-                            , ListBuilder
-                                { builder | previousLineEmpty = True }
-                            )
+                        ( cursor
+                        , ListBuilder
+                            { builder | previousLineEmpty = True }
                         )
                         |. Parser.token "\n"
                     )
             ]
 
 
-{-| A list Item started with a list icon.
+{-| A list item started with a list icon.
+
+If indent stays the same
+-> add to items at the current stack
+
+if ident increases
+-> create a new level in the stack
+
+if ident decreases
+-> close previous group
+->
+
+    1 Icon
+        1.1 Content
+        1.2 Icon
+        1.3 Icon
+           1.3.1 Icon
+
+        1.4
+
+    2 Icon
+
+    Steps =
+    []
+
+    [ Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.3, Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.3.1 ]
+    , Level [ Item 1.3, Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+
+    [ Level [ Item 1.4, Item 1.3([ Item 1.3.1 ]), Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 2., Item 1. (Level [ Item 1.4, Item 1.3([ Item 1.3.1 ]), Item 1.2, Item 1.1 ]) ]
+    ]
+
 -}
-startItem cursor indent (ListBuilder builder) ( reset, decorations, token ) styledParagraphs =
+addItem cursor indent (ListBuilder builder) maybeIcon styledParagraphs =
     let
         newCursor =
-            cursor
-                |> advanceCursor indent
-                |> resetCursor reset
+            case maybeIcon of
+                Just ( reset, decorations, token ) ->
+                    cursor
+                        |> advanceCursor indent
+                        |> resetCursor reset
 
-        indexedDecorations =
-            decorate decorations newCursor
-    in
-    Parser.Loop
-        ( newCursor
-        , ListBuilder
-            { builder
-                | previousLineEmpty = False
-                , previousIndent = indent
-                , currentContent =
-                    Just
-                        { sections =
-                            [ styledParagraphs
-                            ]
-                        , icon =
-                            { token = token
-                            , decorations = indexedDecorations
-                            }
-                        }
-                , items =
-                    addCurrentContent (ListBuilder builder)
-            }
-        )
+                Nothing ->
+                    cursor
 
-
-continueItem cursor (ListBuilder builder) newContent =
-    Parser.Loop
-        ( cursor
-        , ListBuilder
-            { builder
-                | previousLineEmpty = False
-                , currentContent =
-                    case builder.currentContent of
+        newItem =
+            ListItem
+                { children = []
+                , content = styledParagraphs
+                , icon =
+                    case maybeIcon of
                         Nothing ->
-                            -- This should never happen
                             Nothing
 
-                        Just content ->
-                            Just { content | sections = newContent :: content.sections }
-            }
-        )
+                        Just ( reset, decorations, token ) ->
+                            Just
+                                { token = token
+                                , decorations = decorate decorations newCursor
+                                }
+                }
+
+        deltaLevel =
+            indent - List.length builder.levels
+
+        addToLevel brandNewItem levels =
+            case levels of
+                [] ->
+                    [ Level
+                        [ brandNewItem ]
+                    ]
+
+                (Level lvl) :: remaining ->
+                    Level (newItem :: lvl)
+                        :: remaining
+    in
+    case builder.levels of
+        [] ->
+            ( newCursor
+            , ListBuilder
+                { previousLineEmpty = False
+                , previousIndent = indent
+                , levels =
+                    [ Level
+                        [ newItem ]
+                    ]
+                }
+            )
+
+        (Level lvl) :: remaining ->
+            if deltaLevel == 0 then
+                -- add to current level
+                ( newCursor
+                , ListBuilder
+                    { previousLineEmpty = False
+                    , previousIndent = indent
+                    , levels =
+                        Level (newItem :: lvl)
+                            :: remaining
+                    }
+                )
+
+            else if deltaLevel > 0 then
+                -- add new level
+                ( newCursor
+                , ListBuilder
+                    { previousLineEmpty = False
+                    , previousIndent = indent
+                    , levels =
+                        Level [ newItem ]
+                            :: Level lvl
+                            :: remaining
+                    }
+                )
+
+            else
+                -- We've dedent, so we need to first collapse the current level into the one below.
+                -- Then add an item to that level
+                ( newCursor
+                , ListBuilder
+                    { previousLineEmpty = False
+                    , previousIndent = indent
+                    , levels =
+                        collapseLevel (abs deltaLevel) builder.levels
+                            |> addToLevel newItem
+                    }
+                )
+
+
+{-|
+
+    1.
+        1.1
+    2.
+
+
+    Steps =
+    []
+
+    [ Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    -- collapse into lower level
+    [ Level [ Item 1. [ Item 1.1 ] ]
+    ]
+
+    -- add new item
+    [ Level [ Item 2, Item 1. [ Item 1.1 ] ]
+    ]
+
+-}
+collapseLevel num levels =
+    if num == 0 then
+        levels
+
+    else
+        case levels of
+            [] ->
+                levels
+
+            (Level topLevel) :: (Level ((ListItem lowerItem) :: lower)) :: remaining ->
+                collapseLevel (num - 1) <|
+                    Level
+                        (ListItem
+                            { lowerItem
+                                | children = topLevel ++ lowerItem.children
+                            }
+                            :: lower
+                        )
+                        :: remaining
+
+            _ ->
+                levels
 
 
 listIcon =
