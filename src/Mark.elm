@@ -38,8 +38,7 @@ parseWith :
         { a
             | link : List (Element.Attribute msg)
             , token : List (Element.Attribute msg)
-            , list : List (Element.Attribute msg)
-            , listSection : List (Element.Attribute msg)
+            , list : List Mark.Default.Index -> List (Element.Attribute msg)
             , root : List (Element.Attribute msg)
             , block : List (Element.Attribute msg)
         }

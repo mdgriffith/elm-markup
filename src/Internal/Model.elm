@@ -27,7 +27,15 @@ type alias Options model styling msg =
 {-| -}
 type Block model style msg
     = Block String (Parser (style -> model -> Element msg))
-    | Parse String (Parser (style -> model -> List (Element msg)) -> Parser (style -> model -> Element msg))
+    | Parse
+        String
+        (Parser
+            (style
+             -> model
+             -> List (Element msg)
+            )
+         -> Parser (style -> model -> Element msg)
+        )
 
 
 {-| -}
@@ -254,14 +262,14 @@ inlineLoop inlines existing =
                         (fn txt)
                     |> Parser.Loop
             )
-            |. Parser.token "{"
+            |. Parser.token "<"
             |. Parser.chompWhile (\c -> c == ' ')
             |= Parser.oneOf
                 (List.map inlineToParser inlines)
             |. Parser.chompWhile (\c -> c == ' ')
             |. Parser.token "|"
-            |= typographyText styles [ '}' ]
-            |. Parser.token "}"
+            |= typographyText styles [ '>' ]
+            |. Parser.token ">"
 
         -- Code/Token inline
         , Parser.succeed
@@ -437,7 +445,7 @@ typography existing styles =
         |= Parser.getChompedString
             (Parser.chompIf (always True))
 
-    -- Non breaking space
+    -- <> as nonbreaking space
     , Parser.succeed
         (\_ ->
             existing
@@ -446,15 +454,6 @@ typography existing styles =
         )
         |. Parser.token "<>"
         |= Parser.chompWhile (\c -> c == '<' || c == ' ' || c == '>')
-
-    -- capture the opening character if it wasn't chomped previously
-    , Parser.token "<"
-        |> Parser.map
-            (\_ ->
-                existing
-                    |> addText "<"
-                    |> Parser.Loop
-            )
 
     -- replace ellipses
     , Parser.succeed
@@ -556,7 +555,7 @@ stylingChars =
     , '*'
     , '['
     , '\n'
-    , '{'
+    , '<'
     , '`'
     ]
 
