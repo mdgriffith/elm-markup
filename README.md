@@ -70,7 +70,7 @@ There is only a very limited set of characters for formatting text.
 
 You can also define custom inline elements using:
 
-- `{mycustominline| some text I can style as I please }`
+- `<mycustominline| some text I can style as I please >`
 
 
 ## Blocks
