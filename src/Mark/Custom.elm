@@ -36,7 +36,7 @@ module Mark.Custom exposing
 
 import Element exposing (Element)
 import Internal.Model as Internal
-import Parser exposing ((|.), (|=), Parser)
+import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| -}
@@ -194,7 +194,7 @@ string =
     Param
         (Parser.succeed identity
             |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
-            |. Parser.token "\""
+            |. Parser.token (Parser.Token "\"" Internal.DoubleQuote)
             |= quotedString
         )
 
@@ -208,10 +208,10 @@ quotedString =
                     (\new ->
                         Parser.Loop (found ++ new)
                     )
-                    |. Parser.token "\\"
+                    |. Parser.token (Parser.Token "\\" Internal.Escape)
                     |= Parser.getChompedString
-                        (Parser.chompIf (always True))
-                , Parser.map (\_ -> Parser.Done found) (Parser.token "\"")
+                        (Parser.chompIf (always True) Internal.EscapedChar)
+                , Parser.map (\_ -> Parser.Done found) (Parser.token (Parser.Token "\"" Internal.DoubleQuote))
                 , Parser.getChompedString
                     (Parser.chompWhile
                         (\c ->
@@ -235,7 +235,7 @@ oneOf : List ( String, value ) -> Param value
 oneOf opts =
     let
         parseOption ( name, val ) =
-            Parser.keyword name
+            Parser.keyword (Parser.Token name (Internal.Expecting name))
                 |> Parser.map (always val)
     in
     Param
@@ -247,7 +247,7 @@ oneOf opts =
 {-| A parameter to use with `block1` or `block2`.
 -}
 type Param arg
-    = Param (Parser arg)
+    = Param (Parser Internal.Context Internal.Problem arg)
 
 
 {-| -}
@@ -255,8 +255,8 @@ int : Param Int
 int =
     Param
         (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ')
-            |= Parser.int
+            |. Parser.chompIf (\c -> c == ' ') Internal.Space
+            |= Parser.int Internal.Integer Internal.InvalidNumber
         )
 
 
@@ -265,8 +265,8 @@ float : Param Float
 float =
     Param
         (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ')
-            |= Parser.float
+            |. Parser.chompIf (\c -> c == ' ') Internal.Space
+            |= Parser.float Internal.FloatingPoint Internal.InvalidNumber
         )
 
 
@@ -275,11 +275,11 @@ bool : Param Bool
 bool =
     Param
         (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ')
+            |. Parser.chompIf (\c -> c == ' ') Internal.Space
             |= Parser.oneOf
-                [ Parser.token "True"
+                [ Parser.token (Parser.Token "True" (Internal.Expecting "True"))
                     |> Parser.map (always True)
-                , Parser.token "False"
+                , Parser.token (Parser.Token "False" (Internal.Expecting "False"))
                     |> Parser.map (always False)
                 ]
         )
@@ -323,10 +323,10 @@ paragraph name renderer =
                 (\almostElements style model ->
                     renderer (almostElements style model) style model
                 )
-                |. Parser.token "\n"
-                |. Parser.token "    "
+                |. Parser.token (Parser.Token "\n" Internal.Newline)
+                |. Parser.token (Parser.Token "    " Internal.ExpectedIndent)
                 |= inlineParser
-                |. Parser.token "\n"
+                |. Parser.token (Parser.Token "\n" Internal.Newline)
         )
 
 
@@ -365,12 +365,12 @@ section name renderer =
                 (\almostElements style model ->
                     renderer (almostElements style model) style model
                 )
-                |. Parser.token "\n"
-                |. Parser.token "    "
+                |. Parser.token (Parser.Token "\n" Internal.Newline)
+                |. Parser.token (Parser.Token "    " Internal.ExpectedIndent)
                 |= Parser.loop []
                     (\els ->
                         Parser.oneOf
-                            [ Parser.end
+                            [ Parser.end Internal.End
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Done
@@ -383,7 +383,7 @@ section name renderer =
                                                     els
                                             )
                                     )
-                            , Parser.token "\n\n"
+                            , Parser.token (Parser.Token "\n\n" (Internal.Expecting "\n\n"))
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Done
@@ -396,7 +396,7 @@ section name renderer =
                                                     els
                                             )
                                     )
-                            , Parser.token "\n    "
+                            , Parser.token (Parser.Token "\n    " Internal.ExpectedIndent)
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Loop els
@@ -439,25 +439,25 @@ indented name renderer =
                 |= Parser.loop ""
                     (\txt ->
                         Parser.oneOf
-                            [ Parser.end
+                            [ Parser.end Internal.End
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Done txt
                                     )
-                            , Parser.token "\n\n"
+                            , Parser.token (Parser.Token "\n\n" Internal.DoubleNewline)
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Done txt
                                     )
                             , if txt == "" then
-                                Parser.token "    "
+                                Parser.token (Parser.Token "    " Internal.ExpectedIndent)
                                     |> Parser.map
                                         (\_ ->
                                             Parser.Loop txt
                                         )
 
                               else
-                                Parser.token "\n    "
+                                Parser.token (Parser.Token "\n    " Internal.ExpectedIndent)
                                     |> Parser.map
                                         (\_ ->
                                             Parser.Loop (txt ++ "\n")
@@ -514,7 +514,7 @@ It parses bananas and then says `bananas`. If you wanted to do exactly this in r
 -}
 parser :
     String
-    -> (Parser (style -> model -> List (Element msg)) -> Parser (style -> model -> Element msg))
+    -> (Parser Internal.Context Internal.Problem (style -> model -> List (Element msg)) -> Parser Internal.Context Internal.Problem (style -> model -> Element msg))
     -> Block model style msg
 parser name actualParser =
     Internal.Parse name

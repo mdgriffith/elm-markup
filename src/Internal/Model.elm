@@ -1,7 +1,9 @@
 module Internal.Model exposing
     ( Block(..)
+    , Context(..)
     , Inline(..)
     , Options
+    , Problem(..)
     , markup
     )
 
@@ -13,7 +15,38 @@ import Element.Border as Border
 import Element.Font as Font
 import Element.Region
 import Internal.Flag as Flag
-import Parser exposing ((|.), (|=), Parser)
+import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+
+
+type Context
+    = InBlock
+    | InInline
+
+
+type Problem
+    = UnknownBlock
+    | UnknownInline
+    | EmptyBlock
+    | ExpectedIndent
+    | InlineStart
+    | InlineBar
+    | InlineEnd
+    | Expecting String
+    | Escape
+    | EscapedChar
+    | ExpectedNonBreaking
+    | Dash
+    | DoubleQuote
+    | Apostrophe
+    | StyleChange InlineStyle
+    | Newline
+    | DoubleNewline
+    | Space
+    | End
+    | Integer
+    | FloatingPoint
+    | InvalidNumber
+    | ExpectingAlphaNumeric
 
 
 {-| -}
@@ -26,15 +59,16 @@ type alias Options model styling msg =
 
 {-| -}
 type Block model style msg
-    = Block String (Parser (style -> model -> Element msg))
+    = Block String (Parser Context Problem (style -> model -> Element msg))
     | Parse
         String
-        (Parser
+        (Parser Context
+            Problem
             (style
              -> model
              -> List (Element msg)
             )
-         -> Parser (style -> model -> Element msg)
+         -> Parser Context Problem (style -> model -> Element msg)
         )
 
 
@@ -54,7 +88,8 @@ markup :
         }
         msg
     ->
-        Parser
+        Parser Context
+            Problem
             (model
              -> Element msg
             )
@@ -85,12 +120,12 @@ blocks options existing =
                 )
     in
     Parser.oneOf
-        [ Parser.end
+        [ Parser.end End
             |> Parser.map
                 (\_ ->
                     done ()
                 )
-        , Parser.token "\n"
+        , Parser.token (Parser.Token "\n" Newline)
             |> Parser.map
                 (\_ ->
                     Parser.Loop
@@ -99,8 +134,8 @@ blocks options existing =
 
         -- custom blocks
         , Parser.succeed identity
-            |. Parser.token "|"
-            |. Parser.chompIf (\c -> c == ' ')
+            |. Parser.token (Parser.Token "|" (Expecting "|"))
+            |. Parser.chompIf (\c -> c == ' ') Space
             |= Parser.oneOf
                 (List.map
                     (blockToParser options.inlines)
@@ -136,7 +171,7 @@ blocks options existing =
 inlineToParser blockable =
     case blockable of
         Inline name fn ->
-            Parser.keyword name
+            Parser.keyword (Parser.Token name (Expecting name))
                 |> Parser.map
                     (always fn)
 
@@ -144,17 +179,17 @@ inlineToParser blockable =
 blockToParser inlines blockable =
     case blockable of
         Block name arguments ->
-            Parser.keyword name
+            Parser.keyword (Parser.Token name (Expecting name))
                 |> Parser.map
                     (\_ ->
                         Parser.succeed identity
                             |= arguments
-                            |. Parser.token "\n"
-                            |. Parser.token "\n"
+                            |. Parser.token (Parser.Token "\n" Newline)
+                            |. Parser.token (Parser.Token "\n" Newline)
                     )
 
         Parse name parser ->
-            Parser.keyword name
+            Parser.keyword (Parser.Token name (Expecting name))
                 |> Parser.map
                     (\_ ->
                         parser (inline inlines)
@@ -198,7 +233,8 @@ inline :
             msg
         )
     ->
-        Parser
+        Parser Context
+            Problem
             ({ a
                 | link : List (Element.Attribute msg)
                 , token : List (Element.Attribute msg)
@@ -228,7 +264,8 @@ inlineLoop :
             model
             msg
     ->
-        Parser
+        Parser Context
+            Problem
             (Parser.Step
                 (Text
                     { a
@@ -262,14 +299,15 @@ inlineLoop inlines existing =
                         (fn txt)
                     |> Parser.Loop
             )
-            |. Parser.token "<"
+            |. Parser.token
+                (Parser.Token "<" InlineStart)
             |. Parser.chompWhile (\c -> c == ' ')
             |= Parser.oneOf
                 (List.map inlineToParser inlines)
             |. Parser.chompWhile (\c -> c == ' ')
-            |. Parser.token "|"
+            |. Parser.token (Parser.Token "|" InlineBar)
             |= typographyText styles [ '>' ]
-            |. Parser.token ">"
+            |. Parser.token (Parser.Token ">" InlineEnd)
 
         -- Code/Token inline
         , Parser.succeed
@@ -287,10 +325,10 @@ inlineLoop inlines existing =
                             |> Parser.Loop
             )
             -- consume at least one grave accent
-            |. Parser.token "`"
+            |. Parser.token (Parser.Token "`" (Expecting "`"))
             |= Parser.getChompedString
                 (Parser.chompWhile (\c -> c /= '`'))
-            |. Parser.token "`"
+            |. Parser.token (Parser.Token "`" (Expecting "`"))
 
         -- Link
         , Parser.succeed
@@ -309,28 +347,28 @@ inlineLoop inlines existing =
                         )
                     |> Parser.Loop
             )
-            |. Parser.token "["
+            |. Parser.token (Parser.Token "[" (Expecting "["))
             |= Parser.getChompedString
                 (Parser.chompWhile (\c -> c == '`'))
             |= typographyText styles [ ']', '`' ]
             |. Parser.chompWhile (\c -> c == '`')
-            |. Parser.token "]"
-            |. Parser.token "("
+            |. Parser.token (Parser.Token "]" (Expecting "]"))
+            |. Parser.token (Parser.Token "(" (Expecting "("))
             |= Parser.getChompedString
                 (Parser.chompWhile (\c -> c /= ')' && c /= '\n' && c /= ' '))
-            |. Parser.token ")"
+            |. Parser.token (Parser.Token ")" (Expecting ")"))
 
         -- Capture styling
         , Parser.succeed
             (Parser.Loop << changeStyle existing)
             |= Parser.oneOf
-                [ Parser.map (always Italic) (Parser.token "/")
-                , Parser.map (always Strike) (Parser.token "~")
-                , Parser.map (always Bold) (Parser.token "*")
+                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (StyleChange Italic)))
+                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (StyleChange Strike)))
+                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (StyleChange Bold)))
                 ]
 
         -- end on newline
-        , Parser.token "\n"
+        , Parser.token (Parser.Token "\n" Newline)
             |> Parser.map
                 (\_ ->
                     finalize existing
@@ -410,7 +448,11 @@ typographyText styles until =
                 , Parser.oneOf
                     (List.map
                         (\c ->
-                            Parser.token (String.fromChar c)
+                            let
+                                str =
+                                    String.fromChar c
+                            in
+                            Parser.token (Parser.Token str (Expecting str))
                                 |> Parser.map (always (done found))
                         )
                         until
@@ -441,9 +483,10 @@ typography existing styles =
                 |> addText escaped
                 |> Parser.Loop
         )
-        |. Parser.token "\\"
+        |. Parser.token
+            (Parser.Token "\\" Escape)
         |= Parser.getChompedString
-            (Parser.chompIf (always True))
+            (Parser.chompIf (always True) EscapedChar)
 
     -- <> as nonbreaking space
     , Parser.succeed
@@ -452,7 +495,8 @@ typography existing styles =
                 |> addText "\u{00A0}"
                 |> Parser.Loop
         )
-        |. Parser.token "<>"
+        |. Parser.token
+            (Parser.Token "<>" ExpectedNonBreaking)
         |= Parser.chompWhile (\c -> c == '<' || c == ' ' || c == '>')
 
     -- replace ellipses
@@ -473,7 +517,8 @@ typography existing styles =
                     |> Parser.Loop
         )
         -- consume at least one dot
-        |. Parser.token "."
+        |. Parser.token
+            (Parser.Token "." (Expecting "."))
         |= Parser.getChompedString
             (Parser.chompWhile (\c -> c == '.'))
 
@@ -501,12 +546,13 @@ typography existing styles =
                     |> Parser.Loop
         )
         -- consume at least one dash
-        |. Parser.token "-"
+        |. Parser.token
+            (Parser.Token "-" Dash)
         |= Parser.getChompedString
             (Parser.chompWhile (\c -> c == '-'))
 
     -- Auto curly quotes
-    , Parser.token "\""
+    , Parser.token (Parser.Token "\"" DoubleQuote)
         |> Parser.map
             (\_ ->
                 if Flag.present Flag.token styles then
@@ -528,7 +574,7 @@ typography existing styles =
             )
 
     -- replace appostrophe
-    , Parser.token "'"
+    , Parser.token (Parser.Token "'" Apostrophe)
         |> Parser.map
             (\_ ->
                 existing

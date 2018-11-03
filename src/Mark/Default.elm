@@ -2,6 +2,7 @@ module Mark.Default exposing
     ( blocks
     , Styling, styling
     , ListIcon(..), Index, listIcon
+    , listIcons, listStyles
     )
 
 {-|
@@ -20,7 +21,7 @@ import Element.Region
 import Html.Attributes
 import Internal.Model as Internal
 import Mark.Custom as Custom
-import Parser exposing ((|.), (|=), Parser)
+import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| Styling options for the default blocks.
@@ -295,14 +296,14 @@ type CursorReset
 
 
 {-| -}
-indentLevel : Parser Int
+indentLevel : Parser Internal.Context Internal.Problem Int
 indentLevel =
     Parser.oneOf
-        [ Parser.token (String.repeat 12 " ")
+        [ Parser.token (Parser.Token (String.repeat 12 " ") Internal.ExpectedIndent)
             |> Parser.map (always 3)
-        , Parser.token (String.repeat 8 " ")
+        , Parser.token (Parser.Token (String.repeat 8 " ") Internal.ExpectedIndent)
             |> Parser.map (always 2)
-        , Parser.token (String.repeat 4 " ")
+        , Parser.token (Parser.Token (String.repeat 4 " ") Internal.ExpectedIndent)
             |> Parser.map (always 1)
         ]
 
@@ -605,20 +606,20 @@ listItem inlines ( cursor, ListBuilder builder ) =
                     Parser.map Parser.Loop
                         (indentedListItem inlines cursor (ListBuilder builder) indent)
                 )
-        , Parser.end
+        , Parser.end Internal.End
             |> Parser.map
                 (\_ ->
                     Parser.Done (finalizeList (ListBuilder builder))
                 )
         , if builder.previousLineEmpty then
-            Parser.token "\n"
+            Parser.token (Parser.Token "\n" Internal.Newline)
                 |> Parser.map
                     (\_ ->
                         Parser.Done (finalizeList (ListBuilder builder))
                     )
 
           else
-            Parser.token "\n"
+            Parser.token (Parser.Token "\n" Internal.Newline)
                 |> Parser.map
                     (always
                         (Parser.Loop ( cursor, ListBuilder { builder | previousLineEmpty = True } ))
@@ -689,7 +690,7 @@ indentedListItem inlines cursor (ListBuilder builder) indent =
                         , ListBuilder
                             { builder | previousLineEmpty = True }
                         )
-                        |. Parser.token "\n"
+                        |. Parser.token (Parser.Token "\n" Internal.Newline)
                     )
             ]
 
@@ -897,17 +898,17 @@ listIcon =
     Parser.oneOf
         [ Parser.succeed ( [], [], Arrow )
             |. Parser.oneOf
-                [ Parser.token "->"
-                , Parser.token "-->"
+                [ Parser.token (Parser.Token "->" (Internal.Expecting "->"))
+                , Parser.token (Parser.Token "-->" (Internal.Expecting "-->"))
                 ]
             |. Parser.chompWhile (\c -> c == ' ')
         , Parser.succeed identity
-            |. Parser.token "-"
+            |. Parser.token (Parser.Token "-" Internal.Dash)
             |= Parser.oneOf
                 [ Parser.succeed ( [], [], Bullet )
                     |. Parser.oneOf
-                        [ Parser.token " "
-                        , Parser.token "-"
+                        [ Parser.token (Parser.Token " " Internal.Space)
+                        , Parser.token (Parser.Token "-" Internal.Dash)
                         ]
                     |. Parser.chompWhile (\c -> c == ' ' || c == '-')
                 , Parser.succeed
@@ -915,7 +916,7 @@ listIcon =
                         ( reset, decorations, Number )
                     )
                     |= Parser.loop ( [], [] ) listIndex
-                    |. Parser.token " "
+                    |. Parser.token (Parser.Token " " Internal.Space)
                     |. Parser.chompWhile (\c -> c == ' ')
                 ]
         ]
@@ -930,7 +931,7 @@ indentedInlines indent inlines alreadyFound =
         _ ->
             Parser.oneOf
                 [ Parser.succeed (\new -> Parser.Loop (new :: alreadyFound))
-                    |. Parser.token (String.repeat (4 * (indent + 1)) " ")
+                    |. Parser.token (Parser.Token (String.repeat (4 * (indent + 1)) " ") Internal.ExpectedIndent)
                     |= inlines
                 , Parser.succeed
                     (Parser.Done (List.reverse alreadyFound))
@@ -959,10 +960,10 @@ listIndex ( cursorReset, decorations ) =
                             _ ->
                                 Nothing
                     )
-                    |= Parser.getChompedString (Parser.chompIf Char.isDigit)
+                    |= Parser.getChompedString (Parser.chompIf Char.isDigit Internal.Integer)
                     |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
                 , Parser.succeed Nothing
-                    |. Parser.chompIf Char.isAlpha
+                    |. Parser.chompIf Char.isAlpha Internal.ExpectingAlphaNumeric
                     |. Parser.chompWhile Char.isAlpha
                 ]
             |= Parser.getChompedString

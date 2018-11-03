@@ -22,11 +22,19 @@ import Html.Attributes
 import Internal.Model as Internal
 import Mark.Custom as Custom
 import Mark.Default
-import Parser exposing ((|.), (|=), Parser)
+import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+
+
+type alias Context =
+    Internal.Context
+
+
+type alias Problem =
+    Internal.Problem
 
 
 {-| -}
-parse : String -> Result (List Parser.DeadEnd) (Element msg)
+parse : String -> Result (List (Parser.DeadEnd Context Problem)) (Element msg)
 parse source =
     parseWith default source
         |> Result.map (\x -> x ())
@@ -44,7 +52,7 @@ parseWith :
         }
         msg
     -> String
-    -> Result (List Parser.DeadEnd) (model -> Element msg)
+    -> Result (List (Parser.DeadEnd Context Problem)) (model -> Element msg)
 parseWith options source =
     Parser.run (Internal.markup options) source
 
