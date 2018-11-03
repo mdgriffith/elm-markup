@@ -19,8 +19,8 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 type Context
-    = InBlock
-    | InInline
+    = InBlock String
+    | InInline String
 
 
 type Problem
@@ -104,6 +104,14 @@ markup options =
         )
 
 
+{-| Currently:
+
+    end -> done
+    newline -> skip
+    block (| block) -> parse block
+    inlines -> inlines
+
+-}
 blocks options existing =
     let
         done _ =
@@ -172,6 +180,7 @@ inlineToParser blockable =
     case blockable of
         Inline name fn ->
             Parser.keyword (Parser.Token name (Expecting name))
+                |> Parser.inContext (InInline name)
                 |> Parser.map
                     (always fn)
 
@@ -180,6 +189,7 @@ blockToParser inlines blockable =
     case blockable of
         Block name arguments ->
             Parser.keyword (Parser.Token name (Expecting name))
+                |> Parser.inContext (InBlock name)
                 |> Parser.map
                     (\_ ->
                         Parser.succeed identity
@@ -190,6 +200,7 @@ blockToParser inlines blockable =
 
         Parse name parser ->
             Parser.keyword (Parser.Token name (Expecting name))
+                |> Parser.inContext (InBlock name)
                 |> Parser.map
                     (\_ ->
                         parser (inline inlines)

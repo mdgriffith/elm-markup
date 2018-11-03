@@ -138,8 +138,6 @@ blocks :
                 , link : List (Element.Attribute msg)
                 , list : List Index -> List (Element.Attribute msg)
                 , listIcons : List Index -> ListIcon -> Element msg
-
-                -- , listSection : List (Element.Attribute msg)
                 , root : List (Element.Attribute msg)
                 , monospace : List (Element.Attribute msg)
                 , block : List (Element.Attribute msg)
