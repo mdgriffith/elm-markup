@@ -42,15 +42,7 @@ parse source =
 
 {-| -}
 parseWith :
-    Options model
-        { a
-            | link : List (Element.Attribute msg)
-            , token : List (Element.Attribute msg)
-            , list : List Mark.Default.Index -> List (Element.Attribute msg)
-            , root : List (Element.Attribute msg)
-            , block : List (Element.Attribute msg)
-        }
-        msg
+    Options model msg
     -> String
     -> Result (List (Parser.DeadEnd Context Problem)) (model -> Element msg)
 parseWith options source =
@@ -58,20 +50,17 @@ parseWith options source =
 
 
 {-| -}
-type alias Options model styling msg =
-    { styling : model -> styling
-    , blocks : List (Custom.Block model styling msg)
-    , inlines : List (Custom.Inline model styling msg)
+type alias Options model msg =
+    { blocks : List (Custom.Block model msg)
+    , inlines : List (Custom.Inline model msg)
     }
 
 
 {-| A default set of block and inline elements as well as some `defaultStyling` to style them.
 -}
-default : Options model (Mark.Default.Styling msg) msg
+default : Options model msg
 default =
-    { styling =
-        always Mark.Default.styling
-    , blocks =
+    { blocks =
         Mark.Default.blocks
     , inlines =
         []

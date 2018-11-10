@@ -1,6 +1,5 @@
 module Mark.Default exposing
     ( blocks
-    , Styling, styling
     , ListIcon(..), Index, listIcon
     , listIcons, listStyles
     )
@@ -8,7 +7,6 @@ module Mark.Default exposing
 {-|
 
 @docs blocks
-@docs Styling, styling
 @docs ListIcon, Index, listIcon
 
 -}
@@ -22,96 +20,6 @@ import Html.Attributes
 import Internal.Model as Internal
 import Mark.Custom as Custom
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
-
-
-{-| Styling options for the default blocks.
-
-If you add custom `blocks` or `inlines`, you'll probably want to define a new `Styling` type.
-
--}
-type alias Styling msg =
-    { link : List (Element.Attribute msg)
-    , token : List (Element.Attribute msg)
-    , list : List Index -> List (Element.Attribute msg)
-    , listIcons : List Index -> ListIcon -> Element msg
-    , title : List (Element.Attribute msg)
-    , header : List (Element.Attribute msg)
-    , monospace : List (Element.Attribute msg)
-    , root : List (Element.Attribute msg)
-    , block : List (Element.Attribute msg)
-    }
-
-
-{-| -}
-styling : Styling msg
-styling =
-    { root =
-        [ Element.spacing 64
-        , Element.width (Element.px 700)
-        , Element.centerX
-        , Element.padding 100
-        ]
-    , block = []
-    , monospace =
-        [ Element.spacing 5
-        , Element.padding 24
-        , Background.color
-            (Element.rgba 0 0 0 0.04)
-        , Border.rounded 2
-        , Font.size 16
-        , Font.family
-            [ Font.external
-                { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
-                , name = "Source Code Pro"
-                }
-            , Font.sansSerif
-            ]
-        ]
-    , link =
-        [ Font.color
-            (Element.rgb
-                (17 / 255)
-                (132 / 255)
-                (206 / 255)
-            )
-        , Element.mouseOver
-            [ Font.color
-                (Element.rgb
-                    (234 / 255)
-                    (21 / 255)
-                    (122 / 255)
-                )
-            ]
-        ]
-    , token =
-        [ Background.color
-            (Element.rgba 0 0 0 0.04)
-        , Border.rounded 2
-        , Element.paddingXY 5 3
-        , Font.size 16
-        , Font.family
-            [ Font.external
-                { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
-                , name = "Source Code Pro"
-                }
-            , Font.sansSerif
-            ]
-        ]
-    , list = listStyles
-    , listIcons = listIcons
-    , title =
-        [ Font.size 48 ]
-    , header =
-        [ Font.size 36 ]
-    }
-
-
-edges =
-    { top = 0
-    , left = 0
-    , right = 0
-    , bottom = 0
-    }
 
 
 {-| A set of common default blocks.
@@ -129,50 +37,38 @@ edges =
 **Note** none of these are special, they're all defined in terms of `Mark.Custom`.
 
 -}
-blocks :
-    List
-        (Internal.Block model
-            { a
-                | title : List (Element.Attribute msg)
-                , header : List (Element.Attribute msg)
-                , link : List (Element.Attribute msg)
-                , list : List Index -> List (Element.Attribute msg)
-                , listIcons : List Index -> ListIcon -> Element msg
-                , root : List (Element.Attribute msg)
-                , monospace : List (Element.Attribute msg)
-                , block : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-            }
-            msg
-        )
+blocks : List (Internal.Block model msg)
 blocks =
     [ Custom.paragraph "title"
-        (\elements myStyling model ->
+        (\elements model ->
             Element.paragraph
-                (Element.Region.heading 1
-                    :: myStyling.title
-                )
+                [ Element.Region.heading 1
+
+                -- :: myStyling.title
+                ]
                 elements
         )
     , Custom.paragraph "header"
-        (\elements myStyling model ->
+        (\elements model ->
             Element.paragraph
-                (Element.Region.heading 2
-                    :: myStyling.header
-                )
+                [ Element.Region.heading 2
+
+                -- :: myStyling.header
+                ]
                 elements
         )
     , Custom.indented "monospace"
-        (\string myStyling model ->
+        (\string model ->
             Element.paragraph
-                (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
-                    :: Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
-                    :: myStyling.monospace
-                )
+                [ Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
+                , Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
+
+                -- :: myStyling.monospace
+                ]
                 [ Element.text string ]
         )
     , Custom.block2 "image"
-        (\src description myStyling model ->
+        (\src description model ->
             Element.image
                 []
                 { src = String.trim src
@@ -206,6 +102,14 @@ listStyles cursor =
 
         _ ->
             [ Element.spacing 8 ]
+
+
+edges =
+    { top = 0
+    , left = 0
+    , right = 0
+    , bottom = 0
+    }
 
 
 {-| -}
@@ -358,13 +262,13 @@ A list item started with a list icon.
         ]
 
 -}
-type ListBuilder styling model msg
+type ListBuilder model msg
     = ListBuilder
         { previousIndent : Int
         , previousLineEmpty : Bool
         , levels :
             -- (mostRecent :: remaining)
-            List (Level styling model msg)
+            List (Level model msg)
         }
 
 
@@ -417,12 +321,12 @@ type ListBuilder styling model msg
 -}
 
 
-type Level styling model msg
-    = Level (List (ListItem styling model msg))
+type Level model msg
+    = Level (List (ListItem model msg))
 
 
 {-| -}
-type ListItem styling model msg
+type ListItem model msg
     = ListItem
         { icon :
             Maybe
@@ -434,14 +338,14 @@ type ListItem styling model msg
                         , show : Bool
                         }
                 }
-        , content : styling -> model -> List (Element msg)
+        , content : model -> List (Element msg)
         , children :
             -- (mostRecent :: remaining)
-            List (ListItem styling model msg)
+            List (ListItem model msg)
         }
 
 
-emptyListBuilder : ListBuilder styling model msg
+emptyListBuilder : ListBuilder model msg
 emptyListBuilder =
     ListBuilder
         { previousIndent = 0
@@ -450,19 +354,25 @@ emptyListBuilder =
         }
 
 
+
+-- list :
+--     Parser Internal.Context Internal.Problem (model -> List (Element msg))
+--     -> Parser Internal.Context Internal.Problem (model -> Element msg)
+
+
 list inlines =
     Parser.loop
         ( emptyCursor, emptyListBuilder )
         (listItem inlines)
 
 
-finalizeList (ListBuilder builder) myStyling model =
+finalizeList (ListBuilder builder) model =
     Element.column
-        (myStyling.list [])
-        (renderLevels myStyling model builder.levels)
+        []
+        (renderLevels model builder.levels)
 
 
-renderLevels myStyling model levels =
+renderLevels model levels =
     case levels of
         [] ->
             []
@@ -476,43 +386,49 @@ renderLevels myStyling model levels =
                     -- We just collapsed everything down to the top level.
                     top
                         |> List.reverse
-                        |> List.map (renderListItem myStyling model)
+                        |> List.map (renderListItem model)
 
 
-renderListItem myStyling model (ListItem item) =
+renderListItem model (ListItem item) =
     case item.icon of
         Nothing ->
             case item.children of
                 [] ->
-                    renderParagraph myStyling model item.content
+                    renderParagraph model item.content
 
                 _ ->
-                    Element.column (myStyling.list [])
-                        (renderParagraph myStyling model item.content
+                    Element.column
+                        (listStyles [])
+                        (renderParagraph model item.content
                             :: (item.children
                                     |> List.reverse
-                                    |> List.map (renderListItem myStyling model)
+                                    |> List.map (renderListItem model)
                                )
                         )
 
         Just actualIcon ->
             Element.row []
                 [ Element.el [ Element.alignTop ] <|
-                    myStyling.listIcons actualIcon.decorations actualIcon.token
-                , Element.textColumn (myStyling.list actualIcon.decorations)
-                    (renderParagraph myStyling model item.content
+                    listIcons
+                        actualIcon.decorations
+                        actualIcon.token
+                , Element.textColumn
+                    (listStyles
+                        actualIcon.decorations
+                    )
+                    (renderParagraph model item.content
                         :: (item.children
                                 |> List.reverse
-                                |> List.map (renderListItem myStyling model)
+                                |> List.map (renderListItem model)
                            )
                     )
                 ]
 
 
-renderParagraph myStyling model content =
+renderParagraph model content =
     Element.paragraph
         []
-        (content myStyling model)
+        (content model)
 
 
 {-| Parses a single line item (with multiple paragraps)
@@ -551,50 +467,10 @@ renderParagraph myStyling model content =
             -> ensure we only recurse if we've made progress
 
 -}
-
-
-
--- listItem :
---     Parser
---         ({ styling
---             | list : List Index -> List (Element.Attribute msg)
---             , listIcons : List Index -> ListIcon -> Element msg
---          }
---          -> model
---          -> List (Element msg)
---         )
---     ->
---         ( Cursor
---         , ListBuilder
--- { styling
---     | list : List Index -> List (Element.Attribute msg)
---     , listIcons : List Index -> ListIcon -> Element msg
--- }
--- model
--- msg
---         )
---     ->
---         Parser.Parser
---             (Parser.Step
---                 ( Cursor
---                 , ListBuilder
---                     { styling
---                         | list : List Index -> List (Element.Attribute msg)
---                         , listIcons : List Index -> ListIcon -> Element msg
---                     }
---                     model
---                     msg
---                 )
--- ({ styling
---     | list : List Index -> List (Element.Attribute msg)
---     , listIcons : List Index -> ListIcon -> Element msg
---  }
---  -> model
---  -> Element msg
--- )
---             )
-
-
+listItem :
+    Parser Internal.Context Internal.Problem (model -> List (Element msg))
+    -> ( Cursor, ListBuilder model msg )
+    -> Parser Internal.Context Internal.Problem (Parser.Step ( Cursor, ListBuilder model msg ) (model -> Element msg))
 listItem inlines ( cursor, ListBuilder builder ) =
     Parser.oneOf
         [ Parser.succeed identity
@@ -623,36 +499,6 @@ listItem inlines ( cursor, ListBuilder builder ) =
                         (Parser.Loop ( cursor, ListBuilder { builder | previousLineEmpty = True } ))
                     )
         ]
-
-
-
--- indentedListItem :
---     Parser
---         (ListStyling styling msg
---          -> model
---          -> List (Element msg)
---         )
---     -> Cursor
---     ->
---         ListBuilder
---             (ListStyling styling msg)
---             model
---             msg
---     -> Int
---     ->
---         Parser.Parser
---             (Parser.Step
---                 ( Cursor
---                 , ListBuilder
---                     (ListStyling styling msg)
---                     model
---                     msg
---                 )
---                 (ListStyling styling msg
---                  -> model
---                  -> Element msg
---                 )
---             )
 
 
 {-| Parse a complete list item.
@@ -868,6 +714,7 @@ addItem cursor indent (ListBuilder builder) maybeIcon styledParagraphs =
     ]
 
 -}
+collapseLevel : Int -> List (Level model msg) -> List (Level model msg)
 collapseLevel num levels =
     if num == 0 then
         levels
@@ -892,6 +739,7 @@ collapseLevel num levels =
                 levels
 
 
+listIcon : Parser Internal.Context Internal.Problem ( List (Maybe Int), List String, ListIcon )
 listIcon =
     Parser.oneOf
         [ Parser.succeed ( [], [], Arrow )

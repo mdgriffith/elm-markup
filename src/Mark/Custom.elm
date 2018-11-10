@@ -40,13 +40,13 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| -}
-type alias Block model style msg =
-    Internal.Block model style msg
+type alias Block model msg =
+    Internal.Block model msg
 
 
 {-| -}
-type alias Inline model style msg =
-    Internal.Inline model style msg
+type alias Inline model msg =
+    Internal.Inline model msg
 
 
 {-| Create a custom inline styler.
@@ -77,7 +77,7 @@ It will turn the first letter into a [dropped capital](https://en.wikipedia.org/
 **styling** is the `styling` record that is passed in the options of `parseWith`. This means you can make an inline element that can be paragraph via the options.
 
 -}
-inline : String -> (String -> style -> model -> List (Element msg)) -> Inline model style msg
+inline : String -> (String -> model -> List (Element msg)) -> Inline model msg
 inline name renderer =
     Internal.Inline name
         renderer
@@ -110,7 +110,7 @@ Which can then be used in your markup like so:
 The element you defined will show up there.
 
 -}
-block : String -> (style -> model -> Element msg) -> Block model style msg
+block : String -> (model -> Element msg) -> Block model msg
 block name renderer =
     Internal.Block name
         (Parser.succeed renderer)
@@ -145,9 +145,9 @@ or as
 -}
 block1 :
     String
-    -> (arg -> style -> model -> Element msg)
+    -> (arg -> model -> Element msg)
     -> Param arg
-    -> Block model style msg
+    -> Block model msg
 block1 name renderer (Param param) =
     Internal.Block name
         (Parser.succeed renderer
@@ -158,10 +158,10 @@ block1 name renderer (Param param) =
 {-| -}
 block2 :
     String
-    -> (arg -> arg2 -> style -> model -> Element msg)
+    -> (arg -> arg2 -> model -> Element msg)
     -> Param arg
     -> Param arg2
-    -> Block model style msg
+    -> Block model msg
 block2 name renderer (Param param1) (Param param2) =
     Internal.Block name
         (Parser.succeed renderer
@@ -173,11 +173,11 @@ block2 name renderer (Param param1) (Param param2) =
 {-| -}
 block3 :
     String
-    -> (arg -> arg2 -> arg3 -> style -> model -> Element msg)
+    -> (arg -> arg2 -> arg3 -> model -> Element msg)
     -> Param arg
     -> Param arg2
     -> Param arg3
-    -> Block model style msg
+    -> Block model msg
 block3 name renderer (Param param1) (Param param2) (Param param3) =
     Internal.Block name
         (Parser.succeed renderer
@@ -297,31 +297,16 @@ paragraph :
     String
     ->
         (List (Element msg)
-         ->
-            { a
-                | link : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-                , root : List (Element.Attribute msg)
-                , block : List (Element.Attribute msg)
-            }
          -> model
          -> Element msg
         )
-    ->
-        Block model
-            { a
-                | link : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-                , root : List (Element.Attribute msg)
-                , block : List (Element.Attribute msg)
-            }
-            msg
+    -> Block model msg
 paragraph name renderer =
     Internal.Parse name
         (\inlineParser ->
             Parser.succeed
-                (\almostElements style model ->
-                    renderer (almostElements style model) style model
+                (\almostElements model ->
+                    renderer (almostElements model) model
                 )
                 |. Parser.token (Parser.Token "\n" Internal.Newline)
                 |. Parser.token (Parser.Token "    " Internal.ExpectedIndent)
@@ -339,31 +324,16 @@ section :
     String
     ->
         (List (Element msg)
-         ->
-            { a
-                | link : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-                , root : List (Element.Attribute msg)
-                , block : List (Element.Attribute msg)
-            }
          -> model
          -> Element msg
         )
-    ->
-        Block model
-            { a
-                | link : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-                , root : List (Element.Attribute msg)
-                , block : List (Element.Attribute msg)
-            }
-            msg
+    -> Block model msg
 section name renderer =
     Internal.Parse name
         (\inlineParser ->
             Parser.succeed
-                (\almostElements style model ->
-                    renderer (almostElements style model) style model
+                (\almostElements model ->
+                    renderer (almostElements model) model
                 )
                 |. Parser.token (Parser.Token "\n" Internal.Newline)
                 |. Parser.token (Parser.Token "    " Internal.ExpectedIndent)
@@ -374,10 +344,10 @@ section name renderer =
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Done
-                                            (\styling model ->
+                                            (\model ->
                                                 List.foldl
                                                     (\fn elems ->
-                                                        fn styling model :: elems
+                                                        fn model :: elems
                                                     )
                                                     []
                                                     els
@@ -387,10 +357,10 @@ section name renderer =
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Done
-                                            (\styling model ->
+                                            (\model ->
                                                 List.foldl
                                                     (\fn elems ->
-                                                        fn styling model :: elems
+                                                        fn model :: elems
                                                     )
                                                     []
                                                     els
@@ -405,9 +375,9 @@ section name renderer =
                                 |> Parser.map
                                     (\found ->
                                         Parser.Loop
-                                            ((\styling model ->
+                                            ((\model ->
                                                 Element.paragraph []
-                                                    (found styling model)
+                                                    (found model)
                                              )
                                                 :: els
                                             )
@@ -426,11 +396,10 @@ indented :
     String
     ->
         (String
-         -> style
          -> model
          -> Element msg
         )
-    -> Block model style msg
+    -> Block model msg
 indented name renderer =
     Internal.Parse name
         (\opts ->
@@ -514,8 +483,8 @@ It parses bananas and then says `bananas`. If you wanted to do exactly this in r
 -}
 parser :
     String
-    -> (Parser Internal.Context Internal.Problem (style -> model -> List (Element msg)) -> Parser Internal.Context Internal.Problem (style -> model -> Element msg))
-    -> Block model style msg
+    -> (Parser Internal.Context Internal.Problem (model -> List (Element msg)) -> Parser Internal.Context Internal.Problem (model -> Element msg))
+    -> Block model msg
 parser name actualParser =
     Internal.Parse name
         (\inlines ->

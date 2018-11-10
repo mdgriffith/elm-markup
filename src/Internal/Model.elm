@@ -50,43 +50,34 @@ type Problem
 
 
 {-| -}
-type alias Options model styling msg =
-    { styling : model -> styling
-    , blocks : List (Block model styling msg)
-    , inlines : List (Inline model styling msg)
+type alias Options model msg =
+    { blocks : List (Block model msg)
+    , inlines : List (Inline model msg)
     }
 
 
 {-| -}
-type Block model style msg
-    = Block String (Parser Context Problem (style -> model -> Element msg))
+type Block model msg
+    = Block String (Parser Context Problem (model -> Element msg))
     | Parse
         String
         (Parser Context
             Problem
-            (style
-             -> model
+            (model
              -> List (Element msg)
             )
-         -> Parser Context Problem (style -> model -> Element msg)
+         -> Parser Context Problem (model -> Element msg)
         )
 
 
 {-| -}
-type Inline model style msg
-    = Inline String (String -> style -> model -> List (Element msg))
+type Inline model msg
+    = Inline String (String -> model -> List (Element msg))
 
 
 {-| -}
 markup :
-    Options model
-        { styles
-            | link : List (Element.Attribute msg)
-            , token : List (Element.Attribute msg)
-            , root : List (Element.Attribute msg)
-            , block : List (Element.Attribute msg)
-        }
-        msg
+    Options model msg
     ->
         Parser Context
             Problem
@@ -97,7 +88,9 @@ markup options =
     Parser.map
         (\view ->
             \model ->
-                view (options.styling model) model
+                view
+                    --(options.styling model)
+                    model
         )
         (Parser.loop []
             (blocks options)
@@ -116,11 +109,12 @@ blocks options existing =
     let
         done _ =
             Parser.Done
-                (\styling model ->
-                    Element.textColumn styling.root
+                (\model ->
+                    Element.textColumn []
+                        -- styling.root
                         (List.foldl
                             (\fn els ->
-                                fn styling model :: els
+                                fn model :: els
                             )
                             []
                             existing
@@ -162,9 +156,9 @@ blocks options existing =
             |> Parser.map
                 (\found ->
                     Parser.Loop
-                        ((\styling model ->
+                        ((\model ->
                             Element.paragraph []
-                                (found styling model)
+                                (found model)
                          )
                             :: existing
                         )
@@ -220,14 +214,14 @@ type InlineStyle
     | Token
 
 
-type Text styling model msg
+type Text model msg
     = Text
         -- Accumulator string
         String
         -- A bitfield of styles that are active
         Flag.Field
         -- Accumulator of element constructors
-        (List (styling -> model -> List (Element msg)))
+        (List (model -> List (Element msg)))
 
 
 emptyText =
@@ -235,22 +229,11 @@ emptyText =
 
 
 inline :
-    List
-        (Inline model
-            { a
-                | link : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-            }
-            msg
-        )
+    List (Inline model msg)
     ->
         Parser Context
             Problem
-            ({ a
-                | link : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-             }
-             -> model
+            (model
              -> List (Element msg)
             )
 inline inlines =
@@ -258,39 +241,13 @@ inline inlines =
 
 
 inlineLoop :
-    List
-        (Inline model
-            { a
-                | link : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-            }
-            msg
-        )
-    ->
-        Text
-            { a
-                | link : List (Element.Attribute msg)
-                , token : List (Element.Attribute msg)
-            }
-            model
-            msg
+    List (Inline model msg)
+    -> Text model msg
     ->
         Parser Context
             Problem
-            (Parser.Step
-                (Text
-                    { a
-                        | link : List (Element.Attribute msg)
-                        , token : List (Element.Attribute msg)
-                    }
-                    model
-                    msg
-                )
-                ({ a
-                    | link : List (Element.Attribute msg)
-                    , token : List (Element.Attribute msg)
-                 }
-                 -> model
+            (Parser.Step (Text model msg)
+                (model
                  -> List (Element msg)
                 )
             )
@@ -327,9 +284,10 @@ inlineLoop inlines existing =
                     new ->
                         new
                             |> addElement
-                                (\styling _ ->
+                                (\_ ->
                                     [ Element.el
-                                        styling.token
+                                        []
+                                        --styling.token
                                         (Element.text tokenText)
                                     ]
                                 )
@@ -403,24 +361,24 @@ inlineLoop inlines existing =
 
 finalize (Text txt styles els) =
     if els == [] && txt == "" then
-        Parser.Done (\styling model -> [])
+        Parser.Done (\model -> [])
 
     else if txt == "" then
         Parser.Done <|
-            \styling model ->
+            \model ->
                 List.foldl
                     (\fn elems ->
-                        fn styling model ++ elems
+                        fn model ++ elems
                     )
                     []
                     els
 
     else
         Parser.Done <|
-            \styling model ->
+            \model ->
                 List.foldl
                     (\fn elems ->
-                        fn styling model ++ elems
+                        fn model ++ elems
                     )
                     []
                     (renderText styles txt :: els)
@@ -674,7 +632,7 @@ changeStyle (Text txt styles els) styleToken =
             |> addElement (renderText styles txt)
 
 
-toStyles styleField styling =
+toStyles styleField =
     List.concat
         [ if Flag.present Flag.bold styleField then
             [ Font.bold ]
@@ -700,27 +658,29 @@ toStyles styleField styling =
           else
             []
         , if Flag.present Flag.token styleField then
-            styling.token
+            -- styling.token
+            []
 
           else
             []
         ]
 
 
-renderLink styleField txt url styling _ =
-    [ Element.link (styling.link ++ toStyles styleField styling)
+renderLink styleField txt url _ =
+    [ Element.link (toStyles styleField)
+        --styling.link
         { url = url
         , label = Element.text txt
         }
     ]
 
 
-renderText styleField txt styling _ =
+renderText styleField txt _ =
     if Flag.none == styleField then
         [ Element.text txt ]
 
     else
-        [ Element.el (toStyles styleField styling) (Element.text txt) ]
+        [ Element.el (toStyles styleField) (Element.text txt) ]
 
 
 doubleQuote =
