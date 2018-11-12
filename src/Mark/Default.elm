@@ -1,12 +1,12 @@
 module Mark.Default exposing
-    ( blocks
+    ( blocks, inline
     , ListIcon(..), Index, listIcon
     , listIcons, listStyles
     )
 
 {-|
 
-@docs blocks
+@docs blocks, inline
 @docs ListIcon, Index, listIcon
 
 -}
@@ -20,6 +20,54 @@ import Html.Attributes
 import Internal.Model as Internal
 import Mark.Custom as Custom
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+
+
+inline : Internal.TextFormatting -> Maybe Internal.Link -> model -> Element msg
+inline format link model =
+    case format of
+        Internal.NoFormatting txt ->
+            case link of
+                Nothing ->
+                    Element.text txt
+
+                Just { url } ->
+                    Element.link []
+                        { url = url
+                        , label = Element.text txt
+                        }
+
+        Internal.Styles styles txt ->
+            case link of
+                Nothing ->
+                    Element.el (List.filterMap toStyles styles) (Element.text txt)
+
+                Just { url } ->
+                    Element.link (List.filterMap toStyles styles)
+                        { url = url
+                        , label = Element.text txt
+                        }
+
+
+toStyles style =
+    case style of
+        Internal.NoStyleChange ->
+            Nothing
+
+        Internal.Bold ->
+            Just Font.bold
+
+        Internal.Italic ->
+            Just Font.italic
+
+        Internal.Strike ->
+            Just Font.strike
+
+        Internal.Underline ->
+            Just Font.underline
+
+        Internal.Token ->
+            --Just Font.bold
+            Nothing
 
 
 {-| A set of common default blocks.
@@ -37,7 +85,7 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 **Note** none of these are special, they're all defined in terms of `Mark.Custom`.
 
 -}
-blocks : List (Internal.Block model msg)
+blocks : List (Internal.Block (model -> Element msg))
 blocks =
     [ Custom.paragraph "title"
         (\elements model ->
@@ -46,7 +94,7 @@ blocks =
 
                 -- :: myStyling.title
                 ]
-                elements
+                (List.map (\viewEl -> viewEl model) elements)
         )
     , Custom.paragraph "header"
         (\elements model ->
@@ -55,7 +103,7 @@ blocks =
 
                 -- :: myStyling.header
                 ]
-                elements
+                (List.map (\viewEl -> viewEl model) elements)
         )
     , Custom.indented "monospace"
         (\string model ->
@@ -338,7 +386,7 @@ type ListItem model msg
                         , show : Bool
                         }
                 }
-        , content : model -> List (Element msg)
+        , content : List (model -> Element msg)
         , children :
             -- (mostRecent :: remaining)
             List (ListItem model msg)
@@ -354,12 +402,9 @@ emptyListBuilder =
         }
 
 
-
--- list :
---     Parser Internal.Context Internal.Problem (model -> List (Element msg))
---     -> Parser Internal.Context Internal.Problem (model -> Element msg)
-
-
+list :
+    Parser Internal.Context Internal.Problem (List (model -> Element msg))
+    -> Parser Internal.Context Internal.Problem (model -> Element msg)
 list inlines =
     Parser.loop
         ( emptyCursor, emptyListBuilder )
@@ -428,7 +473,7 @@ renderListItem model (ListItem item) =
 renderParagraph model content =
     Element.paragraph
         []
-        (content model)
+        (List.map (\el -> el model) content)
 
 
 {-| Parses a single line item (with multiple paragraps)
@@ -468,7 +513,7 @@ renderParagraph model content =
 
 -}
 listItem :
-    Parser Internal.Context Internal.Problem (model -> List (Element msg))
+    Parser Internal.Context Internal.Problem (List (model -> Element msg))
     -> ( Cursor, ListBuilder model msg )
     -> Parser Internal.Context Internal.Problem (Parser.Step ( Cursor, ListBuilder model msg ) (model -> Element msg))
 listItem inlines ( cursor, ListBuilder builder ) =
@@ -511,6 +556,12 @@ listItem inlines ( cursor, ListBuilder builder ) =
 We already know the indent.
 
 -}
+indentedListItem :
+    Parser Internal.Context Internal.Problem (List (model -> Element msg))
+    -> Cursor
+    -> ListBuilder model msg
+    -> Int
+    -> Parser Internal.Context Internal.Problem ( { current : Int, stack : List Int }, ListBuilder model msg )
 indentedListItem inlines cursor (ListBuilder builder) indent =
     Parser.oneOf <|
         List.filterMap identity
@@ -593,6 +644,13 @@ if ident decreases
     ]
 
 -}
+addItem :
+    Cursor
+    -> Int
+    -> ListBuilder model msg
+    -> Maybe ( List (Maybe Int), List String, ListIcon )
+    -> List (model -> Element msg)
+    -> ( Cursor, ListBuilder model msg )
 addItem cursor indent (ListBuilder builder) maybeIcon styledParagraphs =
     let
         newCursor =

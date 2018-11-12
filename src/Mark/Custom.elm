@@ -2,7 +2,7 @@ module Mark.Custom exposing
     ( Inline, inline
     , Block, block, block1, block2, block3
     , Param, bool, int, float, string, oneOf
-    , paragraph, section, indented
+    , paragraph, indented
     , parser
     )
 
@@ -25,7 +25,7 @@ module Mark.Custom exposing
 
 ## Styled
 
-@docs paragraph, section, indented
+@docs paragraph, indented
 
 
 ## Advanced
@@ -40,13 +40,13 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| -}
-type alias Block model msg =
-    Internal.Block model msg
+type alias Block result =
+    Internal.Block result
 
 
 {-| -}
-type alias Inline model msg =
-    Internal.Inline model msg
+type alias Inline result =
+    Internal.Inline result
 
 
 {-| Create a custom inline styler.
@@ -77,7 +77,7 @@ It will turn the first letter into a [dropped capital](https://en.wikipedia.org/
 **styling** is the `styling` record that is passed in the options of `parseWith`. This means you can make an inline element that can be paragraph via the options.
 
 -}
-inline : String -> (String -> model -> List (Element msg)) -> Inline model msg
+inline : String -> (Internal.TextFormatting -> Maybe Internal.Link -> result) -> Inline result
 inline name renderer =
     Internal.Inline name
         renderer
@@ -110,10 +110,10 @@ Which can then be used in your markup like so:
 The element you defined will show up there.
 
 -}
-block : String -> (model -> Element msg) -> Block model msg
+block : String -> result -> Block result
 block name renderer =
     Internal.Block name
-        (Parser.succeed renderer)
+        (always (Parser.succeed renderer))
 
 
 {-| Same as `block`, but you can parse one parameter as well.
@@ -145,45 +145,51 @@ or as
 -}
 block1 :
     String
-    -> (arg -> model -> Element msg)
+    -> (arg -> result)
     -> Param arg
-    -> Block model msg
+    -> Block result
 block1 name renderer (Param param) =
     Internal.Block name
-        (Parser.succeed renderer
-            |= param
+        (always
+            (Parser.succeed renderer
+                |= param
+            )
         )
 
 
 {-| -}
 block2 :
     String
-    -> (arg -> arg2 -> model -> Element msg)
+    -> (arg -> arg2 -> result)
     -> Param arg
     -> Param arg2
-    -> Block model msg
+    -> Block result
 block2 name renderer (Param param1) (Param param2) =
     Internal.Block name
-        (Parser.succeed renderer
-            |= param1
-            |= param2
+        (always
+            (Parser.succeed renderer
+                |= param1
+                |= param2
+            )
         )
 
 
 {-| -}
 block3 :
     String
-    -> (arg -> arg2 -> arg3 -> model -> Element msg)
+    -> (arg -> arg2 -> arg3 -> result)
     -> Param arg
     -> Param arg2
     -> Param arg3
-    -> Block model msg
+    -> Block result
 block3 name renderer (Param param1) (Param param2) (Param param3) =
     Internal.Block name
-        (Parser.succeed renderer
-            |= param1
-            |= param2
-            |= param3
+        (always
+            (Parser.succeed renderer
+                |= param1
+                |= param2
+                |= param3
+            )
         )
 
 
@@ -285,6 +291,13 @@ bool =
         )
 
 
+
+-- paragraph : Param Bool
+-- paragraph =
+--     Param
+--         (Parser.succeed True)
+
+
 {-| A block that expects a single paragraph of styled text as input. The `header` block that is built in uses this.
 
     | header
@@ -296,17 +309,16 @@ bool =
 paragraph :
     String
     ->
-        (List (Element msg)
-         -> model
-         -> Element msg
+        (List result
+         -> result
         )
-    -> Block model msg
+    -> Block result
 paragraph name renderer =
-    Internal.Parse name
+    Internal.Block name
         (\inlineParser ->
             Parser.succeed
-                (\almostElements model ->
-                    renderer (almostElements model) model
+                (\almostElements ->
+                    renderer almostElements
                 )
                 |. Parser.token (Parser.Token "\n" Internal.Newline)
                 |. Parser.token (Parser.Token "    " Internal.ExpectedIndent)
@@ -315,93 +327,83 @@ paragraph name renderer =
         )
 
 
-{-| Like `Custom.paragraph`, but parses many styled paragraphs.
 
-**Note** Parsing ends when there are three consecutive newlines.
-
--}
-section :
-    String
-    ->
-        (List (Element msg)
-         -> model
-         -> Element msg
-        )
-    -> Block model msg
-section name renderer =
-    Internal.Parse name
-        (\inlineParser ->
-            Parser.succeed
-                (\almostElements model ->
-                    renderer (almostElements model) model
-                )
-                |. Parser.token (Parser.Token "\n" Internal.Newline)
-                |. Parser.token (Parser.Token "    " Internal.ExpectedIndent)
-                |= Parser.loop []
-                    (\els ->
-                        Parser.oneOf
-                            [ Parser.end Internal.End
-                                |> Parser.map
-                                    (\_ ->
-                                        Parser.Done
-                                            (\model ->
-                                                List.foldl
-                                                    (\fn elems ->
-                                                        fn model :: elems
-                                                    )
-                                                    []
-                                                    els
-                                            )
-                                    )
-                            , Parser.token (Parser.Token "\n\n" (Internal.Expecting "\n\n"))
-                                |> Parser.map
-                                    (\_ ->
-                                        Parser.Done
-                                            (\model ->
-                                                List.foldl
-                                                    (\fn elems ->
-                                                        fn model :: elems
-                                                    )
-                                                    []
-                                                    els
-                                            )
-                                    )
-                            , Parser.token (Parser.Token "\n    " Internal.ExpectedIndent)
-                                |> Parser.map
-                                    (\_ ->
-                                        Parser.Loop els
-                                    )
-                            , inlineParser
-                                |> Parser.map
-                                    (\found ->
-                                        Parser.Loop
-                                            ((\model ->
-                                                Element.paragraph []
-                                                    (found model)
-                                             )
-                                                :: els
-                                            )
-                                    )
-                            ]
-                    )
-        )
+-- {-| Like `Custom.paragraph`, but parses many styled paragraphs.
+-- **Note** Parsing ends when there are three consecutive newlines.
+-- -}
+-- section :
+--     String
+--     ->
+--         (List (Element msg)
+--          -> model
+--          -> Element msg
+--         )
+--     -> Block result
+-- section name renderer =
+--     Internal.Block name
+--         (\inlineParser ->
+--             Parser.succeed
+--                 (\almostElements model ->
+--                     renderer (almostElements model) model
+--                 )
+--                 |. Parser.token (Parser.Token "\n" Internal.Newline)
+--                 |. Parser.token (Parser.Token "    " Internal.ExpectedIndent)
+--                 |= Parser.loop []
+--                     (\els ->
+--                         Parser.oneOf
+--                             [ Parser.end Internal.End
+--                                 |> Parser.map
+--                                     (\_ ->
+--                                         Parser.Done
+--                                             (\model ->
+--                                                 List.foldl
+--                                                     (\fn elems ->
+--                                                         fn model :: elems
+--                                                     )
+--                                                     []
+--                                                     els
+--                                             )
+--                                     )
+--                             , Parser.token (Parser.Token "\n\n" (Internal.Expecting "\n\n"))
+--                                 |> Parser.map
+--                                     (\_ ->
+--                                         Parser.Done
+--                                             (\model ->
+--                                                 List.foldl
+--                                                     (\fn elems ->
+--                                                         fn model :: elems
+--                                                     )
+--                                                     []
+--                                                     els
+--                                             )
+--                                     )
+--                             , Parser.token (Parser.Token "\n    " Internal.ExpectedIndent)
+--                                 |> Parser.map
+--                                     (\_ ->
+--                                         Parser.Loop els
+--                                     )
+--                             , inlineParser
+--                                 |> Parser.map
+--                                     (\found ->
+--                                         Parser.Loop
+--                                             ((\model ->
+--                                                 Element.paragraph []
+--                                                     (List.map (\viewInline -> viewInline model) found)
+--                                              )
+--                                                 :: els
+--                                             )
+--                                     )
+--                             ]
+--                     )
+--         )
 
 
 {-| Parse a 4-space-indented, unstyled block of text.
-
 It ends after three consecutive newline characters.
-
 -}
-indented :
-    String
-    ->
-        (String
-         -> model
-         -> Element msg
-        )
-    -> Block model msg
+indented : String -> (String -> result) -> Block result
 indented name renderer =
-    Internal.Parse name
+    Internal.Block name
         (\opts ->
             Parser.succeed renderer
                 |. Parser.chompWhile (\c -> c == '\n')
@@ -483,10 +485,10 @@ It parses bananas and then says `bananas`. If you wanted to do exactly this in r
 -}
 parser :
     String
-    -> (Parser Internal.Context Internal.Problem (model -> List (Element msg)) -> Parser Internal.Context Internal.Problem (model -> Element msg))
-    -> Block model msg
+    -> (Parser Internal.Context Internal.Problem (List result) -> Parser Internal.Context Internal.Problem result)
+    -> Block result
 parser name actualParser =
-    Internal.Parse name
+    Internal.Block name
         (\inlines ->
             Parser.succeed identity
                 |. Parser.chompWhile (\c -> c == '\n')

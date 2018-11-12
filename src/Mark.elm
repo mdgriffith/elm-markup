@@ -22,7 +22,7 @@ import Html.Attributes
 import Internal.Model as Internal
 import Mark.Custom as Custom
 import Mark.Default
-import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+import Parser.Advanced as Parser exposing (Parser)
 
 
 type alias Context =
@@ -42,26 +42,45 @@ parse source =
 
 {-| -}
 parseWith :
-    Options model msg
+    Options result
     -> String
-    -> Result (List (Parser.DeadEnd Context Problem)) (model -> Element msg)
+    -> Result (List (Parser.DeadEnd Context Problem)) result
 parseWith options source =
     Parser.run (Internal.markup options) source
 
 
-{-| -}
-type alias Options model msg =
-    { blocks : List (Custom.Block model msg)
-    , inlines : List (Custom.Inline model msg)
-    }
-
-
 {-| A default set of block and inline elements as well as some `defaultStyling` to style them.
 -}
-default : Options model msg
+default : Options (model -> Element msg)
 default =
     { blocks =
         Mark.Default.blocks
+    , merge = \els model -> Element.textColumn [] (List.map (\el -> el model) els)
     , inlines =
-        []
+        { view = Mark.Default.inline
+
+        -- TextFormatting -> String -> result
+        , inlines = []
+        , merge = \els model -> Element.paragraph [] (List.map (\el -> el model) els)
+        , replacements =
+            [ Internal.Replacement "..." "…"
+            , Internal.Replacement "<>" "\u{00A0}"
+            , Internal.Replacement "---" "—"
+            , Internal.Replacement "--" "–"
+            , Internal.Replacement "'" "’"
+            , Internal.Balanced
+                { start = ( "\"", "“" )
+                , end = ( "\"", "”" )
+                }
+            ]
+        }
     }
+
+
+{-| -}
+type alias Options result =
+    Internal.Options result
+
+
+type alias InlineOptions result =
+    Internal.InlineOptions result
