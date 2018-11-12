@@ -267,7 +267,7 @@ inlineLoop inlineOptions existing =
                             Text
                                 { rendered =
                                     inlineOptions.view
-                                        current.text
+                                        linkText.text
                                         (Just { url = url })
                                         :: current.rendered
                                 , text = NoFormatting ""
@@ -342,10 +342,18 @@ finalize inlineOptions (Text cursor) =
 styledText : InlineOptions result -> TextFormatting -> List Char -> Parser Context Problem (Text result)
 styledText options txt until =
     let
+        vacantText =
+            case txt of
+                NoFormatting x ->
+                    NoFormatting ""
+
+                Styles styles _ ->
+                    Styles styles ""
+
         untilStrings =
             List.map String.fromChar until
     in
-    Parser.loop (Text { text = txt, rendered = [], balancedReplacements = [] })
+    Parser.loop (Text { text = vacantText, rendered = [], balancedReplacements = [] })
         (\found ->
             Parser.oneOf
                 [ Parser.oneOf (replace options.replacements found Flag.none)
