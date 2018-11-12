@@ -47,6 +47,24 @@ inline format link model =
                         , label = Element.text txt
                         }
 
+        Internal.Fragments frags ->
+            case link of
+                Nothing ->
+                    Element.row []
+                        (List.map renderFragment frags)
+
+                Just { url } ->
+                    Element.link []
+                        { url = url
+                        , label =
+                            Element.row []
+                                (List.map renderFragment frags)
+                        }
+
+
+renderFragment frag =
+    Element.el (List.filterMap toStyles frag.styles) (Element.text frag.text)
+
 
 toStyles style =
     case style of

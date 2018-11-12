@@ -95,10 +95,7 @@ type alias Link =
 type TextFormatting
     = NoFormatting String
     | Styles (List InlineStyle) String
-
-
-
--- | Fragments (List Fragment)
+    | Fragments (List Fragment)
 
 
 type alias Fragment =
@@ -217,6 +214,29 @@ blockToParser inlines blockable =
                     )
 
 
+reduceFragments txt =
+    case txt of
+        Fragments frags ->
+            let
+                finalized =
+                    frags
+                        |> List.filter (\f -> f.text /= "")
+                        |> List.reverse
+            in
+            case finalized of
+                [] ->
+                    txt
+
+                [ frag ] ->
+                    Styles frag.styles frag.text
+
+                remaining ->
+                    Fragments remaining
+
+        _ ->
+            txt
+
+
 inlineLoop :
     InlineOptions result
     -> Text result
@@ -242,18 +262,38 @@ inlineLoop inlineOptions existing =
         -- Custom inline block
         , Parser.succeed
             (\customInline (Text styled) ->
-                Parser.Loop
-                    (addElement
-                        (customInline styled.text Nothing)
-                        existing
-                    )
+                case changeStyle inlineOptions existing NoStyleChange of
+                    Text current ->
+                        Parser.Loop <|
+                            Text
+                                { rendered =
+                                    customInline
+                                        (reduceFragments styled.text)
+                                        Nothing
+                                        :: styled.rendered
+                                        ++ current.rendered
+                                , text =
+                                    case styled.text of
+                                        NoFormatting _ ->
+                                            NoFormatting ""
+
+                                        Styles styles _ ->
+                                            Styles styles ""
+
+                                        Fragments frags ->
+                                            case frags of
+                                                [] ->
+                                                    NoFormatting ""
+
+                                                f :: _ ->
+                                                    Styles f.styles ""
+                                , balancedReplacements = styled.balancedReplacements
+                                }
             )
             |. Parser.token
                 (Parser.Token "<" InlineStart)
-            |. Parser.chompWhile (\c -> c == ' ')
             |= Parser.oneOf
                 (List.map inlineToParser inlineOptions.inlines)
-            |. Parser.chompWhile (\c -> c == ' ')
             |. Parser.token (Parser.Token "|" InlineBar)
             |= styledText inlineOptions txt [ '>' ]
             |. Parser.token (Parser.Token ">" InlineEnd)
@@ -263,14 +303,33 @@ inlineLoop inlineOptions existing =
             (\(Text linkText) url ->
                 case changeStyle inlineOptions existing NoStyleChange of
                     Text current ->
+                        let
+                            _ =
+                                Debug.log "formatting" linkText.text
+                        in
                         Parser.Loop <|
                             Text
                                 { rendered =
                                     inlineOptions.view
-                                        linkText.text
+                                        (reduceFragments linkText.text)
                                         (Just { url = url })
-                                        :: current.rendered
-                                , text = NoFormatting ""
+                                        :: linkText.rendered
+                                        ++ current.rendered
+                                , text =
+                                    case linkText.text of
+                                        NoFormatting _ ->
+                                            NoFormatting ""
+
+                                        Styles styles _ ->
+                                            Styles styles ""
+
+                                        Fragments frags ->
+                                            case frags of
+                                                [] ->
+                                                    NoFormatting ""
+
+                                                f :: _ ->
+                                                    Styles f.styles ""
                                 , balancedReplacements = linkText.balancedReplacements
                                 }
             )
@@ -330,6 +389,11 @@ finalize inlineOptions (Text cursor) =
 
                 Styles _ x ->
                     x
+
+                Fragments frags ->
+                    frags
+                        |> List.map .text
+                        |> String.join ""
     in
     Parser.Done <|
         if txt == "" then
@@ -339,6 +403,11 @@ finalize inlineOptions (Text cursor) =
             List.reverse (inlineOptions.view cursor.text Nothing :: cursor.rendered)
 
 
+{-| This parser is used to parse styled text, but the delay rendering it.
+
+That may seem sorta weird, but we need this in cases like for links. We want styled
+
+-}
 styledText : InlineOptions result -> TextFormatting -> List Char -> Parser Context Problem (Text result)
 styledText options txt until =
     let
@@ -349,6 +418,10 @@ styledText options txt until =
 
                 Styles styles _ ->
                     Styles styles ""
+
+                -- TODO: is this an issue?
+                x ->
+                    x
 
         untilStrings =
             List.map String.fromChar until
@@ -365,6 +438,16 @@ styledText options txt until =
                 , Parser.oneOf (almostReplacement options.replacements found)
                     |> Parser.map Parser.Loop
 
+                -- Capture style command characters
+                , Parser.succeed
+                    (Parser.Loop << cacheStyle options found)
+                    |= Parser.oneOf
+                        [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (StyleChange Italic)))
+                        , Parser.map (always Strike) (Parser.token (Parser.Token "~" (StyleChange Strike)))
+                        , Parser.map (always Bold) (Parser.token (Parser.Token "*" (StyleChange Bold)))
+                        , Parser.map (always Token) (Parser.token (Parser.Token "`" (StyleChange Token)))
+                        ]
+
                 -- chomp until a meaningful character
                 , Parser.getChompedString
                     (Parser.chompWhile
@@ -378,10 +461,7 @@ styledText options txt until =
                     )
                     |> Parser.map
                         (\new ->
-                            if new == "" then
-                                Parser.Done found
-
-                            else if new == "\n" then
+                            if new == "" || new == "\n" then
                                 Parser.Done found
 
                             else if List.member (String.right 1 new) untilStrings then
@@ -392,6 +472,64 @@ styledText options txt until =
                         )
                 ]
         )
+
+
+cacheStyle inlineOptions (Text cursor) styleToken =
+    let
+        newText =
+            case styleToken of
+                NoStyleChange ->
+                    cursor.text
+
+                Bold ->
+                    cacheNewStyle Bold cursor.text
+
+                Italic ->
+                    cacheNewStyle Italic cursor.text
+
+                Strike ->
+                    cacheNewStyle Strike cursor.text
+
+                Underline ->
+                    cacheNewStyle Underline cursor.text
+
+                Token ->
+                    cacheNewStyle Token cursor.text
+    in
+    Text
+        { rendered = cursor.rendered
+        , text = newText
+        , balancedReplacements = cursor.balancedReplacements
+        }
+
+
+cacheNewStyle newStyle text =
+    case text of
+        NoFormatting str ->
+            Fragments [ { text = "", styles = [ newStyle ] }, { text = str, styles = [] } ]
+
+        Styles styles str ->
+            if List.member newStyle styles then
+                Fragments [ { text = "", styles = List.filter ((/=) newStyle) styles }, { text = str, styles = styles } ]
+
+            else
+                Fragments [ { text = "", styles = [ newStyle ] }, { text = str, styles = styles } ]
+
+        Fragments frags ->
+            case frags of
+                [] ->
+                    Fragments [ { text = "", styles = [ newStyle ] } ]
+
+                current :: remain ->
+                    if List.member newStyle current.styles then
+                        Fragments <| { text = "", styles = List.filter ((/=) newStyle) current.styles } :: current :: remain
+
+                    else
+                        Fragments <| { text = "", styles = newStyle :: current.styles } :: current :: remain
+
+
+
+-- Fragments ({ text = "", styles = [ newStyle ] } :: frags)
 
 
 {-| -}
@@ -555,6 +693,14 @@ addText newTxt (Text cursor) =
         Styles styles txt ->
             Text { cursor | text = Styles styles (txt ++ newTxt) }
 
+        Fragments frags ->
+            case frags of
+                [] ->
+                    Text { cursor | text = Fragments [ { text = newTxt, styles = [] } ] }
+
+                recent :: remain ->
+                    Text { cursor | text = Fragments ({ text = recent.text ++ newTxt, styles = recent.styles } :: remain) }
+
 
 {-| If we accumulating a link style, accumulate it there.
 -}
@@ -617,6 +763,9 @@ flipStyle newStyle text =
 
             else
                 Styles (newStyle :: styles) ""
+
+        Fragments frags ->
+            Fragments frags
 
 
 flagFieldToStyle field txt =
