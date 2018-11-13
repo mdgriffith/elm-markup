@@ -126,7 +126,7 @@ blocks options existing =
 
         -- custom blocks
         , Parser.succeed identity
-            |. Parser.token (Parser.Token "|" (Expecting "|"))
+            |. Parser.token (Parser.Token "|=" (Expecting "|="))
             |. Parser.chompIf (\c -> c == ' ') Space
             |= Parser.oneOf
                 (case options.blocks of
@@ -134,7 +134,7 @@ blocks options existing =
                         [ Parser.problem NoBlocks ]
 
                     _ ->
-                        List.map
+                        List.filterMap
                             (blockToParser options.inlines)
                             options.blocks
                 )
@@ -169,16 +169,44 @@ inlineToParser blockable =
                     (always fn)
 
 
-blockToParser : InlineOptions result -> Block result -> Parser Context Problem (Parser Context Problem result)
+capitalize str =
+    case str of
+        "" ->
+            Nothing
+
+        _ ->
+            let
+                fst =
+                    String.left 1 str
+
+                remaining =
+                    String.dropLeft 1 str
+            in
+            Just (String.toUpper fst ++ remaining)
+
+
+blockToParser : InlineOptions result -> Block result -> Maybe (Parser Context Problem (Parser Context Problem result))
 blockToParser inlines blockable =
     case blockable of
-        Block name parser ->
-            Parser.keyword (Parser.Token name (Expecting name))
-                |> Parser.inContext (InBlock name)
-                |> Parser.map
-                    (\_ ->
-                        parser (Parser.loop emptyText (inlineLoop inlines))
-                    )
+        Block nonstandardizedName parser ->
+            let
+                maybeName =
+                    nonstandardizedName
+                        |> String.trim
+                        |> capitalize
+            in
+            case maybeName of
+                Nothing ->
+                    Nothing
+
+                Just name ->
+                    Parser.keyword (Parser.Token name (Expecting name))
+                        |> Parser.inContext (InBlock name)
+                        |> Parser.map
+                            (\_ ->
+                                parser (Parser.loop emptyText (inlineLoop inlines))
+                            )
+                        |> Just
 
 
 reduceFragments txt =

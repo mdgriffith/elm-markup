@@ -199,7 +199,7 @@ blocks =
 {-| -}
 title : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
 title attrs =
-    Custom.paragraph "title"
+    Custom.paragraph "Title"
         (\elements model ->
             Element.paragraph
                 (Element.Region.heading 1 :: attrs)
@@ -210,7 +210,7 @@ title attrs =
 {-| -}
 header : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
 header attrs =
-    Custom.paragraph "header"
+    Custom.paragraph "Header"
         (\elements model ->
             Element.paragraph
                 (Element.Region.heading 2 :: attrs)
@@ -221,7 +221,7 @@ header attrs =
 {-| -}
 image : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
 image attrs =
-    Custom.block2 "image"
+    Custom.block2 "Image"
         (\src description model ->
             Element.image
                 attrs
@@ -236,7 +236,7 @@ image attrs =
 {-| -}
 monospace : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
 monospace attrs =
-    Custom.indented "monospace"
+    Custom.indented "Monospace"
         (\string model ->
             Element.paragraph
                 (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
@@ -255,7 +255,7 @@ list :
     }
     -> Custom.Block (model -> Element msg)
 list listConfig =
-    Custom.parser "list"
+    Custom.parser "List"
         (listParser listConfig)
 
 
