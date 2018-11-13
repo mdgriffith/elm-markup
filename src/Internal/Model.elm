@@ -1,12 +1,10 @@
 module Internal.Model exposing
     ( Block(..)
-    , Context(..)
     , Inline(..)
     , InlineOptions
     , InlineStyle(..)
     , Link
     , Options
-    , Problem(..)
     , Replacement(..)
     , TextFormatting(..)
     , markup
@@ -14,44 +12,8 @@ module Internal.Model exposing
 
 {-| -}
 
-import Element exposing (Element)
-import Element.Background as Background
-import Element.Border as Border
-import Element.Font as Font
-import Element.Region
-import Internal.Flag as Flag
+import Mark.Error exposing (..)
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
-
-
-type Context
-    = InBlock String
-    | InInline String
-
-
-type Problem
-    = UnknownBlock
-    | UnknownInline
-    | EmptyBlock
-    | ExpectedIndent
-    | InlineStart
-    | InlineBar
-    | InlineEnd
-    | Expecting String
-    | Escape
-    | EscapedChar
-    | ExpectedNonBreaking
-    | Dash
-    | DoubleQuote
-    | Apostrophe
-    | StyleChange InlineStyle
-    | Newline
-    | DoubleNewline
-    | Space
-    | End
-    | Integer
-    | FloatingPoint
-    | InvalidNumber
-    | ExpectingAlphaNumeric
 
 
 {-| -}
@@ -167,9 +129,14 @@ blocks options existing =
             |. Parser.token (Parser.Token "|" (Expecting "|"))
             |. Parser.chompIf (\c -> c == ' ') Space
             |= Parser.oneOf
-                (List.map
-                    (blockToParser options.inlines)
-                    options.blocks
+                (case options.blocks of
+                    [] ->
+                        [ Parser.problem NoBlocks ]
+
+                    _ ->
+                        List.map
+                            (blockToParser options.inlines)
+                            options.blocks
                 )
             |> Parser.andThen
                 identity
@@ -250,7 +217,7 @@ inlineLoop inlineOptions existing =
     in
     Parser.oneOf
         [ -- Do any character replacements that are necessary
-          Parser.oneOf (replace inlineOptions.replacements existing Flag.none)
+          Parser.oneOf (replace inlineOptions.replacements existing)
             |> Parser.map Parser.Loop
 
         -- If a char matches the first character of a replacement,
@@ -345,10 +312,10 @@ inlineLoop inlineOptions existing =
         , Parser.succeed
             (Parser.Loop << changeStyle inlineOptions existing)
             |= Parser.oneOf
-                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (StyleChange Italic)))
-                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (StyleChange Strike)))
-                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (StyleChange Bold)))
-                , Parser.map (always Token) (Parser.token (Parser.Token "`" (StyleChange Token)))
+                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
+                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
+                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
+                , Parser.map (always Token) (Parser.token (Parser.Token "`" (Expecting "`")))
                 ]
 
         -- end on newline
@@ -429,7 +396,7 @@ styledText options txt until =
     Parser.loop (Text { text = vacantText, rendered = [], balancedReplacements = [] })
         (\found ->
             Parser.oneOf
-                [ Parser.oneOf (replace options.replacements found Flag.none)
+                [ Parser.oneOf (replace options.replacements found)
                     |> Parser.map Parser.Loop
 
                 -- If a char matches the first character of a replacement,
@@ -442,10 +409,10 @@ styledText options txt until =
                 , Parser.succeed
                     (Parser.Loop << cacheStyle options found)
                     |= Parser.oneOf
-                        [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (StyleChange Italic)))
-                        , Parser.map (always Strike) (Parser.token (Parser.Token "~" (StyleChange Strike)))
-                        , Parser.map (always Bold) (Parser.token (Parser.Token "*" (StyleChange Bold)))
-                        , Parser.map (always Token) (Parser.token (Parser.Token "`" (StyleChange Token)))
+                        [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
+                        , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
+                        , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
+                        , Parser.map (always Token) (Parser.token (Parser.Token "`" (Expecting "`")))
                         ]
 
                 -- chomp until a meaningful character
@@ -572,8 +539,8 @@ Escaping a character will skip the replacement.
     -> "..." -> ellipses
 
 -}
-replace : List Replacement -> Text rendered -> Flag.Field -> List (Parser Context Problem (Text rendered))
-replace replacements existing styles =
+replace : List Replacement -> Text rendered -> List (Parser Context Problem (Text rendered))
+replace replacements existing =
     let
         -- Escaped characters are captured as-is
         escaped =
@@ -766,44 +733,3 @@ flipStyle newStyle text =
 
         Fragments frags ->
             Fragments frags
-
-
-flagFieldToStyle field txt =
-    if field == Flag.none then
-        NoFormatting txt
-
-    else
-        Styles
-            (List.concat
-                [ if Flag.present Flag.bold field then
-                    [ Bold ]
-
-                  else
-                    []
-                , if Flag.present Flag.italic field then
-                    [ Italic ]
-
-                  else
-                    []
-                , if
-                    Flag.present Flag.strike field
-                        && Flag.present Flag.underline field
-                  then
-                    [ Underline ]
-
-                  else
-                    []
-                , if Flag.present Flag.strike field then
-                    [ Strike ]
-
-                  else
-                    []
-                , if Flag.present Flag.token field then
-                    -- styling.token
-                    [ Token ]
-
-                  else
-                    []
-                ]
-            )
-            txt

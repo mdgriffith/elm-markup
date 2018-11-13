@@ -1,6 +1,7 @@
 module Mark exposing
     ( parse, parseWith
-    , Options, default
+    , Options
+    , Context, Problem
     )
 
 {-|
@@ -11,32 +12,32 @@ module Mark exposing
 
 @docs Index, ListIcon, defaultListIcon
 
+@docs Context, Problem
+
 -}
 
 import Element exposing (Element)
-import Element.Background as Background
-import Element.Border as Border
-import Element.Font as Font
-import Element.Region
-import Html.Attributes
 import Internal.Model as Internal
 import Mark.Custom as Custom
 import Mark.Default
+import Mark.Error
 import Parser.Advanced as Parser exposing (Parser)
 
 
+{-| -}
 type alias Context =
-    Internal.Context
+    Mark.Error.Context
 
 
+{-| -}
 type alias Problem =
-    Internal.Problem
+    Mark.Error.Problem
 
 
 {-| -}
 parse : String -> Result (List (Parser.DeadEnd Context Problem)) (Element msg)
 parse source =
-    parseWith default source
+    parseWith Mark.Default.default source
         |> Result.map (\x -> x ())
 
 
@@ -47,34 +48,6 @@ parseWith :
     -> Result (List (Parser.DeadEnd Context Problem)) result
 parseWith options source =
     Parser.run (Internal.markup options) source
-
-
-{-| A default set of block and inline elements as well as some `defaultStyling` to style them.
--}
-default : Options (model -> Element msg)
-default =
-    { blocks =
-        Mark.Default.blocks
-    , merge = \els model -> Element.textColumn [] (List.map (\el -> el model) els)
-    , inlines =
-        { view = Mark.Default.inline
-
-        -- TextFormatting -> String -> result
-        , inlines = []
-        , merge = \els model -> Element.paragraph [] (List.map (\el -> el model) els)
-        , replacements =
-            [ Internal.Replacement "..." "…"
-            , Internal.Replacement "<>" "\u{00A0}"
-            , Internal.Replacement "---" "—"
-            , Internal.Replacement "--" "–"
-            , Internal.Replacement "'" "’"
-            , Internal.Balanced
-                { start = ( "\"", "“" )
-                , end = ( "\"", "”" )
-                }
-            ]
-        }
-    }
 
 
 {-| -}

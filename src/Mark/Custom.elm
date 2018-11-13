@@ -34,8 +34,8 @@ module Mark.Custom exposing
 
 -}
 
-import Element exposing (Element)
 import Internal.Model as Internal
+import Mark.Error
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
@@ -200,7 +200,7 @@ string =
     Param
         (Parser.succeed identity
             |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
-            |. Parser.token (Parser.Token "\"" Internal.DoubleQuote)
+            |. Parser.token (Parser.Token "\"" Mark.Error.DoubleQuote)
             |= quotedString
         )
 
@@ -214,10 +214,10 @@ quotedString =
                     (\new ->
                         Parser.Loop (found ++ new)
                     )
-                    |. Parser.token (Parser.Token "\\" Internal.Escape)
+                    |. Parser.token (Parser.Token "\\" Mark.Error.Escape)
                     |= Parser.getChompedString
-                        (Parser.chompIf (always True) Internal.EscapedChar)
-                , Parser.map (\_ -> Parser.Done found) (Parser.token (Parser.Token "\"" Internal.DoubleQuote))
+                        (Parser.chompIf (always True) Mark.Error.EscapedChar)
+                , Parser.map (\_ -> Parser.Done found) (Parser.token (Parser.Token "\"" Mark.Error.DoubleQuote))
                 , Parser.getChompedString
                     (Parser.chompWhile
                         (\c ->
@@ -241,7 +241,7 @@ oneOf : List ( String, value ) -> Param value
 oneOf opts =
     let
         parseOption ( name, val ) =
-            Parser.keyword (Parser.Token name (Internal.Expecting name))
+            Parser.keyword (Parser.Token name (Mark.Error.Expecting name))
                 |> Parser.map (always val)
     in
     Param
@@ -253,7 +253,7 @@ oneOf opts =
 {-| A parameter to use with `block1` or `block2`.
 -}
 type Param arg
-    = Param (Parser Internal.Context Internal.Problem arg)
+    = Param (Parser Mark.Error.Context Mark.Error.Problem arg)
 
 
 {-| -}
@@ -261,8 +261,8 @@ int : Param Int
 int =
     Param
         (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ') Internal.Space
-            |= Parser.int Internal.Integer Internal.InvalidNumber
+            |. Parser.chompIf (\c -> c == ' ') Mark.Error.Space
+            |= Parser.int Mark.Error.Integer Mark.Error.InvalidNumber
         )
 
 
@@ -271,8 +271,8 @@ float : Param Float
 float =
     Param
         (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ') Internal.Space
-            |= Parser.float Internal.FloatingPoint Internal.InvalidNumber
+            |. Parser.chompIf (\c -> c == ' ') Mark.Error.Space
+            |= Parser.float Mark.Error.FloatingPoint Mark.Error.InvalidNumber
         )
 
 
@@ -281,11 +281,11 @@ bool : Param Bool
 bool =
     Param
         (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ') Internal.Space
+            |. Parser.chompIf (\c -> c == ' ') Mark.Error.Space
             |= Parser.oneOf
-                [ Parser.token (Parser.Token "True" (Internal.Expecting "True"))
+                [ Parser.token (Parser.Token "True" (Mark.Error.Expecting "True"))
                     |> Parser.map (always True)
-                , Parser.token (Parser.Token "False" (Internal.Expecting "False"))
+                , Parser.token (Parser.Token "False" (Mark.Error.Expecting "False"))
                     |> Parser.map (always False)
                 ]
         )
@@ -320,10 +320,10 @@ paragraph name renderer =
                 (\almostElements ->
                     renderer almostElements
                 )
-                |. Parser.token (Parser.Token "\n" Internal.Newline)
-                |. Parser.token (Parser.Token "    " Internal.ExpectedIndent)
+                |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
+                |. Parser.token (Parser.Token "    " Mark.Error.ExpectedIndent)
                 |= inlineParser
-                |. Parser.token (Parser.Token "\n" Internal.Newline)
+                |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
         )
 
 
@@ -410,25 +410,25 @@ indented name renderer =
                 |= Parser.loop ""
                     (\txt ->
                         Parser.oneOf
-                            [ Parser.end Internal.End
+                            [ Parser.end Mark.Error.End
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Done txt
                                     )
-                            , Parser.token (Parser.Token "\n\n" Internal.DoubleNewline)
+                            , Parser.token (Parser.Token "\n\n" Mark.Error.DoubleNewline)
                                 |> Parser.map
                                     (\_ ->
                                         Parser.Done txt
                                     )
                             , if txt == "" then
-                                Parser.token (Parser.Token "    " Internal.ExpectedIndent)
+                                Parser.token (Parser.Token "    " Mark.Error.ExpectedIndent)
                                     |> Parser.map
                                         (\_ ->
                                             Parser.Loop txt
                                         )
 
                               else
-                                Parser.token (Parser.Token "\n    " Internal.ExpectedIndent)
+                                Parser.token (Parser.Token "\n    " Mark.Error.ExpectedIndent)
                                     |> Parser.map
                                         (\_ ->
                                             Parser.Loop (txt ++ "\n")
@@ -485,7 +485,7 @@ It parses bananas and then says `bananas`. If you wanted to do exactly this in r
 -}
 parser :
     String
-    -> (Parser Internal.Context Internal.Problem (List result) -> Parser Internal.Context Internal.Problem result)
+    -> (Parser Mark.Error.Context Mark.Error.Problem (List result) -> Parser Mark.Error.Context Mark.Error.Problem result)
     -> Block result
 parser name actualParser =
     Internal.Block name

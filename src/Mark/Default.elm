@@ -1,13 +1,34 @@
 module Mark.Default exposing
-    ( blocks, inline
-    , ListIcon(..), Index, listIcon
-    , listIcons, listStyles
+    ( default
+    , blocks, inline
+    , ListIcon(..), Index
+    , root, paragraph
+    , title, header, list, image, monospace
+    , replacements
+    , listIcon
     )
 
 {-|
 
+@docs default
+
 @docs blocks, inline
-@docs ListIcon, Index, listIcon
+@docs ListIcon, Index
+
+
+# Default Mergers
+
+@docs root, paragraph
+
+
+# Default Blocks
+
+@docs title, header, list, image, monospace
+
+
+# Character Replacements
+
+@docs replacements
 
 -}
 
@@ -19,7 +40,31 @@ import Element.Region
 import Html.Attributes
 import Internal.Model as Internal
 import Mark.Custom as Custom
+import Mark.Error
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+
+
+{-| A default set of block and inline elements as well as some `defaultStyling` to style them.
+-}
+default : Internal.Options (model -> Element msg)
+default =
+    { blocks =
+        blocks
+    , merge =
+        root
+            [ Element.spacing 64
+            , Element.width (Element.px 700)
+            , Element.centerX
+            , Element.padding 100
+            ]
+    , inlines =
+        { view = inline
+        , inlines = []
+        , merge = paragraph []
+        , replacements =
+            replacements
+        }
+    }
 
 
 inline : Internal.TextFormatting -> Maybe Internal.Link -> model -> Element msg
@@ -60,6 +105,27 @@ inline format link model =
                             Element.row []
                                 (List.map renderFragment frags)
                         }
+
+
+paragraph attrs els model =
+    Element.paragraph attrs (List.map (\el -> el model) els)
+
+
+root attrs els model =
+    Element.textColumn attrs (List.map (\el -> el model) els)
+
+
+replacements =
+    [ Internal.Replacement "..." "…"
+    , Internal.Replacement "<>" "\u{00A0}"
+    , Internal.Replacement "---" "—"
+    , Internal.Replacement "--" "–"
+    , Internal.Replacement "'" "’"
+    , Internal.Balanced
+        { start = ( "\"", "“" )
+        , end = ( "\"", "”" )
+        }
+    ]
 
 
 renderFragment frag =
@@ -103,49 +169,94 @@ toStyles style =
 **Note** none of these are special, they're all defined in terms of `Mark.Custom`.
 
 -}
-blocks : List (Internal.Block (model -> Element msg))
+blocks : List (Custom.Block (model -> Element msg))
 blocks =
-    [ Custom.paragraph "title"
+    [ title [ Font.size 48 ]
+    , header [ Font.size 36 ]
+    , monospace
+        [ Element.spacing 5
+        , Element.padding 24
+        , Background.color
+            (Element.rgba 0 0 0 0.04)
+        , Border.rounded 2
+        , Font.size 16
+        , Font.family
+            [ Font.external
+                { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
+                , name = "Source Code Pro"
+                }
+            , Font.sansSerif
+            ]
+        ]
+    , image []
+    , list
+        { style = listStyles
+        , icon = listIcons
+        }
+    ]
+
+
+{-| -}
+title : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
+title attrs =
+    Custom.paragraph "title"
         (\elements model ->
             Element.paragraph
-                [ Element.Region.heading 1
-
-                -- :: myStyling.title
-                ]
+                (Element.Region.heading 1 :: attrs)
                 (List.map (\viewEl -> viewEl model) elements)
         )
-    , Custom.paragraph "header"
+
+
+{-| -}
+header : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
+header attrs =
+    Custom.paragraph "header"
         (\elements model ->
             Element.paragraph
-                [ Element.Region.heading 2
-
-                -- :: myStyling.header
-                ]
+                (Element.Region.heading 2 :: attrs)
                 (List.map (\viewEl -> viewEl model) elements)
         )
-    , Custom.indented "monospace"
-        (\string model ->
-            Element.paragraph
-                [ Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
-                , Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
 
-                -- :: myStyling.monospace
-                ]
-                [ Element.text string ]
-        )
-    , Custom.block2 "image"
+
+{-| -}
+image : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
+image attrs =
+    Custom.block2 "image"
         (\src description model ->
             Element.image
-                []
+                attrs
                 { src = String.trim src
                 , description = String.trim description
                 }
         )
         Custom.string
         Custom.string
-    , Custom.parser "list"
-        list
-    ]
+
+
+{-| -}
+monospace : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
+monospace attrs =
+    Custom.indented "monospace"
+        (\string model ->
+            Element.paragraph
+                (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
+                    :: Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
+                    :: attrs
+                )
+                [ Element.text string ]
+        )
+
+
+{-| Parse a nested list
+-}
+list :
+    { icon : List Index -> ListIcon -> Element msg
+    , style : List Index -> List (Element.Attribute msg)
+    }
+    -> Custom.Block (model -> Element msg)
+list listConfig =
+    Custom.parser "list"
+        (listParser listConfig)
 
 
 
@@ -230,6 +341,13 @@ type alias Index =
 
 
 {-| -}
+type ListIcon
+    = Bullet
+    | Arrow
+    | Number
+
+
+{-| -}
 type alias Cursor =
     { current : Int
     , stack : List Int
@@ -252,26 +370,19 @@ mapCursor fn cursor =
 
 
 {-| -}
-type ListIcon
-    = Bullet
-    | Arrow
-    | Number
-
-
-{-| -}
 type CursorReset
     = CursorReset (List (Maybe Int))
 
 
 {-| -}
-indentLevel : Parser Internal.Context Internal.Problem Int
+indentLevel : Parser Mark.Error.Context Mark.Error.Problem Int
 indentLevel =
     Parser.oneOf
-        [ Parser.token (Parser.Token (String.repeat 12 " ") Internal.ExpectedIndent)
+        [ Parser.token (Parser.Token (String.repeat 12 " ") Mark.Error.ExpectedIndent)
             |> Parser.map (always 3)
-        , Parser.token (Parser.Token (String.repeat 8 " ") Internal.ExpectedIndent)
+        , Parser.token (Parser.Token (String.repeat 8 " ") Mark.Error.ExpectedIndent)
             |> Parser.map (always 2)
-        , Parser.token (Parser.Token (String.repeat 4 " ") Internal.ExpectedIndent)
+        , Parser.token (Parser.Token (String.repeat 4 " ") Mark.Error.ExpectedIndent)
             |> Parser.map (always 1)
         ]
 
@@ -420,22 +531,25 @@ emptyListBuilder =
         }
 
 
-list :
-    Parser Internal.Context Internal.Problem (List (model -> Element msg))
-    -> Parser Internal.Context Internal.Problem (model -> Element msg)
-list inlines =
+listParser :
+    { icon : List Index -> ListIcon -> Element msg
+    , style : List Index -> List (Element.Attribute msg)
+    }
+    -> Parser Mark.Error.Context Mark.Error.Problem (List (model -> Element msg))
+    -> Parser Mark.Error.Context Mark.Error.Problem (model -> Element msg)
+listParser config inlines =
     Parser.loop
         ( emptyCursor, emptyListBuilder )
-        (listItem inlines)
+        (listItem config inlines)
 
 
-finalizeList (ListBuilder builder) model =
+finalizeList config (ListBuilder builder) model =
     Element.column
         []
-        (renderLevels model builder.levels)
+        (renderLevels config model builder.levels)
 
 
-renderLevels model levels =
+renderLevels config model levels =
     case levels of
         [] ->
             []
@@ -449,10 +563,10 @@ renderLevels model levels =
                     -- We just collapsed everything down to the top level.
                     top
                         |> List.reverse
-                        |> List.map (renderListItem model)
+                        |> List.map (renderListItem config model)
 
 
-renderListItem model (ListItem item) =
+renderListItem config model (ListItem item) =
     case item.icon of
         Nothing ->
             case item.children of
@@ -461,28 +575,28 @@ renderListItem model (ListItem item) =
 
                 _ ->
                     Element.column
-                        (listStyles [])
+                        (config.style [])
                         (renderParagraph model item.content
                             :: (item.children
                                     |> List.reverse
-                                    |> List.map (renderListItem model)
+                                    |> List.map (renderListItem config model)
                                )
                         )
 
         Just actualIcon ->
             Element.row []
                 [ Element.el [ Element.alignTop ] <|
-                    listIcons
+                    config.icon
                         actualIcon.decorations
                         actualIcon.token
                 , Element.textColumn
-                    (listStyles
+                    (config.style
                         actualIcon.decorations
                     )
                     (renderParagraph model item.content
                         :: (item.children
                                 |> List.reverse
-                                |> List.map (renderListItem model)
+                                |> List.map (renderListItem config model)
                            )
                     )
                 ]
@@ -531,10 +645,13 @@ renderParagraph model content =
 
 -}
 listItem :
-    Parser Internal.Context Internal.Problem (List (model -> Element msg))
+    { icon : List Index -> ListIcon -> Element msg
+    , style : List Index -> List (Element.Attribute msg)
+    }
+    -> Parser Mark.Error.Context Mark.Error.Problem (List (model -> Element msg))
     -> ( Cursor, ListBuilder model msg )
-    -> Parser Internal.Context Internal.Problem (Parser.Step ( Cursor, ListBuilder model msg ) (model -> Element msg))
-listItem inlines ( cursor, ListBuilder builder ) =
+    -> Parser Mark.Error.Context Mark.Error.Problem (Parser.Step ( Cursor, ListBuilder model msg ) (model -> Element msg))
+listItem config inlines ( cursor, ListBuilder builder ) =
     Parser.oneOf
         [ Parser.succeed identity
             |= indentLevel
@@ -543,20 +660,20 @@ listItem inlines ( cursor, ListBuilder builder ) =
                     Parser.map Parser.Loop
                         (indentedListItem inlines cursor (ListBuilder builder) indent)
                 )
-        , Parser.end Internal.End
+        , Parser.end Mark.Error.End
             |> Parser.map
                 (\_ ->
-                    Parser.Done (finalizeList (ListBuilder builder))
+                    Parser.Done (finalizeList config (ListBuilder builder))
                 )
         , if builder.previousLineEmpty then
-            Parser.token (Parser.Token "\n" Internal.Newline)
+            Parser.token (Parser.Token "\n" Mark.Error.Newline)
                 |> Parser.map
                     (\_ ->
-                        Parser.Done (finalizeList (ListBuilder builder))
+                        Parser.Done (finalizeList config (ListBuilder builder))
                     )
 
           else
-            Parser.token (Parser.Token "\n" Internal.Newline)
+            Parser.token (Parser.Token "\n" Mark.Error.Newline)
                 |> Parser.map
                     (always
                         (Parser.Loop ( cursor, ListBuilder { builder | previousLineEmpty = True } ))
@@ -575,11 +692,11 @@ We already know the indent.
 
 -}
 indentedListItem :
-    Parser Internal.Context Internal.Problem (List (model -> Element msg))
+    Parser Mark.Error.Context Mark.Error.Problem (List (model -> Element msg))
     -> Cursor
     -> ListBuilder model msg
     -> Int
-    -> Parser Internal.Context Internal.Problem ( { current : Int, stack : List Int }, ListBuilder model msg )
+    -> Parser Mark.Error.Context Mark.Error.Problem ( { current : Int, stack : List Int }, ListBuilder model msg )
 indentedListItem inlines cursor (ListBuilder builder) indent =
     Parser.oneOf <|
         List.filterMap identity
@@ -603,7 +720,7 @@ indentedListItem inlines cursor (ListBuilder builder) indent =
                         , ListBuilder
                             { builder | previousLineEmpty = True }
                         )
-                        |. Parser.token (Parser.Token "\n" Internal.Newline)
+                        |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
                     )
             ]
 
@@ -815,22 +932,22 @@ collapseLevel num levels =
                 levels
 
 
-listIcon : Parser Internal.Context Internal.Problem ( List (Maybe Int), List String, ListIcon )
+listIcon : Parser Mark.Error.Context Mark.Error.Problem ( List (Maybe Int), List String, ListIcon )
 listIcon =
     Parser.oneOf
         [ Parser.succeed ( [], [], Arrow )
             |. Parser.oneOf
-                [ Parser.token (Parser.Token "->" (Internal.Expecting "->"))
-                , Parser.token (Parser.Token "-->" (Internal.Expecting "-->"))
+                [ Parser.token (Parser.Token "->" (Mark.Error.Expecting "->"))
+                , Parser.token (Parser.Token "-->" (Mark.Error.Expecting "-->"))
                 ]
             |. Parser.chompWhile (\c -> c == ' ')
         , Parser.succeed identity
-            |. Parser.token (Parser.Token "-" Internal.Dash)
+            |. Parser.token (Parser.Token "-" Mark.Error.Dash)
             |= Parser.oneOf
                 [ Parser.succeed ( [], [], Bullet )
                     |. Parser.oneOf
-                        [ Parser.token (Parser.Token " " Internal.Space)
-                        , Parser.token (Parser.Token "-" Internal.Dash)
+                        [ Parser.token (Parser.Token " " Mark.Error.Space)
+                        , Parser.token (Parser.Token "-" Mark.Error.Dash)
                         ]
                     |. Parser.chompWhile (\c -> c == ' ' || c == '-')
                 , Parser.succeed
@@ -838,7 +955,7 @@ listIcon =
                         ( reset, decorations, Number )
                     )
                     |= Parser.loop ( [], [] ) listIndex
-                    |. Parser.token (Parser.Token " " Internal.Space)
+                    |. Parser.token (Parser.Token " " Mark.Error.Space)
                     |. Parser.chompWhile (\c -> c == ' ')
                 ]
         ]
@@ -853,7 +970,7 @@ indentedInlines indent inlines alreadyFound =
         _ ->
             Parser.oneOf
                 [ Parser.succeed (\new -> Parser.Loop (new :: alreadyFound))
-                    |. Parser.token (Parser.Token (String.repeat (4 * (indent + 1)) " ") Internal.ExpectedIndent)
+                    |. Parser.token (Parser.Token (String.repeat (4 * (indent + 1)) " ") Mark.Error.ExpectedIndent)
                     |= inlines
                 , Parser.succeed
                     (Parser.Done (List.reverse alreadyFound))
@@ -882,10 +999,10 @@ listIndex ( cursorReset, decorations ) =
                             _ ->
                                 Nothing
                     )
-                    |= Parser.getChompedString (Parser.chompIf Char.isDigit Internal.Integer)
+                    |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Error.Integer)
                     |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
                 , Parser.succeed Nothing
-                    |. Parser.chompIf Char.isAlpha Internal.ExpectingAlphaNumeric
+                    |. Parser.chompIf Char.isAlpha Mark.Error.ExpectingAlphaNumeric
                     |. Parser.chompWhile Char.isAlpha
                 ]
             |= Parser.getChompedString
