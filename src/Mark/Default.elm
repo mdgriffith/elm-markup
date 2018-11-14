@@ -38,15 +38,13 @@ import Element.Border as Border
 import Element.Font as Font
 import Element.Region
 import Html.Attributes
-import Internal.Model as Internal
-import Mark.Custom as Custom
-import Mark.Error
+import Mark.Custom
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| A default set of block and inline elements as well as some `defaultStyling` to style them.
 -}
-default : Internal.Options (model -> Element msg)
+default : Mark.Custom.Options (model -> Element msg)
 default =
     { blocks =
         blocks
@@ -100,10 +98,10 @@ default =
 
 
 {-| -}
-inline : { code : List (Element.Attribute msg), link : List (Element.Attribute msg) } -> Internal.TextFormatting -> Maybe Internal.Link -> model -> Element msg
+inline : { code : List (Element.Attribute msg), link : List (Element.Attribute msg) } -> Mark.Custom.TextFormatting -> Maybe Mark.Custom.Link -> model -> Element msg
 inline style format link model =
     case format of
-        Internal.NoFormatting txt ->
+        Mark.Custom.NoFormatting txt ->
             case link of
                 Nothing ->
                     Element.text txt
@@ -114,7 +112,7 @@ inline style format link model =
                         , label = Element.text txt
                         }
 
-        Internal.Styles styles txt ->
+        Mark.Custom.Styles styles txt ->
             case link of
                 Nothing ->
                     Element.el (List.concatMap (toStyles style) styles) (Element.text txt)
@@ -125,7 +123,7 @@ inline style format link model =
                         , label = Element.text txt
                         }
 
-        Internal.Fragments frags ->
+        Mark.Custom.Fragments frags ->
             case link of
                 Nothing ->
                     Element.row [ Element.htmlAttribute (Html.Attributes.style "display" "inline-flex") ]
@@ -149,12 +147,12 @@ root attrs els model =
 
 
 replacements =
-    [ Internal.Replacement "..." "…"
-    , Internal.Replacement "<>" "\u{00A0}"
-    , Internal.Replacement "---" "—"
-    , Internal.Replacement "--" "–"
-    , Internal.Replacement "'" "’"
-    , Internal.Balanced
+    [ Mark.Custom.replacement "..." "…"
+    , Mark.Custom.replacement "<>" "\u{00A0}"
+    , Mark.Custom.replacement "---" "—"
+    , Mark.Custom.replacement "--" "–"
+    , Mark.Custom.replacement "'" "’"
+    , Mark.Custom.balanced
         { start = ( "\"", "“" )
         , end = ( "\"", "”" )
         }
@@ -167,22 +165,22 @@ renderFragment style frag =
 
 toStyles config style =
     case style of
-        Internal.NoStyleChange ->
+        Mark.Custom.NoStyleChange ->
             []
 
-        Internal.Bold ->
+        Mark.Custom.Bold ->
             [ Font.bold ]
 
-        Internal.Italic ->
+        Mark.Custom.Italic ->
             [ Font.italic ]
 
-        Internal.Strike ->
+        Mark.Custom.Strike ->
             [ Font.strike ]
 
-        Internal.Underline ->
+        Mark.Custom.Underline ->
             [ Font.underline ]
 
-        Internal.Token ->
+        Mark.Custom.Token ->
             config.code
 
 
@@ -201,7 +199,7 @@ toStyles config style =
 **Note** none of these are special, they're all defined in terms of `Mark.Custom`.
 
 -}
-blocks : List (Custom.Block (model -> Element msg))
+blocks : List (Mark.Custom.Block (model -> Element msg))
 blocks =
     [ title [ Font.size 48 ]
     , header [ Font.size 36 ]
@@ -229,9 +227,9 @@ blocks =
 
 
 {-| -}
-title : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
+title : List (Element.Attribute msg) -> Mark.Custom.Block (model -> Element msg)
 title attrs =
-    Custom.paragraph "Title"
+    Mark.Custom.paragraph "Title"
         (\elements model ->
             Element.paragraph
                 (Element.Region.heading 1 :: attrs)
@@ -240,9 +238,9 @@ title attrs =
 
 
 {-| -}
-header : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
+header : List (Element.Attribute msg) -> Mark.Custom.Block (model -> Element msg)
 header attrs =
-    Custom.paragraph "Header"
+    Mark.Custom.paragraph "Header"
         (\elements model ->
             Element.paragraph
                 (Element.Region.heading 2 :: attrs)
@@ -251,9 +249,9 @@ header attrs =
 
 
 {-| -}
-image : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
+image : List (Element.Attribute msg) -> Mark.Custom.Block (model -> Element msg)
 image attrs =
-    Custom.block2 "Image"
+    Mark.Custom.block2 "Image"
         (\src description model ->
             Element.image
                 attrs
@@ -261,14 +259,14 @@ image attrs =
                 , description = String.trim description
                 }
         )
-        Custom.string
-        Custom.string
+        Mark.Custom.string
+        Mark.Custom.string
 
 
 {-| -}
-monospace : List (Element.Attribute msg) -> Custom.Block (model -> Element msg)
+monospace : List (Element.Attribute msg) -> Mark.Custom.Block (model -> Element msg)
 monospace attrs =
-    Custom.indented "Monospace"
+    Mark.Custom.indented "Monospace"
         (\string model ->
             Element.paragraph
                 (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
@@ -285,9 +283,9 @@ list :
     { icon : List Index -> ListIcon -> Element msg
     , style : List Index -> List (Element.Attribute msg)
     }
-    -> Custom.Block (model -> Element msg)
+    -> Mark.Custom.Block (model -> Element msg)
 list listConfig =
-    Custom.parser "List"
+    Mark.Custom.parser "List"
         (listParser listConfig)
 
 
@@ -411,18 +409,18 @@ type CursorReset
 
 
 {-| -}
-indentLevelAbove : Int -> Parser Mark.Error.Context Mark.Error.Problem Int
+indentLevelAbove : Int -> Parser Mark.Custom.Context Mark.Custom.Problem Int
 indentLevelAbove base =
     Parser.succeed
         (\additional ->
             1 + (String.length additional // 4)
         )
-        |. Parser.token (Parser.Token (String.repeat ((base + 1) * 4) " ") Mark.Error.ExpectedIndent)
+        |. Parser.token (Parser.Token (String.repeat ((base + 1) * 4) " ") Mark.Custom.ExpectedIndent)
         |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
 
 
 {-| -}
-indentLevelAtOrBelow : Int -> Parser Mark.Error.Context Mark.Error.Problem Int
+indentLevelAtOrBelow : Int -> Parser Mark.Custom.Context Mark.Custom.Problem Int
 indentLevelAtOrBelow base =
     Parser.succeed
         (\additional ->
@@ -580,8 +578,8 @@ listParser :
     , style : List Index -> List (Element.Attribute msg)
     }
     -> Int
-    -> Parser Mark.Error.Context Mark.Error.Problem (List (model -> Element msg))
-    -> Parser Mark.Error.Context Mark.Error.Problem (model -> Element msg)
+    -> Parser Mark.Custom.Context Mark.Custom.Problem (List (model -> Element msg))
+    -> Parser Mark.Custom.Context Mark.Custom.Problem (model -> Element msg)
 listParser config indent inlines =
     Parser.loop
         ( emptyCursor, emptyListBuilder )
@@ -694,9 +692,9 @@ listItem :
     , style : List Index -> List (Element.Attribute msg)
     }
     -> Int
-    -> Parser Mark.Error.Context Mark.Error.Problem (List (model -> Element msg))
+    -> Parser Mark.Custom.Context Mark.Custom.Problem (List (model -> Element msg))
     -> ( Cursor, ListBuilder model msg )
-    -> Parser Mark.Error.Context Mark.Error.Problem (Parser.Step ( Cursor, ListBuilder model msg ) (model -> Element msg))
+    -> Parser Mark.Custom.Context Mark.Custom.Problem (Parser.Step ( Cursor, ListBuilder model msg ) (model -> Element msg))
 listItem config baseIndent inlines ( cursor, ListBuilder builder ) =
     Parser.oneOf
         [ Parser.succeed identity
@@ -707,7 +705,7 @@ listItem config baseIndent inlines ( cursor, ListBuilder builder ) =
                     Parser.map Parser.Loop
                         (indentedListItem inlines cursor (ListBuilder builder) indent)
                 )
-        , Parser.end Mark.Error.End
+        , Parser.end Mark.Custom.End
             |> Parser.map
                 (\_ ->
                     Parser.Done (finalizeList config (ListBuilder builder))
@@ -716,12 +714,12 @@ listItem config baseIndent inlines ( cursor, ListBuilder builder ) =
         -- Empty Line
         , Parser.succeed
             (Parser.Loop ( cursor, ListBuilder builder ))
-            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Mark.Error.Newline))
+            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Mark.Custom.Newline))
             |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Mark.Error.Newline))
+            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Mark.Custom.Newline))
         , Parser.succeed
             (Parser.Loop ( cursor, ListBuilder builder ))
-            |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
+            |. Parser.token (Parser.Token "\n" Mark.Custom.Newline)
 
         -- If we get here, we're done!
         , Parser.succeed
@@ -740,11 +738,11 @@ We already know the indent.
 
 -}
 indentedListItem :
-    Parser Mark.Error.Context Mark.Error.Problem (List (model -> Element msg))
+    Parser Mark.Custom.Context Mark.Custom.Problem (List (model -> Element msg))
     -> Cursor
     -> ListBuilder model msg
     -> Int
-    -> Parser Mark.Error.Context Mark.Error.Problem ( { current : Int, stack : List Int }, ListBuilder model msg )
+    -> Parser Mark.Custom.Context Mark.Custom.Problem ( { current : Int, stack : List Int }, ListBuilder model msg )
 indentedListItem inlines cursor (ListBuilder builder) indent =
     Parser.oneOf <|
         [ Parser.succeed (addItem cursor indent (ListBuilder builder))
@@ -963,22 +961,22 @@ collapseLevel num levels =
                 levels
 
 
-listIcon : Parser Mark.Error.Context Mark.Error.Problem ( List (Maybe Int), List String, ListIcon )
+listIcon : Parser Mark.Custom.Context Mark.Custom.Problem ( List (Maybe Int), List String, ListIcon )
 listIcon =
     Parser.oneOf
         [ Parser.succeed ( [], [], Arrow )
             |. Parser.oneOf
-                [ Parser.token (Parser.Token "->" (Mark.Error.Expecting "->"))
-                , Parser.token (Parser.Token "-->" (Mark.Error.Expecting "-->"))
+                [ Parser.token (Parser.Token "->" (Mark.Custom.Expecting "->"))
+                , Parser.token (Parser.Token "-->" (Mark.Custom.Expecting "-->"))
                 ]
             |. Parser.chompWhile (\c -> c == ' ')
         , Parser.succeed identity
-            |. Parser.token (Parser.Token "-" Mark.Error.Dash)
+            |. Parser.token (Parser.Token "-" Mark.Custom.Dash)
             |= Parser.oneOf
                 [ Parser.succeed ( [], [], Bullet )
                     |. Parser.oneOf
-                        [ Parser.token (Parser.Token " " Mark.Error.Space)
-                        , Parser.token (Parser.Token "-" Mark.Error.Dash)
+                        [ Parser.token (Parser.Token " " Mark.Custom.Space)
+                        , Parser.token (Parser.Token "-" Mark.Custom.Dash)
                         ]
                     |. Parser.chompWhile (\c -> c == ' ' || c == '-')
                 , Parser.succeed
@@ -986,7 +984,7 @@ listIcon =
                         ( reset, decorations, Number )
                     )
                     |= Parser.loop ( [], [] ) listIndex
-                    |. Parser.token (Parser.Token " " Mark.Error.Space)
+                    |. Parser.token (Parser.Token " " Mark.Custom.Space)
                     |. Parser.chompWhile (\c -> c == ' ')
                 ]
         ]
@@ -1001,7 +999,7 @@ indentedInlines indent inlines alreadyFound =
         _ ->
             Parser.oneOf
                 [ Parser.succeed (\new -> Parser.Loop (new :: alreadyFound))
-                    |. Parser.token (Parser.Token (String.repeat (4 * (indent + 1)) " ") Mark.Error.ExpectedIndent)
+                    |. Parser.token (Parser.Token (String.repeat (4 * (indent + 1)) " ") Mark.Custom.ExpectedIndent)
                     |= inlines
                 , Parser.succeed
                     (Parser.Done (List.reverse alreadyFound))
@@ -1030,10 +1028,10 @@ listIndex ( cursorReset, decorations ) =
                             _ ->
                                 Nothing
                     )
-                    |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Error.Integer)
+                    |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Custom.Integer)
                     |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
                 , Parser.succeed Nothing
-                    |. Parser.chompIf Char.isAlpha Mark.Error.ExpectingAlphaNumeric
+                    |. Parser.chompIf Char.isAlpha Mark.Custom.ExpectingAlphaNumeric
                     |. Parser.chompWhile Char.isAlpha
                 ]
             |= Parser.getChompedString
