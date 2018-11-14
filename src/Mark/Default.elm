@@ -58,7 +58,39 @@ default =
             , Element.padding 100
             ]
     , inlines =
-        { view = inline
+        { view =
+            inline
+                { code =
+                    [ Background.color
+                        (Element.rgba 0 0 0 0.04)
+                    , Border.rounded 2
+                    , Element.paddingXY 5 3
+                    , Font.size 16
+                    , Font.family
+                        [ Font.external
+                            { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
+                            , name = "Source Code Pro"
+                            }
+                        , Font.sansSerif
+                        ]
+                    ]
+                , link =
+                    [ Font.color
+                        (Element.rgb
+                            (17 / 255)
+                            (132 / 255)
+                            (206 / 255)
+                        )
+                    , Element.mouseOver
+                        [ Font.color
+                            (Element.rgb
+                                (234 / 255)
+                                (21 / 255)
+                                (122 / 255)
+                            )
+                        ]
+                    ]
+                }
         , inlines = []
         , merge = paragraph []
         , replacements =
@@ -67,8 +99,9 @@ default =
     }
 
 
-inline : Internal.TextFormatting -> Maybe Internal.Link -> model -> Element msg
-inline format link model =
+{-| -}
+inline : { code : List (Element.Attribute msg), link : List (Element.Attribute msg) } -> Internal.TextFormatting -> Maybe Internal.Link -> model -> Element msg
+inline style format link model =
     case format of
         Internal.NoFormatting txt ->
             case link of
@@ -76,7 +109,7 @@ inline format link model =
                     Element.text txt
 
                 Just { url } ->
-                    Element.link []
+                    Element.link style.link
                         { url = url
                         , label = Element.text txt
                         }
@@ -84,10 +117,10 @@ inline format link model =
         Internal.Styles styles txt ->
             case link of
                 Nothing ->
-                    Element.el (List.filterMap toStyles styles) (Element.text txt)
+                    Element.el (List.concatMap (toStyles style) styles) (Element.text txt)
 
                 Just { url } ->
-                    Element.link (List.filterMap toStyles styles)
+                    Element.link (style.link ++ List.concatMap (toStyles style) styles)
                         { url = url
                         , label = Element.text txt
                         }
@@ -95,15 +128,15 @@ inline format link model =
         Internal.Fragments frags ->
             case link of
                 Nothing ->
-                    Element.row []
-                        (List.map renderFragment frags)
+                    Element.row [ Element.htmlAttribute (Html.Attributes.style "display" "inline-flex") ]
+                        (List.map (renderFragment style) frags)
 
                 Just { url } ->
-                    Element.link []
+                    Element.link style.link
                         { url = url
                         , label =
-                            Element.row []
-                                (List.map renderFragment frags)
+                            Element.row [ Element.htmlAttribute (Html.Attributes.style "display" "inline-flex") ]
+                                (List.map (renderFragment style) frags)
                         }
 
 
@@ -128,30 +161,29 @@ replacements =
     ]
 
 
-renderFragment frag =
-    Element.el (List.filterMap toStyles frag.styles) (Element.text frag.text)
+renderFragment style frag =
+    Element.el (List.concatMap (toStyles style) frag.styles) (Element.text frag.text)
 
 
-toStyles style =
+toStyles config style =
     case style of
         Internal.NoStyleChange ->
-            Nothing
+            []
 
         Internal.Bold ->
-            Just Font.bold
+            [ Font.bold ]
 
         Internal.Italic ->
-            Just Font.italic
+            [ Font.italic ]
 
         Internal.Strike ->
-            Just Font.strike
+            [ Font.strike ]
 
         Internal.Underline ->
-            Just Font.underline
+            [ Font.underline ]
 
         Internal.Token ->
-            --Just Font.bold
-            Nothing
+            config.code
 
 
 {-| A set of common default blocks.
@@ -266,13 +298,17 @@ list listConfig =
 {-| -}
 listStyles : List Index -> List (Element.Attribute msg)
 listStyles cursor =
+    let
+        _ =
+            Debug.log "list styles" cursor
+    in
     case List.length cursor of
         0 ->
             -- top level element
             [ Element.spacing 64 ]
 
         1 ->
-            [ Element.spacing 16 ]
+            [ Element.spacing 32 ]
 
         2 ->
             [ Element.spacing 16 ]
@@ -375,16 +411,24 @@ type CursorReset
 
 
 {-| -}
-indentLevel : Parser Mark.Error.Context Mark.Error.Problem Int
-indentLevel =
-    Parser.oneOf
-        [ Parser.token (Parser.Token (String.repeat 12 " ") Mark.Error.ExpectedIndent)
-            |> Parser.map (always 3)
-        , Parser.token (Parser.Token (String.repeat 8 " ") Mark.Error.ExpectedIndent)
-            |> Parser.map (always 2)
-        , Parser.token (Parser.Token (String.repeat 4 " ") Mark.Error.ExpectedIndent)
-            |> Parser.map (always 1)
-        ]
+indentLevelAbove : Int -> Parser Mark.Error.Context Mark.Error.Problem Int
+indentLevelAbove base =
+    Parser.succeed
+        (\additional ->
+            1 + (String.length additional // 4)
+        )
+        |. Parser.token (Parser.Token (String.repeat ((base + 1) * 4) " ") Mark.Error.ExpectedIndent)
+        |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
+
+
+{-| -}
+indentLevelAtOrBelow : Int -> Parser Mark.Error.Context Mark.Error.Problem Int
+indentLevelAtOrBelow base =
+    Parser.succeed
+        (\additional ->
+            String.length additional // 4
+        )
+        |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
 
 
 {-| = indentLevel icon space content
@@ -535,17 +579,18 @@ listParser :
     { icon : List Index -> ListIcon -> Element msg
     , style : List Index -> List (Element.Attribute msg)
     }
+    -> Int
     -> Parser Mark.Error.Context Mark.Error.Problem (List (model -> Element msg))
     -> Parser Mark.Error.Context Mark.Error.Problem (model -> Element msg)
-listParser config inlines =
+listParser config indent inlines =
     Parser.loop
         ( emptyCursor, emptyListBuilder )
-        (listItem config inlines)
+        (listItem config indent inlines)
 
 
 finalizeList config (ListBuilder builder) model =
     Element.column
-        []
+        (config.style [])
         (renderLevels config model builder.levels)
 
 
@@ -648,13 +693,15 @@ listItem :
     { icon : List Index -> ListIcon -> Element msg
     , style : List Index -> List (Element.Attribute msg)
     }
+    -> Int
     -> Parser Mark.Error.Context Mark.Error.Problem (List (model -> Element msg))
     -> ( Cursor, ListBuilder model msg )
     -> Parser Mark.Error.Context Mark.Error.Problem (Parser.Step ( Cursor, ListBuilder model msg ) (model -> Element msg))
-listItem config inlines ( cursor, ListBuilder builder ) =
+listItem config baseIndent inlines ( cursor, ListBuilder builder ) =
     Parser.oneOf
         [ Parser.succeed identity
-            |= indentLevel
+            -- Get the indent level above the baseline.
+            |= indentLevelAbove baseIndent
             |> Parser.andThen
                 (\indent ->
                     Parser.map Parser.Loop
@@ -665,19 +712,20 @@ listItem config inlines ( cursor, ListBuilder builder ) =
                 (\_ ->
                     Parser.Done (finalizeList config (ListBuilder builder))
                 )
-        , if builder.previousLineEmpty then
-            Parser.token (Parser.Token "\n" Mark.Error.Newline)
-                |> Parser.map
-                    (\_ ->
-                        Parser.Done (finalizeList config (ListBuilder builder))
-                    )
 
-          else
-            Parser.token (Parser.Token "\n" Mark.Error.Newline)
-                |> Parser.map
-                    (always
-                        (Parser.Loop ( cursor, ListBuilder { builder | previousLineEmpty = True } ))
-                    )
+        -- Empty Line
+        , Parser.succeed
+            (Parser.Loop ( cursor, ListBuilder builder ))
+            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Mark.Error.Newline))
+            |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Mark.Error.Newline))
+        , Parser.succeed
+            (Parser.Loop ( cursor, ListBuilder builder ))
+            |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
+
+        -- If we get here, we're done!
+        , Parser.succeed
+            (Parser.Done (finalizeList config (ListBuilder builder)))
         ]
 
 
@@ -699,30 +747,13 @@ indentedListItem :
     -> Parser Mark.Error.Context Mark.Error.Problem ( { current : Int, stack : List Int }, ListBuilder model msg )
 indentedListItem inlines cursor (ListBuilder builder) indent =
     Parser.oneOf <|
-        List.filterMap identity
-            [ Just
-                (Parser.succeed (addItem cursor indent (ListBuilder builder))
-                    |= Parser.map Just listIcon
-                    |. Parser.chompWhile (\c -> c == ' ')
-                    |= inlines
-                )
-            , Just
-                (Parser.succeed (addItem cursor indent (ListBuilder builder) Nothing)
-                    |= inlines
-                )
-            , if builder.previousLineEmpty then
-                Nothing
-
-              else
-                Just
-                    (Parser.succeed
-                        ( cursor
-                        , ListBuilder
-                            { builder | previousLineEmpty = True }
-                        )
-                        |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
-                    )
-            ]
+        [ Parser.succeed (addItem cursor indent (ListBuilder builder))
+            |= Parser.map Just listIcon
+            |. Parser.chompWhile (\c -> c == ' ')
+            |= inlines
+        , Parser.succeed (addItem cursor indent (ListBuilder builder) Nothing)
+            |= inlines
+        ]
 
 
 {-| A list item started with a list icon.
