@@ -42,7 +42,7 @@ type Replacement
 
 {-| -}
 type Block result
-    = Block String (Parser Context Problem (List result) -> Parser Context Problem result)
+    = Block String (Int -> Parser Context Problem (List result) -> Parser Context Problem result)
 
 
 {-| -}
@@ -110,6 +110,7 @@ markup options =
     inlines -> inlines
 
 -}
+blocks : Options result -> List result -> Parser Context Problem (Parser.Step (List result) (List result))
 blocks options existing =
     Parser.oneOf
         [ Parser.end End
@@ -125,9 +126,12 @@ blocks options existing =
                 )
 
         -- custom blocks
-        , Parser.succeed identity
+        , Parser.succeed
+            (\blockParser ->
+                blockParser 0 (Parser.loop emptyText (inlineLoop options.inlines))
+            )
             |. Parser.token (Parser.Token "|=" (Expecting "|="))
-            |. Parser.chompIf (\c -> c == ' ') Space
+            |. Parser.chompWhile (\c -> c == ' ')
             |= Parser.oneOf
                 (case options.blocks of
                     [] ->
@@ -135,15 +139,19 @@ blocks options existing =
 
                     _ ->
                         List.filterMap
-                            (blockToParser options.inlines)
+                            blockToParser
                             options.blocks
                 )
+            |. Parser.chompWhile (\c -> c == ' ')
+            |. Parser.chompIf (\c -> c == '\n') Newline
             |> Parser.andThen
-                identity
-            |> Parser.map
-                (\found ->
-                    Parser.Loop
-                        (found :: existing)
+                (\blockParser ->
+                    Parser.map
+                        (\found ->
+                            Parser.Loop
+                                (found :: existing)
+                        )
+                        blockParser
                 )
 
         -- custom inlines
@@ -153,6 +161,19 @@ blocks options existing =
                     Parser.Loop
                         (options.inlines.merge found :: existing)
                 )
+        ]
+
+
+{-| -}
+indent : Parser Mark.Error.Context Mark.Error.Problem Int
+indent =
+    Parser.oneOf
+        [ --     Parser.token (Parser.Token (String.repeat 12 " ") Mark.Error.ExpectedIndent)
+          --     |> Parser.map (always 3)
+          -- , Parser.token (Parser.Token (String.repeat 8 " ") Mark.Error.ExpectedIndent)
+          --     |> Parser.map (always 2)
+          Parser.token (Parser.Token (String.repeat 4 " ") Mark.Error.ExpectedIndent)
+            |> Parser.map (always 1)
         ]
 
 
@@ -185,8 +206,10 @@ capitalize str =
             Just (String.toUpper fst ++ remaining)
 
 
-blockToParser : InlineOptions result -> Block result -> Maybe (Parser Context Problem (Parser Context Problem result))
-blockToParser inlines blockable =
+blockToParser :
+    Block result
+    -> Maybe (Parser Context Problem (Int -> Parser Context Problem (List result) -> Parser Context Problem result))
+blockToParser blockable =
     case blockable of
         Block nonstandardizedName parser ->
             let
@@ -204,7 +227,7 @@ blockToParser inlines blockable =
                         |> Parser.inContext (InBlock name)
                         |> Parser.map
                             (\_ ->
-                                parser (Parser.loop emptyText (inlineLoop inlines))
+                                parser
                             )
                         |> Just
 
@@ -298,10 +321,6 @@ inlineLoop inlineOptions existing =
             (\(Text linkText) url ->
                 case changeStyle inlineOptions existing NoStyleChange of
                     Text current ->
-                        let
-                            _ =
-                                Debug.log "formatting" linkText.text
-                        in
                         Parser.Loop <|
                             Text
                                 { rendered =

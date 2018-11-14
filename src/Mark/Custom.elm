@@ -4,6 +4,7 @@ module Mark.Custom exposing
     , Param, bool, int, float, string, oneOf
     , paragraph, indented
     , parser
+    , replacement, balanced
     )
 
 {-|
@@ -32,6 +33,8 @@ module Mark.Custom exposing
 
 @docs parser
 
+@docs replacement, balanced
+
 -}
 
 import Internal.Model as Internal
@@ -47,6 +50,22 @@ type alias Block result =
 {-| -}
 type alias Inline result =
     Internal.Inline result
+
+
+{-| -}
+replacement : String -> String -> Internal.Replacement
+replacement =
+    Internal.Replacement
+
+
+{-| -}
+balanced :
+    { end : ( String, String )
+    , start : ( String, String )
+    }
+    -> Internal.Replacement
+balanced =
+    Internal.Balanced
 
 
 {-| Create a custom inline styler.
@@ -113,7 +132,7 @@ The element you defined will show up there.
 block : String -> result -> Block result
 block name renderer =
     Internal.Block name
-        (always (Parser.succeed renderer))
+        (\indent inlines -> Parser.succeed renderer)
 
 
 {-| Same as `block`, but you can parse one parameter as well.
@@ -150,10 +169,9 @@ block1 :
     -> Block result
 block1 name renderer (Param param) =
     Internal.Block name
-        (always
-            (Parser.succeed renderer
+        (\indent inlines ->
+            Parser.succeed renderer
                 |= param
-            )
         )
 
 
@@ -166,11 +184,10 @@ block2 :
     -> Block result
 block2 name renderer (Param param1) (Param param2) =
     Internal.Block name
-        (always
-            (Parser.succeed renderer
+        (\indent inlines ->
+            Parser.succeed renderer
                 |= param1
                 |= param2
-            )
         )
 
 
@@ -184,12 +201,11 @@ block3 :
     -> Block result
 block3 name renderer (Param param1) (Param param2) (Param param3) =
     Internal.Block name
-        (always
-            (Parser.succeed renderer
+        (\indent inlines ->
+            Parser.succeed renderer
                 |= param1
                 |= param2
                 |= param3
-            )
         )
 
 
@@ -291,13 +307,6 @@ bool =
         )
 
 
-
--- paragraph : Param Bool
--- paragraph =
---     Param
---         (Parser.succeed True)
-
-
 {-| A block that expects a single paragraph of styled text as input. The `header` block that is built in uses this.
 
     | header
@@ -315,15 +324,12 @@ paragraph :
     -> Block result
 paragraph name renderer =
     Internal.Block name
-        (\inlineParser ->
+        (\indent inlineParser ->
             Parser.succeed
                 (\almostElements ->
                     renderer almostElements
                 )
-                |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
-                |. Parser.token (Parser.Token "    " Mark.Error.ExpectedIndent)
                 |= inlineParser
-                |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
         )
 
 
@@ -399,14 +405,15 @@ paragraph name renderer =
 
 
 {-| Parse a 4-space-indented, unstyled block of text.
-It ends after three consecutive newline characters.
+
+Ends once the block is no longer indented.
+
 -}
 indented : String -> (String -> result) -> Block result
 indented name renderer =
     Internal.Block name
-        (\opts ->
+        (\indent inlineParser ->
             Parser.succeed renderer
-                |. Parser.chompWhile (\c -> c == '\n')
                 |= Parser.loop ""
                     (\txt ->
                         Parser.oneOf
@@ -415,11 +422,8 @@ indented name renderer =
                                     (\_ ->
                                         Parser.Done txt
                                     )
-                            , Parser.token (Parser.Token "\n\n" Mark.Error.DoubleNewline)
-                                |> Parser.map
-                                    (\_ ->
-                                        Parser.Done txt
-                                    )
+                            , Parser.succeed (Parser.Loop txt)
+                                |. Parser.token (Parser.Token "\n" Mark.Error.Newline)
                             , if txt == "" then
                                 Parser.token (Parser.Token "    " Mark.Error.ExpectedIndent)
                                     |> Parser.map
@@ -485,15 +489,23 @@ It parses bananas and then says `bananas`. If you wanted to do exactly this in r
 -}
 parser :
     String
-    -> (Parser Mark.Error.Context Mark.Error.Problem (List result) -> Parser Mark.Error.Context Mark.Error.Problem result)
+    -> (Int -> Parser Mark.Error.Context Mark.Error.Problem (List result) -> Parser Mark.Error.Context Mark.Error.Problem result)
     -> Block result
 parser name actualParser =
     Internal.Block name
-        (\inlines ->
+        (\indent inlines ->
             Parser.succeed identity
-                |. Parser.chompWhile (\c -> c == '\n')
-                |= actualParser inlines
+                |= actualParser indent inlines
         )
+
+
+
+{- Internal Rendering Logic
+
+
+
+
+-}
 
 
 doubleQuote =
