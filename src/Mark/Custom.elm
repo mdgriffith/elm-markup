@@ -548,6 +548,7 @@ type Block result
 {-| -}
 type Inline result
     = Inline String (TextFormatting -> Maybe Link -> result)
+    | Icon String result
 
 
 type alias Link =
@@ -710,14 +711,17 @@ indent =
 {- Custom Blocks -}
 
 
-inlineToParser blockable =
-    case blockable of
+inlineToParser inlineElement =
+    case inlineElement of
         Inline name fn ->
             Parser.keyword (Parser.Token name (Expecting name))
                 |> Parser.map
-                    (\_ ->
-                        fn
-                    )
+                    (\_ -> inlineElement)
+
+        Icon name result ->
+            Parser.keyword (Parser.Token name (Expecting name))
+                |> Parser.map
+                    (\_ -> inlineElement)
 
 
 capitalize str =
@@ -808,42 +812,77 @@ inlineLoop inlineOptions existing =
 
         -- Custom inline block
         , Parser.succeed
-            (\customInline (Text styled) ->
-                case changeStyle inlineOptions existing NoStyleChange of
-                    Text current ->
-                        Parser.Loop <|
-                            Text
-                                { rendered =
-                                    customInline
-                                        (reduceFragments styled.text)
-                                        Nothing
-                                        :: styled.rendered
-                                        ++ current.rendered
-                                , text =
-                                    case styled.text of
-                                        NoFormatting _ ->
-                                            NoFormatting ""
-
-                                        Styles styles _ ->
-                                            Styles styles ""
-
-                                        Fragments frags ->
-                                            case frags of
-                                                [] ->
-                                                    NoFormatting ""
-
-                                                f :: _ ->
-                                                    Styles f.styles ""
-                                , balancedReplacements = styled.balancedReplacements
-                                }
-            )
+            identity
             |. Parser.token
                 (Parser.Token "<" InlineStart)
             |= Parser.oneOf
                 (List.map inlineToParser inlineOptions.inlines)
-            |. Parser.token (Parser.Token "|" InlineBar)
-            |= styledText inlineOptions txt [ '>' ]
-            |. Parser.token (Parser.Token ">" InlineEnd)
+            |> Parser.andThen
+                (\inlineType ->
+                    case inlineType of
+                        Inline name customInline ->
+                            Parser.succeed
+                                (\(Text styled) ->
+                                    case changeStyle inlineOptions existing NoStyleChange of
+                                        Text current ->
+                                            Parser.Loop <|
+                                                Text
+                                                    { rendered =
+                                                        customInline
+                                                            (reduceFragments styled.text)
+                                                            Nothing
+                                                            :: styled.rendered
+                                                            ++ current.rendered
+                                                    , text =
+                                                        case styled.text of
+                                                            NoFormatting _ ->
+                                                                NoFormatting ""
+
+                                                            Styles styles _ ->
+                                                                Styles styles ""
+
+                                                            Fragments frags ->
+                                                                case frags of
+                                                                    [] ->
+                                                                        NoFormatting ""
+
+                                                                    f :: _ ->
+                                                                        Styles f.styles ""
+                                                    , balancedReplacements = styled.balancedReplacements
+                                                    }
+                                )
+                                |. Parser.token (Parser.Token "|" InlineBar)
+                                |= styledText inlineOptions txt [ '>' ]
+                                |. Parser.token (Parser.Token ">" InlineEnd)
+
+                        Icon name result ->
+                            Parser.succeed
+                                (case changeStyle inlineOptions existing NoStyleChange of
+                                    Text current ->
+                                        Parser.Loop <|
+                                            Text
+                                                { rendered =
+                                                    result :: current.rendered
+                                                , text =
+                                                    case current.text of
+                                                        NoFormatting _ ->
+                                                            NoFormatting ""
+
+                                                        Styles styles _ ->
+                                                            Styles styles ""
+
+                                                        Fragments frags ->
+                                                            case frags of
+                                                                [] ->
+                                                                    NoFormatting ""
+
+                                                                f :: _ ->
+                                                                    Styles f.styles ""
+                                                , balancedReplacements = current.balancedReplacements
+                                                }
+                                )
+                                |. Parser.token (Parser.Token ">" InlineEnd)
+                )
 
         -- Link
         , Parser.succeed
