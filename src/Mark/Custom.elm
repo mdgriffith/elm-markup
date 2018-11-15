@@ -74,7 +74,7 @@ balanced =
 {-| Create a custom inline styler.
 
     Custom.inline "intro"
-        (\string styling model ->
+        (\textFormatting model ->
             let
                 txt =
                     String.trim string
@@ -210,6 +210,11 @@ block3 name renderer (Param param1) (Param param2) (Param param3) =
                 |= param2
                 |= param3
         )
+
+
+
+-- styled : Param TextFormatting
+-- styled
 
 
 {-| Parse a double quoted string.
@@ -576,23 +581,19 @@ type Context
 
 
 type Problem
-    = UnknownBlock
-    | NoBlocks
-    | UnknownInline
-    | EmptyBlock
+    = NoBlocks
     | ExpectedIndent
     | InlineStart
     | InlineBar
     | InlineEnd
     | Expecting String
+    | ExpectingBlockName String
     | Escape
     | EscapedChar
-    | ExpectedNonBreaking
     | Dash
     | DoubleQuote
     | Apostrophe
     | Newline
-    | DoubleNewline
     | Space
     | End
     | Integer
@@ -605,6 +606,7 @@ type Problem
 {- Formatted Text -}
 
 
+{-| -}
 type Text rendered
     = Text
         -- Accumulator string
@@ -616,6 +618,8 @@ type Text rendered
         }
 
 
+{-| -}
+emptyText : Text rendered
 emptyText =
     Text { text = NoFormatting "", rendered = [], balancedReplacements = [] }
 
@@ -710,9 +714,10 @@ inlineToParser blockable =
     case blockable of
         Inline name fn ->
             Parser.keyword (Parser.Token name (Expecting name))
-                |> Parser.inContext (InInline name)
                 |> Parser.map
-                    (always fn)
+                    (\_ ->
+                        fn
+                    )
 
 
 capitalize str =
@@ -748,11 +753,10 @@ blockToParser blockable =
                     Nothing
 
                 Just name ->
-                    Parser.keyword (Parser.Token name (Expecting name))
-                        |> Parser.inContext (InBlock name)
+                    Parser.keyword (Parser.Token name (ExpectingBlockName name))
                         |> Parser.map
                             (\_ ->
-                                blockParser
+                                \i inlineParser -> Parser.inContext (InBlock name) (blockParser i inlineParser)
                             )
                         |> Just
 
@@ -1081,7 +1085,7 @@ almostReplacement replacements existing =
                     addText c existing
                 )
                 |= Parser.getChompedString
-                    (Parser.chompIf (\c -> c == char) EscapedChar)
+                    (Parser.chompIf (\c -> c == char && char /= '<') EscapedChar)
 
         first repl =
             case repl of
