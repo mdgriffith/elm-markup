@@ -92,11 +92,9 @@ balanced =
 
 When applied via `parseWith`, can then be used in markup like the following
 
-    {intro| Lorem Ipsum is simply dummy text } of the printing and...
+    <intro| Lorem Ipsum is simply dummy text > of the printing and...
 
 It will turn the first letter into a [dropped capital](https://en.wikipedia.org/wiki/Initial) and lead in with [small caps](https://practicaltypography.com/small-caps.html)
-
-**styling** is the `styling` record that is passed in the options of `parseWith`. This means you can make an inline element that can be paragraph via the options.
 
 -}
 inline : String -> (TextFormatting -> Maybe Link -> result) -> Inline result
@@ -116,7 +114,7 @@ inline name renderer =
             { styling = Mark.defaultStyling
             , inlines = []
             , blocks =
-                [ Custom.block "red"
+                [ Custom.block "Red"
                     (\styling model ->
                         Element.el
                             [ Font.color (Element.rgb 1 0 0) ]
@@ -127,7 +125,7 @@ inline name renderer =
 
 Which can then be used in your markup like so:
 
-    | red
+    | Red
 
 The element you defined will show up there.
 
@@ -212,20 +210,87 @@ block3 name renderer (Param param1) (Param param2) (Param param3) =
         )
 
 
+{-| Define a list of options. Useful for working with custom types.
+-}
+oneOf : String -> List ( String, value ) -> Param value
+oneOf optionName opts =
+    let
+        parseOption ( name, val ) =
+            Parser.keyword (Parser.Token name (Expecting name))
+                |> Parser.map (always val)
+    in
+    field optionName <|
+        Param
+            (Parser.oneOf
+                (List.map parseOption opts)
+            )
 
--- styled : Param TextFormatting
--- styled
+
+{-| A parameter to use with `block1` or `block2`.
+-}
+type Param arg
+    = Param (Parser Context Problem arg)
+
+
+{-| -}
+int : String -> Param Int
+int name =
+    field name <|
+        Param
+            (Parser.succeed identity
+                |. Parser.chompIf (\c -> c == ' ') Space
+                |= Parser.int Integer InvalidNumber
+            )
+
+
+{-| -}
+float : String -> Param Float
+float name =
+    field name <|
+        Param
+            (Parser.succeed identity
+                |. Parser.chompIf (\c -> c == ' ') Space
+                |= Parser.float FloatingPoint InvalidNumber
+            )
+
+
+{-| -}
+bool : String -> Param Bool
+bool name =
+    field name <|
+        Param
+            (Parser.succeed identity
+                |= Parser.oneOf
+                    [ Parser.token (Parser.Token "True" (Expecting "True"))
+                        |> Parser.map (always True)
+                    , Parser.token (Parser.Token "False" (Expecting "False"))
+                        |> Parser.map (always False)
+                    ]
+            )
 
 
 {-| Parse a double quoted string.
 -}
-string : Param String
-string =
+string : String -> Param String
+string name =
+    field name <|
+        Param
+            (Parser.succeed identity
+                |. Parser.token (Parser.Token "\"" DoubleQuote)
+                |= quotedString
+            )
+
+
+field : String -> Param value -> Param value
+field name (Param valParser) =
     Param
         (Parser.succeed identity
             |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
-            |. Parser.token (Parser.Token "\"" DoubleQuote)
-            |= quotedString
+            |. Parser.token (Parser.Token name (ExpectingFieldName name))
+            |. Parser.chompWhile (\c -> c == ' ')
+            |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+            |. Parser.chompWhile (\c -> c == ' ')
+            |= valParser
         )
 
 
@@ -259,60 +324,8 @@ quotedString =
         )
 
 
-{-| Define a list of options. Useful for working with custom types.
--}
-oneOf : List ( String, value ) -> Param value
-oneOf opts =
-    let
-        parseOption ( name, val ) =
-            Parser.keyword (Parser.Token name (Expecting name))
-                |> Parser.map (always val)
-    in
-    Param
-        (Parser.oneOf
-            (List.map parseOption opts)
-        )
 
-
-{-| A parameter to use with `block1` or `block2`.
--}
-type Param arg
-    = Param (Parser Context Problem arg)
-
-
-{-| -}
-int : Param Int
-int =
-    Param
-        (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ') Space
-            |= Parser.int Integer InvalidNumber
-        )
-
-
-{-| -}
-float : Param Float
-float =
-    Param
-        (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ') Space
-            |= Parser.float FloatingPoint InvalidNumber
-        )
-
-
-{-| -}
-bool : Param Bool
-bool =
-    Param
-        (Parser.succeed identity
-            |. Parser.chompIf (\c -> c == ' ') Space
-            |= Parser.oneOf
-                [ Parser.token (Parser.Token "True" (Expecting "True"))
-                    |> Parser.map (always True)
-                , Parser.token (Parser.Token "False" (Expecting "False"))
-                    |> Parser.map (always False)
-                ]
-        )
+-- text : String
 
 
 {-| A block that expects a single paragraph of styled text as input. The `header` block that is built in uses this.
@@ -589,6 +602,7 @@ type Problem
     | InlineEnd
     | Expecting String
     | ExpectingBlockName String
+    | ExpectingFieldName String
     | Escape
     | EscapedChar
     | Dash
