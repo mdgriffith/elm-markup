@@ -140,7 +140,7 @@ block name renderer =
 
 For example, here's how the builtin block, `image`, using `block2` and two `Custom.string` parameters.
 
-    Custom.block2 "image"
+    Custom.block2 "Image"
         (\src description styling model ->
             Element.image
                 []
@@ -513,11 +513,7 @@ parser :
     -> (Int -> Parser Context Problem (List result) -> Parser Context Problem result)
     -> Block result
 parser name actualParser =
-    Block name
-        (\baseIndent inlines ->
-            Parser.succeed identity
-                |= actualParser baseIndent inlines
-        )
+    Block name actualParser
 
 
 
@@ -674,7 +670,7 @@ blocks options existing =
             (\blockParser ->
                 blockParser 0 (Parser.loop emptyText (inlineLoop options.inlines))
             )
-            |. Parser.token (Parser.Token "|=" (Expecting "|="))
+            |. Parser.token (Parser.Token "|" (Expecting "|"))
             |. Parser.chompWhile (\c -> c == ' ')
             |= Parser.oneOf
                 (case options.blocks of
@@ -828,7 +824,7 @@ inlineLoop inlineOptions existing =
         , Parser.succeed
             identity
             |. Parser.token
-                (Parser.Token "<" InlineStart)
+                (Parser.Token "{" InlineStart)
             |= Parser.oneOf
                 (List.map inlineToParser inlineOptions.inlines)
             |> Parser.andThen
@@ -866,8 +862,8 @@ inlineLoop inlineOptions existing =
                                                     }
                                 )
                                 |. Parser.token (Parser.Token "|" InlineBar)
-                                |= styledText inlineOptions txt [ '>' ]
-                                |. Parser.token (Parser.Token ">" InlineEnd)
+                                |= styledText inlineOptions txt [ '}' ]
+                                |. Parser.token (Parser.Token "}" InlineEnd)
 
                         Icon name result ->
                             Parser.succeed
@@ -1001,7 +997,7 @@ finalize inlineOptions (Text cursor) =
 
 {-| This parser is used to parse styled text, but the delay rendering it.
 
-That may seem sorta weird, but we need this in cases like for links. We want styled
+That may seem sorta weird, but we need this in cases like for links, where we might want to change styles within the <a> tag.
 
 -}
 styledText : InlineOptions result -> TextFormatting -> List Char -> Parser Context Problem (Text result)
@@ -1124,10 +1120,6 @@ cacheNewStyle newStyle text =
                         Fragments <| { text = "", styles = newStyle :: current.styles } :: current :: remain
 
 
-
--- Fragments ({ text = "", styles = [ newStyle ] } :: frags)
-
-
 {-| -}
 almostReplacement : List Replacement -> Text rendered -> List (Parser Context Problem (Text rendered))
 almostReplacement replacements existing =
@@ -1138,7 +1130,7 @@ almostReplacement replacements existing =
                     addText c existing
                 )
                 |= Parser.getChompedString
-                    (Parser.chompIf (\c -> c == char && char /= '<') EscapedChar)
+                    (Parser.chompIf (\c -> c == char && char /= '{') EscapedChar)
 
         first repl =
             case repl of

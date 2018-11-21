@@ -89,12 +89,52 @@ default =
                         ]
                     ]
                 }
-        , inlines = []
+        , inlines =
+            [ Mark.Custom.inline "drop"
+                (\formatting maybeLink model ->
+                    let
+                        string =
+                            formattedToString formatting
+
+                        -- |> String.join ""
+                        txt =
+                            String.trim string
+                    in
+                    if txt == "" then
+                        Element.none
+
+                    else
+                        Element.row []
+                            [ Element.el
+                                [ Element.alignLeft
+                                , Font.size 64
+                                , Element.htmlAttribute (Html.Attributes.style "line-height" "0.75em")
+                                , Element.moveDown 8
+                                ]
+                                (Element.text (String.toUpper (String.slice 0 1 txt)))
+                            , Element.el [ Font.size 16 ]
+                                (Element.text (String.toUpper (String.dropLeft 1 txt)))
+                            ]
+                )
+            ]
         , merge = paragraph []
         , replacements =
             replacements
         }
     }
+
+
+formattedToString : Mark.Custom.TextFormatting -> String
+formattedToString form =
+    case form of
+        Mark.Custom.NoFormatting str ->
+            str
+
+        Mark.Custom.Styles style str ->
+            str
+
+        _ ->
+            ""
 
 
 {-| -}
@@ -259,8 +299,23 @@ image attrs =
                 , description = String.trim description
                 }
         )
-        Mark.Custom.string
-        Mark.Custom.string
+        (Mark.Custom.string "src")
+        (Mark.Custom.string "description")
+
+
+
+-- alternative attrs =
+--     Mark.Custom.block "Image"
+--         (\src description ->
+--             Element.image
+--                 attrs
+--                 { src = String.trim src
+--                 , description = String.trim description
+--                 }
+--         )
+--         |> (Mark.Custom.field "src" Mark.Custom.string)
+--         |> (Mark.Custom.field "description" Mark.Custom.string)
+-- alt2
 
 
 {-| -}
@@ -296,10 +351,6 @@ list listConfig =
 {-| -}
 listStyles : List Index -> List (Element.Attribute msg)
 listStyles cursor =
-    let
-        _ =
-            Debug.log "list styles" cursor
-    in
     case List.length cursor of
         0 ->
             -- top level element
