@@ -1,29 +1,28 @@
 module Mark.Custom exposing
     ( parse
-    , block
-    , bool
-    , Block
-    , map
-    , Problem, Context
-    , TextFormatting(..)
-    , InlineStyle(..)
+    , Block, block, many, oneOf, map
+    , bool, int, float
+    , text, textWith, inline, Replacement, replacement, balanced
+    , advanced
+    , Problem(..), Context(..)
+    , Text, TextFormatting(..), InlineStyle(..)
     )
 
 {-|
 
 @docs parse
 
-@docs block
+@docs Block, block, many, oneOf, map
 
-@docs bool
+@docs bool, int, float
 
-@docs Block
+@docs text, textWith, inline, Replacement, replacement, balanced
 
-@docs map
+@docs advanced
 
 @docs Problem, Context
 
-@docs TextFormatting, Fragment
+@docs Text, TextFormatting, InlineStyle
 
 -}
 
@@ -34,7 +33,7 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 {-
 
    block "Header"
-       (\indent styled ->
+       (\styled ->
            Element.paragraph [ Region.heading 1 ] styled
        )
        text
@@ -43,13 +42,12 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
        (\src description ->
            Element.image ...
        )
-       (record
-           |> field "src" file
-           |> field "description" string
-       )
+       |> field "src" file
+       |> field "description" string
 
-   block "List"
-       (Advanced.parse listParser)
+
+   advanced "List"
+       (listParser)
 
     block "Section"
         renderer
@@ -155,6 +153,22 @@ block name renderer (Block childParser) =
 
 
 {-| -}
+advanced : String -> Parser Context Problem result -> Block result
+advanced name parser =
+    Block
+        (Parser.getIndent
+            |> Parser.andThen
+                (\indent ->
+                    Parser.succeed identity
+                        |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |. Parser.chompIf (\c -> c == '\n') Newline
+                        |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) parser)
+                )
+        )
+
+
+{-| -}
 map : (a -> b) -> Block a -> Block b
 map fn (Block parser) =
     Block (Parser.map fn parser)
@@ -162,8 +176,39 @@ map fn (Block parser) =
 
 {-| -}
 many : Block a -> Block (List a)
-many (Block single) =
-    Debug.todo "doo it!"
+many thing =
+    Block <|
+        Parser.loop []
+            (blocksOrNewlines thing)
+
+
+{-| -}
+blocksOrNewlines : Block thing -> List thing -> Parser Context Problem (Parser.Step (List thing) (List thing))
+blocksOrNewlines (Block myBlock) existing =
+    Parser.oneOf
+        [ Parser.end End
+            |> Parser.map
+                (\_ ->
+                    Parser.Done existing
+                )
+        , Parser.token (Parser.Token "\n" Newline)
+            |> Parser.map
+                (\_ ->
+                    Parser.Loop
+                        existing
+                )
+        , myBlock
+            |> Parser.map
+                (\foundBlock ->
+                    Parser.Loop (foundBlock :: existing)
+                )
+        ]
+
+
+{-| -}
+oneOf : List (Block a) -> Block a
+oneOf blocks =
+    Block (Parser.oneOf (List.map (\(Block parser) -> parser) blocks))
 
 
 {-| -}
@@ -193,6 +238,7 @@ bool =
         )
 
 
+{-| -}
 text : Block (List Text)
 text =
     textWith
@@ -235,6 +281,22 @@ textWith :
     -> Block result
 textWith options =
     Block (styledText options [] [])
+
+
+{-| -}
+replacement : String -> String -> Replacement
+replacement =
+    Replacement
+
+
+{-| -}
+balanced :
+    { end : ( String, String )
+    , start : ( String, String )
+    }
+    -> Replacement
+balanced =
+    Balanced
 
 
 {-| -}
