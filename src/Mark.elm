@@ -1,6 +1,5 @@
 module Mark exposing
     ( parse, parseWith
-    , Options, InlineOptions
     , Context, Problem
     )
 
@@ -8,7 +7,7 @@ module Mark exposing
 
 @docs parse, parseWith
 
-@docs Options, InlineOptions, default
+@docs Options
 
 @docs Index, ListIcon, defaultListIcon
 
@@ -17,19 +16,19 @@ module Mark exposing
 -}
 
 import Element exposing (Element)
-import Mark.Custom as Custom
+import Mark.Custom
 import Mark.Default
 import Parser.Advanced as Parser exposing (Parser)
 
 
 {-| -}
 type alias Context =
-    Custom.Context
+    Mark.Custom.Context
 
 
 {-| -}
 type alias Problem =
-    Custom.Problem
+    Mark.Custom.Problem
 
 
 {-| -}
@@ -41,18 +40,8 @@ parse source =
 
 {-| -}
 parseWith :
-    Options result
+    Mark.Custom.Block result
     -> String
     -> Result (List (Parser.DeadEnd Context Problem)) result
 parseWith options source =
-    Custom.parse options source
-
-
-{-| -}
-type alias Options result =
-    Custom.Options result
-
-
-{-| -}
-type alias InlineOptions result =
-    Custom.InlineOptions result
+    Mark.Custom.parse options source
