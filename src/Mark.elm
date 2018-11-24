@@ -34,13 +34,13 @@ type alias Problem =
 {-| -}
 parse : String -> Result (List (Parser.DeadEnd Context Problem)) (Element msg)
 parse source =
-    parseWith Mark.Default.default source
+    parseWith Mark.Default.document source
         |> Result.map (\x -> x ())
 
 
 {-| -}
 parseWith :
-    Mark.Custom.Block result
+    Mark.Custom.Root result
     -> String
     -> Result (List (Parser.DeadEnd Context Problem)) result
 parseWith options source =
