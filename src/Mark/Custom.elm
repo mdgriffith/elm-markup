@@ -1,7 +1,8 @@
 module Mark.Custom exposing
     ( parse
     , Block, block, many, oneOf, map
-    , bool, int, float
+    , Root, root
+    , bool, int, float, string
     , text, textWith, inline, Replacement, replacement, balanced
     , advanced
     , Problem(..), Context(..)
@@ -14,7 +15,9 @@ module Mark.Custom exposing
 
 @docs Block, block, many, oneOf, map
 
-@docs bool, int, float
+@docs Root, root
+
+@docs bool, int, float, string
 
 @docs text, textWith, inline, Replacement, replacement, balanced
 
@@ -58,21 +61,25 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 -}
 
 
-parse : Block result -> String -> Result (List (Parser.DeadEnd Context Problem)) result
-parse (Block blocks) source =
+{-| -}
+parse : Root result -> String -> Result (List (Parser.DeadEnd Context Problem)) result
+parse (Root blocks) source =
     Parser.run blocks source
 
 
+{-| -}
 type Block result
     = Block (Parser Context Problem result)
 
 
+{-| -}
 type alias Text =
     { style : TextFormatting
     , link : Maybe String
     }
 
 
+{-| -}
 type TextFormatting
     = NoFormatting String
     | Styles (List InlineStyle) String
@@ -90,6 +97,7 @@ type TextAccumulator rendered
         }
 
 
+{-| -}
 type Replacement
     = Replacement String String
     | Balanced
@@ -98,6 +106,7 @@ type Replacement
         }
 
 
+{-| -}
 type InlineStyle
     = NoStyleChange
     | Bold
@@ -107,11 +116,13 @@ type InlineStyle
     | Token
 
 
+{-| -}
 type Context
     = InBlock String
     | InInline String
 
 
+{-| -}
 type Problem
     = NoBlocks
     | ExpectedIndent
@@ -144,28 +155,39 @@ block name renderer (Block childParser) =
             |> Parser.andThen
                 (\indent ->
                     Parser.succeed renderer
+                        -- TODO: I'd rather not use backtrackable, but not entirely sure how to avoid it here.
+                        |. Parser.backtrackable (Parser.token (Parser.Token "|" (ExpectingBlockName name)))
+                        |. Parser.backtrackable
+                            (Parser.oneOf
+                                [ Parser.chompIf (\c -> c == ' ') Space
+                                , Parser.succeed ()
+                                ]
+                            )
                         |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |. Parser.chompIf (\c -> c == '\n') Newline
+                        |. Parser.token (Parser.Token (String.repeat indent " ") ExpectedIndent)
                         |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) childParser)
                 )
         )
 
 
 {-| -}
-advanced : String -> Parser Context Problem result -> Block result
-advanced name parser =
-    Block
-        (Parser.getIndent
-            |> Parser.andThen
-                (\indent ->
-                    Parser.succeed identity
-                        |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |. Parser.chompIf (\c -> c == '\n') Newline
-                        |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) parser)
-                )
-        )
+type Root result
+    = Root (Parser Context Problem result)
+
+
+{-| -}
+root : (child -> result) -> Block child -> Root result
+root renderer (Block childParser) =
+    Root
+        (Parser.map renderer childParser)
+
+
+{-| -}
+advanced : Parser Context Problem result -> Block result
+advanced parser =
+    Block parser
 
 
 {-| -}
@@ -189,14 +211,19 @@ blocksOrNewlines (Block myBlock) existing =
         [ Parser.end End
             |> Parser.map
                 (\_ ->
-                    Parser.Done existing
+                    Parser.Done (List.reverse existing)
                 )
-        , Parser.token (Parser.Token "\n" Newline)
-            |> Parser.map
-                (\_ ->
-                    Parser.Loop
-                        existing
-                )
+
+        -- Whitespace Line
+        , Parser.succeed
+            (Parser.Loop existing)
+            |. Parser.token (Parser.Token "\n" Newline)
+            |. Parser.oneOf
+                [ Parser.succeed ()
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                , Parser.succeed ()
+                ]
         , myBlock
             |> Parser.map
                 (\foundBlock ->
@@ -235,6 +262,17 @@ bool =
             , Parser.token (Parser.Token "False" (Expecting "False"))
                 |> Parser.map (always False)
             ]
+        )
+
+
+{-| -}
+string : Block String
+string =
+    Block
+        (Parser.getChompedString
+            (Parser.chompWhile
+                (\c -> c /= '\n')
+            )
         )
 
 
@@ -414,7 +452,7 @@ styledTextLoop options meaningful untilStrings found =
                                                 , style = textNode.style
                                                 }
                                         )
-                                        textList
+                                        (List.reverse textList)
                                         ++ current.rendered
                                 , text =
                                     case List.map .style (List.reverse textList) of
@@ -477,7 +515,7 @@ finishText :
 finishText opts accum =
     case changeStyle opts accum NoStyleChange of
         TextAccumulator txt ->
-            opts.merge txt.rendered
+            opts.merge (List.reverse txt.rendered)
 
 
 {-| -}
