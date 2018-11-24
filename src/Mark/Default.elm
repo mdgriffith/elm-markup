@@ -124,9 +124,9 @@ monospace attrs =
                     :: Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
                     :: attrs
                 )
-                [ Element.text (String.join "\n" string) ]
+                [ Element.text string ]
         )
-        (Mark.Custom.many Mark.Custom.string)
+        Mark.Custom.multiline
 
 
 {-| -}

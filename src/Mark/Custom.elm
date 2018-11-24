@@ -2,7 +2,7 @@ module Mark.Custom exposing
     ( parse
     , Block, block, many, oneOf, map
     , Root, root
-    , bool, int, float, string
+    , bool, int, float, string, multiline
     , text, textWith, inline, Replacement, replacement, balanced
     , advanced
     , Problem(..), Context(..)
@@ -17,7 +17,7 @@ module Mark.Custom exposing
 
 @docs Root, root
 
-@docs bool, int, float, string
+@docs bool, int, float, string, multiline
 
 @docs text, textWith, inline, Replacement, replacement, balanced
 
@@ -204,6 +204,10 @@ many thing =
             (blocksOrNewlines thing)
 
 
+
+-- nested
+
+
 {-| -}
 blocksOrNewlines : Block thing -> List thing -> Parser Context Problem (Parser.Step (List thing) (List thing))
 blocksOrNewlines (Block myBlock) existing =
@@ -277,6 +281,32 @@ string =
 
 
 {-| -}
+multiline : Block String
+multiline =
+    Block
+        (Parser.getIndent
+            |> Parser.andThen
+                (\indent ->
+                    Parser.loop "" (indentedString indent)
+                )
+        )
+
+
+indentedString indent found =
+    Parser.oneOf
+        [ Parser.succeed (\str -> Parser.Loop (str ++ found))
+            |. Parser.token (Parser.Token (String.repeat indent " ") ExpectedIndent)
+            |= Parser.getChompedString
+                (Parser.chompWhile
+                    (\c -> c /= '\n')
+                )
+        , Parser.token (Parser.Token "\n" Newline)
+            |> Parser.map (\_ -> Parser.Loop (found ++ "\n"))
+        , Parser.succeed (Parser.Done found)
+        ]
+
+
+{-| -}
 text : Block (List Text)
 text =
     textWith
@@ -289,6 +319,18 @@ basicTextOptions =
     , merge = identity
     , replacements = []
     }
+
+
+{-| -}
+textWith :
+    { view : Text -> rendered
+    , inlines : List (Inline rendered)
+    , merge : List rendered -> result
+    , replacements : List Replacement
+    }
+    -> Block result
+textWith options =
+    Block (styledText options [] [])
 
 
 {-| -}
@@ -307,18 +349,6 @@ inline name renderer =
                 |= styledText basicTextOptions styles [ '}' ]
                 |. Parser.token (Parser.Token "}" InlineEnd)
         )
-
-
-{-| -}
-textWith :
-    { view : Text -> rendered
-    , inlines : List (Inline rendered)
-    , merge : List rendered -> result
-    , replacements : List Replacement
-    }
-    -> Block result
-textWith options =
-    Block (styledText options [] [])
 
 
 {-| -}
@@ -678,12 +708,6 @@ addText newTxt (TextAccumulator cursor) =
 
         Styles styles txt ->
             TextAccumulator { cursor | text = Styles styles (txt ++ newTxt) }
-
-
-{-| If we accumulating a link style, accumulate it there.
--}
-addElement newElements (TextAccumulator cursor) =
-    TextAccumulator { cursor | rendered = newElements :: cursor.rendered }
 
 
 changeStyle options (TextAccumulator cursor) styleToken =
