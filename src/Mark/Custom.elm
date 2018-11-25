@@ -1,6 +1,6 @@
 module Mark.Custom exposing
     ( parse
-    , Block, block, many, oneOf, map
+    , Block, block, oneOf, map, many, nested
     , Root, root
     , bool, int, float, string, multiline
     , text, textWith, inline, Replacement, replacement, balanced
@@ -13,7 +13,7 @@ module Mark.Custom exposing
 
 @docs parse
 
-@docs Block, block, many, oneOf, map
+@docs Block, block, oneOf, map, many, nested
 
 @docs Root, root
 
@@ -85,6 +85,15 @@ type TextFormatting
     | Styles (List InlineStyle) String
 
 
+textFormttingString form =
+    case form of
+        NoFormatting str ->
+            str
+
+        Styles _ str ->
+            str
+
+
 {-| -}
 type TextAccumulator rendered
     = TextAccumulator
@@ -125,6 +134,7 @@ type Context
 {-| -}
 type Problem
     = NoBlocks
+    | EmptyBlock
     | ExpectedIndent
     | InlineStart
     | InlineBar
@@ -145,6 +155,7 @@ type Problem
     | FloatingPoint
     | InvalidNumber
     | ExpectingAlphaNumeric
+    | CantStartTextWithSpace
 
 
 {-| -}
@@ -166,7 +177,7 @@ block name renderer (Block childParser) =
                         |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |. Parser.chompIf (\c -> c == '\n') Newline
-                        |. Parser.token (Parser.Token (String.repeat indent " ") ExpectedIndent)
+                        |. Parser.token (Parser.Token (String.repeat (indent + 4) " ") ExpectedIndent)
                         |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) childParser)
                 )
         )
@@ -181,7 +192,8 @@ type Root result
 root : (child -> result) -> Block child -> Root result
 root renderer (Block childParser) =
     Root
-        (Parser.map renderer childParser)
+        -- (!) Docs of Parser say indent defaults to 0, but I think it defaults to 1
+        (Parser.map renderer (Parser.withIndent 0 childParser))
 
 
 {-| -}
@@ -196,16 +208,185 @@ map fn (Block parser) =
     Block (Parser.map fn parser)
 
 
+{-| `text` and other `Blocks` don't allow starting with spaces.
+
+However, it can be useful to capture indentation for things like a nested list.
+
+So, for example, here's a list.
+
+    | List
+        - item one
+        - item two
+            - nested item two
+        - item three
+            - nested item three
+
+In order to support blocks like this, you can use `nested`, which captures the indentation and returns it as an `Int`, which is the number of spaces that it's indented in the block,
+
+In order to parse the above, you could define a block as
+
+    block "List"
+        (\items ->
+            -- items : List (Int, Text)
+        )
+        (many (nested text))
+
+Which will result in something like the following(though with `Text` instead of strings):
+
+    ( 0, "item one" )
+
+    ( 0, "item two" )
+
+    ( 4, "nested item two" )
+
+    ( 0, "item three" )
+
+    ( 4, "nested item three" )
+
+_Note_ the indentation is always a multiple of 4.
+
+-}
+nested : Block a -> Block (List ( Int, a ))
+nested itemBlock =
+    Block
+        (Parser.getIndent
+            |> Parser.andThen
+                (\indent ->
+                    Parser.loop
+                        ( { base = indent
+                          , prev = 0
+                          }
+                        , []
+                        )
+                        (indentedBlocksOrNewlines itemBlock)
+                )
+        )
+
+
+{-| -}
+indentation : Int -> Parser Context Problem (Parser.Step Int Int)
+indentation count =
+    Parser.oneOf
+        [ Parser.succeed (Parser.Loop (count + 4))
+            |. Parser.token (Parser.Token "    " ExpectedIndent)
+        , Parser.succeed (Parser.Loop 0)
+            |. Parser.token (Parser.Token " " ExpectedIndent)
+            |. Parser.problem ExpectedIndent
+        , Parser.succeed (Parser.Done count)
+        ]
+
+
+{-| We only expect nearby indentations.
+
+We can't go below the `base` indentation.
+
+Based on the previous indentation:
+
+  - previous - 4
+  - previous
+  - previous + 4
+
+If we don't match the above rules, we might want to count the mismatched number.
+
+-}
+expectIndentation : Int -> Int -> Parser Context Problem Int
+expectIndentation base previous =
+    Parser.oneOf
+        [ Parser.succeed (previous + 4)
+            |. Parser.token (Parser.Token (String.repeat (base + previous + 4) " ") ExpectedIndent)
+        , Parser.succeed previous
+            |. Parser.token (Parser.Token (String.repeat (base + previous) " ") ExpectedIndent)
+        , if previous >= 4 then
+            Parser.succeed (previous - 4)
+                |. Parser.token (Parser.Token (String.repeat (base + previous - 4) " ") ExpectedIndent)
+
+          else
+            Parser.problem ExpectedIndent
+        ]
+
+
+type alias NestedIndex =
+    { base : Int
+    , prev : Int
+    }
+
+
+{-| -}
+indentedBlocksOrNewlines : Block thing -> ( NestedIndex, List ( Int, thing ) ) -> Parser Context Problem (Parser.Step ( NestedIndex, List ( Int, thing ) ) (List ( Int, thing )))
+indentedBlocksOrNewlines (Block itemParser) ( indent, existing ) =
+    case existing of
+        [] ->
+            Parser.oneOf
+                [ Parser.end End
+                    |> Parser.andThen
+                        (\_ -> Parser.problem EmptyBlock)
+
+                -- Whitespace Line
+                , Parser.succeed
+                    (Parser.Loop ( indent, existing ))
+                    |. Parser.token (Parser.Token "\n" Newline)
+                    |. Parser.oneOf
+                        [ Parser.succeed ()
+                            |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                        , Parser.succeed ()
+                        ]
+
+                -- Indent is already parsed, skip it
+                , Parser.succeed
+                    (\foundBlock ->
+                        let
+                            newIndex =
+                                { prev = 0
+                                , base = indent.base
+                                }
+                        in
+                        Parser.Loop ( newIndex, ( 0, foundBlock ) :: existing )
+                    )
+                    |= itemParser
+                ]
+
+        _ ->
+            Parser.oneOf
+                [ Parser.end End
+                    |> Parser.map
+                        (\_ ->
+                            Parser.Done (List.reverse existing)
+                        )
+
+                -- Whitespace Line
+                , Parser.succeed
+                    (Parser.Loop ( indent, existing ))
+                    |. Parser.token (Parser.Token "\n" Newline)
+                    |. Parser.oneOf
+                        [ Parser.succeed ()
+                            |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                        , Parser.succeed ()
+                        ]
+
+                -- block with required indent
+                , Parser.succeed
+                    (\newIndent foundBlock ->
+                        let
+                            newIndex =
+                                { prev = newIndent
+                                , base = indent.base
+                                }
+                        in
+                        Parser.Loop ( newIndex, ( newIndent, foundBlock ) :: existing )
+                    )
+                    |= expectIndentation indent.base indent.prev
+                    |= itemParser
+                ]
+
+
 {-| -}
 many : Block a -> Block (List a)
 many thing =
     Block <|
         Parser.loop []
             (blocksOrNewlines thing)
-
-
-
--- nested
 
 
 {-| -}
@@ -292,6 +473,7 @@ multiline =
         )
 
 
+indentedString : Int -> String -> Parser Context Problem (Parser.Step String String)
 indentedString indent found =
     Parser.oneOf
         [ Parser.succeed (\str -> Parser.Loop (str ++ found))
@@ -423,106 +605,116 @@ styledTextLoop :
     -> TextAccumulator rendered
     -> Parser Context Problem (Parser.Step (TextAccumulator rendered) result)
 styledTextLoop options meaningful untilStrings found =
-    Parser.oneOf
-        [ Parser.oneOf (replace options.replacements found)
-            |> Parser.map Parser.Loop
-
-        -- If a char matches the first character of a replacement,
-        -- but didn't match the full replacement captured above,
-        -- then stash that char.
-        , Parser.oneOf (almostReplacement options.replacements found)
-            |> Parser.map Parser.Loop
-
-        -- Capture style command characters
-        , Parser.succeed
-            (Parser.Loop << changeStyle options found)
-            |= Parser.oneOf
-                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
-                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
-                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
-                , Parser.map (always Token) (Parser.token (Parser.Token "`" (Expecting "`")))
-                ]
-
-        -- Custom inline block
-        , Parser.succeed
-            (\rendered ->
-                let
-                    current =
-                        case changeStyle options found NoStyleChange of
-                            TextAccumulator accum ->
-                                accum
-                in
-                Parser.Loop
-                    (TextAccumulator
-                        { rendered = rendered :: current.rendered
-
-                        -- TODO: This should inherit formatting from the inline parser
-                        , text = NoFormatting ""
-                        , balancedReplacements = current.balancedReplacements
-                        }
-                    )
-            )
-            |. Parser.token
-                (Parser.Token "{" InlineStart)
-            |= Parser.oneOf
-                (List.map (\(Inline inlineParser) -> inlineParser (currentStyles found)) options.inlines)
-
-        -- Link
-        , Parser.succeed
-            (\textList url ->
-                case changeStyle options found NoStyleChange of
-                    TextAccumulator current ->
-                        Parser.Loop <|
-                            TextAccumulator
-                                { rendered =
-                                    List.map
-                                        (\textNode ->
-                                            options.view
-                                                { link = Just url
-                                                , style = textNode.style
-                                                }
-                                        )
-                                        (List.reverse textList)
-                                        ++ current.rendered
-                                , text =
-                                    case List.map .style (List.reverse textList) of
-                                        [] ->
-                                            NoFormatting ""
-
-                                        (NoFormatting _) :: _ ->
-                                            NoFormatting ""
-
-                                        (Styles styles _) :: _ ->
-                                            Styles styles ""
-                                , balancedReplacements = current.balancedReplacements
-                                }
-            )
-            |. Parser.token (Parser.Token "[" (Expecting "["))
-            |= styledText basicTextOptions (currentStyles found) [ ']' ]
-            |. Parser.token (Parser.Token "]" (Expecting "]"))
-            |. Parser.token (Parser.Token "(" (Expecting "("))
-            |= Parser.getChompedString
-                (Parser.chompWhile (\c -> c /= ')' && c /= '\n' && c /= ' '))
-            |. Parser.token (Parser.Token ")" (Expecting ")"))
-
-        -- chomp until a meaningful character
-        , Parser.chompWhile
-            (\c ->
-                not (List.member c meaningful)
-            )
+    if found == emptyText then
+        Parser.chompIf
+            (\c -> c /= ' ')
+            CantStartTextWithSpace
             |> Parser.getChompedString
             |> Parser.map
                 (\new ->
-                    if new == "" || new == "\n" then
-                        Parser.Done (finishText options found)
-
-                    else if List.member (String.right 1 new) untilStrings then
-                        Parser.Done (finishText options (addText (String.dropRight 1 new) found))
-
-                    else
-                        Parser.Loop (addText new found)
+                    Parser.Loop (addText new found)
                 )
-        ]
+
+    else
+        Parser.oneOf
+            [ Parser.oneOf (replace options.replacements found)
+                |> Parser.map Parser.Loop
+
+            -- If a char matches the first character of a replacement,
+            -- but didn't match the full replacement captured above,
+            -- then stash that char.
+            , Parser.oneOf (almostReplacement options.replacements found)
+                |> Parser.map Parser.Loop
+
+            -- Capture style command characters
+            , Parser.succeed
+                (Parser.Loop << changeStyle options found)
+                |= Parser.oneOf
+                    [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
+                    , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
+                    , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
+                    , Parser.map (always Token) (Parser.token (Parser.Token "`" (Expecting "`")))
+                    ]
+
+            -- Custom inline block
+            , Parser.succeed
+                (\rendered ->
+                    let
+                        current =
+                            case changeStyle options found NoStyleChange of
+                                TextAccumulator accum ->
+                                    accum
+                    in
+                    Parser.Loop
+                        (TextAccumulator
+                            { rendered = rendered :: current.rendered
+
+                            -- TODO: This should inherit formatting from the inline parser
+                            , text = NoFormatting ""
+                            , balancedReplacements = current.balancedReplacements
+                            }
+                        )
+                )
+                |. Parser.token
+                    (Parser.Token "{" InlineStart)
+                |= Parser.oneOf
+                    (List.map (\(Inline inlineParser) -> inlineParser (currentStyles found)) options.inlines)
+
+            -- Link
+            , Parser.succeed
+                (\textList url ->
+                    case changeStyle options found NoStyleChange of
+                        TextAccumulator current ->
+                            Parser.Loop <|
+                                TextAccumulator
+                                    { rendered =
+                                        List.map
+                                            (\textNode ->
+                                                options.view
+                                                    { link = Just url
+                                                    , style = textNode.style
+                                                    }
+                                            )
+                                            (List.reverse textList)
+                                            ++ current.rendered
+                                    , text =
+                                        case List.map .style (List.reverse textList) of
+                                            [] ->
+                                                NoFormatting ""
+
+                                            (NoFormatting _) :: _ ->
+                                                NoFormatting ""
+
+                                            (Styles styles _) :: _ ->
+                                                Styles styles ""
+                                    , balancedReplacements = current.balancedReplacements
+                                    }
+                )
+                |. Parser.token (Parser.Token "[" (Expecting "["))
+                |= styledText basicTextOptions (currentStyles found) [ ']' ]
+                |. Parser.token (Parser.Token "]" (Expecting "]"))
+                |. Parser.token (Parser.Token "(" (Expecting "("))
+                |= Parser.getChompedString
+                    (Parser.chompWhile (\c -> c /= ')' && c /= '\n' && c /= ' '))
+                |. Parser.token (Parser.Token ")" (Expecting ")"))
+            , -- chomp until a meaningful character
+              Parser.chompWhile
+                (\c ->
+                    not (List.member c meaningful)
+                )
+                |> Parser.getChompedString
+                |> Parser.map
+                    (\new ->
+                        if new == "" || new == "\n" then
+                            Parser.Done (finishText options found)
+
+                        else if List.member (String.right 1 new) untilStrings then
+                            Parser.Done (finishText options (addText (String.dropRight 1 new) found))
+
+                        else
+                            Parser.Loop (addText new found)
+                    )
+            ]
 
 
 currentStyles (TextAccumulator formatted) =
