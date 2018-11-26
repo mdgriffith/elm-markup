@@ -248,14 +248,52 @@ list listConfig textParser =
     Mark.Custom.block "List"
         (\items model ->
             let
-                gather ( indent, item ) ( cursor, ListBuilder builder ) =
-                    addItem cursor indent (ListBuilder builder) (Just ( [], [], Arrow )) item
+                gather ( indent, icon, item ) ( cursor, ListBuilder builder ) =
+                    addItem cursor indent (ListBuilder builder) icon item
             in
             List.foldl gather ( emptyCursor, emptyListBuilder ) items
                 |> Tuple.second
                 |> (\els -> finalizeList listConfig els model)
         )
-        (Mark.Custom.nested textParser)
+        (Mark.Custom.nested
+            { item = textParser
+            , start =
+                Mark.Custom.advanced
+                    (Parser.succeed identity
+                        |= listIcon
+                        |. Parser.chompIf (\c -> c == ' ') (Mark.Custom.Expecting " ")
+                    )
+            }
+        )
+
+
+listIcon : Parser Mark.Custom.Context Mark.Custom.Problem ( List (Maybe Int), List String, ListIcon )
+listIcon =
+    Parser.oneOf
+        [ Parser.succeed ( [], [], Arrow )
+            |. Parser.oneOf
+                [ Parser.token (Parser.Token "->" (Mark.Custom.Expecting "->"))
+                , Parser.token (Parser.Token "-->" (Mark.Custom.Expecting "-->"))
+                ]
+            |. Parser.chompIf (\c -> c == ' ') (Mark.Custom.Expecting " ")
+        , Parser.succeed identity
+            |. Parser.token (Parser.Token "-" (Mark.Custom.Expecting "-"))
+            |= Parser.oneOf
+                [ Parser.succeed ( [], [], Bullet )
+                    |. Parser.oneOf
+                        [ Parser.token (Parser.Token " " Mark.Custom.Space)
+                        , Parser.token (Parser.Token "-" Mark.Custom.Dash)
+                        ]
+                    |. Parser.chompIf (\c -> c == ' ') (Mark.Custom.Expecting " ")
+                , Parser.succeed
+                    (\( reset, decorations ) ->
+                        ( reset, decorations, Number )
+                    )
+                    |= Parser.loop ( [], [] ) listIndex
+                    |. Parser.token (Parser.Token " " Mark.Custom.Space)
+                    |. Parser.chompIf (\c -> c == ' ') (Mark.Custom.Expecting " ")
+                ]
+        ]
 
 
 
@@ -899,35 +937,6 @@ collapseLevel num levels =
 
             _ ->
                 levels
-
-
-listIcon : Parser Mark.Custom.Context Mark.Custom.Problem ( List (Maybe Int), List String, ListIcon )
-listIcon =
-    Parser.oneOf
-        [ Parser.succeed ( [], [], Arrow )
-            |. Parser.oneOf
-                [ Parser.token (Parser.Token "->" (Mark.Custom.Expecting "->"))
-                , Parser.token (Parser.Token "-->" (Mark.Custom.Expecting "-->"))
-                ]
-            |. Parser.chompWhile (\c -> c == ' ')
-        , Parser.succeed identity
-            |. Parser.token (Parser.Token "-" Mark.Custom.Dash)
-            |= Parser.oneOf
-                [ Parser.succeed ( [], [], Bullet )
-                    |. Parser.oneOf
-                        [ Parser.token (Parser.Token " " Mark.Custom.Space)
-                        , Parser.token (Parser.Token "-" Mark.Custom.Dash)
-                        ]
-                    |. Parser.chompWhile (\c -> c == ' ' || c == '-')
-                , Parser.succeed
-                    (\( reset, decorations ) ->
-                        ( reset, decorations, Number )
-                    )
-                    |= Parser.loop ( [], [] ) listIndex
-                    |. Parser.token (Parser.Token " " Mark.Custom.Space)
-                    |. Parser.chompWhile (\c -> c == ' ')
-                ]
-        ]
 
 
 indentedInlines indent inlines alreadyFound =

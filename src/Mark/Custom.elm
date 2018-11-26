@@ -136,6 +136,7 @@ type Problem
     = NoBlocks
     | EmptyBlock
     | ExpectedIndent
+    | NonMatchingIndent Int Int
     | InlineStart
     | InlineBar
     | InlineEnd
@@ -218,36 +219,47 @@ So, for example, here's a list.
         - item one
         - item two
             - nested item two
+            additional text for nested item two
         - item three
             - nested item three
 
-In order to support blocks like this, you can use `nested`, which captures the indentation and returns it as an `Int`, which is the number of spaces that it's indented in the block,
+In order to support blocks like this, you can use `nested`, which
+captures the indentation and returns it as an `Int`,
+which is the number of spaces that it's indented in the block.
 
 In order to parse the above, you could define a block as
 
     block "List"
         (\items ->
-            -- items : List (Int, Text)
+            -- items : List (Int, (), Text)
         )
-        (many (nested text))
+        (nested
+            { item = text
+            , delimiter = advanced (Parser.token "-")
+            }
+        )
 
 Which will result in something like the following(though with `Text` instead of strings):
 
-    ( 0, "item one" )
+    ( 0, (), [ "item one" ] )
 
-    ( 0, "item two" )
+    ( 0, (), [ "item two" ] )
 
-    ( 4, "nested item two" )
+    ( 4, (), [ "nested item two", "additional text for nested item two" ] )
 
-    ( 0, "item three" )
+    ( 0, (), [ "item three" ] )
 
-    ( 4, "nested item three" )
+    ( 4, (), [ "nested item three" ] )
 
 _Note_ the indentation is always a multiple of 4.
 
 -}
-nested : Block a -> Block (List ( Int, a ))
-nested itemBlock =
+nested :
+    { item : Block item
+    , start : Block icon
+    }
+    -> Block (List ( Int, Maybe icon, item ))
+nested config =
     Block
         (Parser.getIndent
             |> Parser.andThen
@@ -258,51 +270,9 @@ nested itemBlock =
                           }
                         , []
                         )
-                        (indentedBlocksOrNewlines itemBlock)
+                        (indentedBlocksOrNewlines config.start config.item)
                 )
         )
-
-
-{-| -}
-indentation : Int -> Parser Context Problem (Parser.Step Int Int)
-indentation count =
-    Parser.oneOf
-        [ Parser.succeed (Parser.Loop (count + 4))
-            |. Parser.token (Parser.Token "    " ExpectedIndent)
-        , Parser.succeed (Parser.Loop 0)
-            |. Parser.token (Parser.Token " " ExpectedIndent)
-            |. Parser.problem ExpectedIndent
-        , Parser.succeed (Parser.Done count)
-        ]
-
-
-{-| We only expect nearby indentations.
-
-We can't go below the `base` indentation.
-
-Based on the previous indentation:
-
-  - previous - 4
-  - previous
-  - previous + 4
-
-If we don't match the above rules, we might want to count the mismatched number.
-
--}
-expectIndentation : Int -> Int -> Parser Context Problem Int
-expectIndentation base previous =
-    Parser.oneOf
-        [ Parser.succeed (previous + 4)
-            |. Parser.token (Parser.Token (String.repeat (base + previous + 4) " ") ExpectedIndent)
-        , Parser.succeed previous
-            |. Parser.token (Parser.Token (String.repeat (base + previous) " ") ExpectedIndent)
-        , if previous >= 4 then
-            Parser.succeed (previous - 4)
-                |. Parser.token (Parser.Token (String.repeat (base + previous - 4) " ") ExpectedIndent)
-
-          else
-            Parser.problem ExpectedIndent
-        ]
 
 
 type alias NestedIndex =
@@ -313,10 +283,11 @@ type alias NestedIndex =
 
 {-| -}
 indentedBlocksOrNewlines :
-    Block thing
-    -> ( NestedIndex, List ( Int, thing ) )
-    -> Parser Context Problem (Parser.Step ( NestedIndex, List ( Int, thing ) ) (List ( Int, thing )))
-indentedBlocksOrNewlines (Block itemParser) ( indent, existing ) =
+    Block icon
+    -> Block thing
+    -> ( NestedIndex, List ( Int, Maybe icon, thing ) )
+    -> Parser Context Problem (Parser.Step ( NestedIndex, List ( Int, Maybe icon, thing ) ) (List ( Int, Maybe icon, thing )))
+indentedBlocksOrNewlines (Block iconParser) (Block itemParser) ( indent, existing ) =
     Parser.oneOf
         [ case existing of
             [] ->
@@ -343,37 +314,123 @@ indentedBlocksOrNewlines (Block itemParser) ( indent, existing ) =
                 ]
         , case existing of
             [] ->
-                -- Indent is already parsed, skip it
+                -- Indent is already parsed(by block constructor) for first element, skip it
                 Parser.succeed
-                    (\foundBlock ->
+                    (\foundIcon foundBlock ->
                         let
                             newIndex =
                                 { prev = 0
                                 , base = indent.base
                                 }
                         in
-                        Parser.Loop ( newIndex, ( 0, foundBlock ) :: existing )
+                        Parser.Loop ( newIndex, ( 0, Just foundIcon, foundBlock ) :: existing )
                     )
+                    |= iconParser
                     |= itemParser
 
             _ ->
-                -- block with required indent
-                expectIndentation indent.base indent.prev
-                    |> Parser.andThen
-                        (\newIndent ->
-                            Parser.withIndent newIndent itemParser
-                                |> Parser.map
-                                    (\foundBlock ->
-                                        let
-                                            newIndex =
-                                                { prev = newIndent
-                                                , base = indent.base
-                                                }
-                                        in
-                                        Parser.Loop ( newIndex, ( newIndent, foundBlock ) :: existing )
-                                    )
-                        )
+                Parser.oneOf
+                    [ -- block with required indent
+                      expectIndentation indent.base indent.prev
+                        |> Parser.andThen
+                            (\newIndent ->
+                                -- If the indent has changed, then the delimiter is required
+                                Parser.withIndent newIndent <|
+                                    Parser.oneOf
+                                        ((Parser.succeed
+                                            (\icon item ->
+                                                let
+                                                    newIndex =
+                                                        { prev = newIndent
+                                                        , base = indent.base
+                                                        }
+                                                in
+                                                Parser.Loop ( newIndex, ( newIndent, Just icon, item ) :: existing )
+                                            )
+                                            |= iconParser
+                                            |= itemParser
+                                         )
+                                            :: (if newIndent == indent.prev then
+                                                    [ itemParser
+                                                        |> Parser.map
+                                                            (\foundBlock ->
+                                                                let
+                                                                    newIndex =
+                                                                        { prev = newIndent
+                                                                        , base = indent.base
+                                                                        }
+                                                                in
+                                                                Parser.Loop ( newIndex, ( newIndent, Nothing, foundBlock ) :: existing )
+                                                            )
+                                                    ]
+
+                                                else
+                                                    []
+                                               )
+                                        )
+                            )
+
+                    -- We reach here because the indentation parsing was not successful,
+                    -- This means any issues are handled by whatever parser comes next.
+                    , Parser.succeed (Parser.Done (List.reverse existing))
+                    ]
         ]
+
+
+{-| We only expect nearby indentations.
+
+We can't go below the `base` indentation.
+
+Based on the previous indentation:
+
+  - previous - 4
+  - previous
+  - previous + 4
+
+If we don't match the above rules, we might want to count the mismatched number.
+
+-}
+expectIndentation : Int -> Int -> Parser Context Problem Int
+expectIndentation base previous =
+    Parser.succeed Tuple.pair
+        |= Parser.oneOf
+            ([ Parser.succeed (previous + 4)
+                |. Parser.token (Parser.Token (String.repeat (base + previous + 4) " ") ExpectedIndent)
+             , Parser.succeed previous
+                |. Parser.token (Parser.Token (String.repeat (base + previous) " ") ExpectedIndent)
+             ]
+                ++ descending base previous
+            )
+        |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
+        |> Parser.andThen
+            (\( indentLevel, extraSpaces ) ->
+                if extraSpaces == "" then
+                    Parser.succeed indentLevel
+
+                else
+                    Parser.problem
+                        (NonMatchingIndent
+                            base
+                            (base + indentLevel + String.length extraSpaces)
+                        )
+            )
+
+
+descending base prev =
+    if prev <= base then
+        []
+
+    else
+        List.map
+            (\x ->
+                let
+                    level =
+                        x + 4
+                in
+                Parser.succeed level
+                    |. Parser.token (Parser.Token (String.repeat level " ") ExpectedIndent)
+            )
+            (List.range 0 ((prev - base) // 4))
 
 
 {-| Many blocks that are all at the same indentation level.
