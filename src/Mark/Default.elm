@@ -247,22 +247,15 @@ list :
 list listConfig textParser =
     Mark.Custom.block "List"
         (\items model ->
-            let
-                gather ( indent, icon, item ) ( cursor, ListBuilder builder ) =
-                    addItem cursor indent (ListBuilder builder) icon item
-            in
-            List.foldl gather ( emptyCursor, emptyListBuilder ) items
-                |> Tuple.second
-                |> (\els -> finalizeList listConfig els model)
+            Element.column
+                (listConfig.style [])
+                (List.map (renderListItem listConfig model) items)
         )
         (Mark.Custom.nested
             { item = textParser
             , start =
                 Mark.Custom.advanced
-                    (Parser.succeed identity
-                        |= listIcon
-                        |. Parser.chompIf (\c -> c == ' ') (Mark.Custom.Expecting " ")
-                    )
+                    listIcon
             }
         )
 
@@ -487,7 +480,6 @@ A list item started with a list icon.
 type ListBuilder model msg
     = ListBuilder
         { previousIndent : Int
-        , previousLineEmpty : Bool
         , levels :
             -- (mostRecent :: remaining)
             List (Level model msg)
@@ -522,7 +514,6 @@ emptyListBuilder : ListBuilder model msg
 emptyListBuilder =
     ListBuilder
         { previousIndent = 0
-        , previousLineEmpty = False
         , levels = []
         }
 
@@ -576,74 +567,22 @@ emptyListBuilder =
 -}
 
 
-finalizeList :
-    { icon : List Index -> ListIcon -> Element msg
-    , style : List Index -> List (Element.Attribute msg)
-    }
-    -> ListBuilder model msg
-    -> model
-    -> Element msg
-finalizeList config (ListBuilder builder) model =
-    Element.column
-        (config.style [])
-        (renderLevels config model builder.levels)
-
-
-renderLevels config model levels =
-    case levels of
-        [] ->
-            []
-
-        _ ->
-            case collapseLevel (List.length levels - 1) levels of
-                [] ->
-                    []
-
-                (Level top) :: ignore ->
-                    -- We just collapsed everything down to the top level.
-                    top
-                        |> List.reverse
-                        |> List.map (renderListItem config model)
-
-
-renderListItem config model (ListItem item) =
-    case item.icon of
-        Nothing ->
-            case item.children of
-                [] ->
-                    Element.paragraph
-                        []
-                        (item.content model)
-
-                _ ->
-                    Element.column
-                        (config.style [])
-                        (Element.paragraph
-                            []
-                            (item.content model)
-                            :: (item.children
-                                    |> List.reverse
-                                    |> List.map (renderListItem config model)
-                               )
-                        )
-
-        Just actualIcon ->
+renderListItem config model (Mark.Custom.Nested item) =
+    case item.content of
+        ( ( cursor, format, icon ), items ) ->
             Element.row []
-                [ Element.el [ Element.alignTop ] <|
-                    config.icon
-                        actualIcon.decorations
-                        actualIcon.token
+                [ Element.el [ Element.alignTop ]
+                    (listIcons [] icon)
                 , Element.textColumn
-                    (config.style
-                        actualIcon.decorations
-                    )
-                    (Element.paragraph
-                        []
-                        (item.content model)
-                        :: (item.children
-                                |> List.reverse
-                                |> List.map (renderListItem config model)
-                           )
+                    (config.style [])
+                    (List.map
+                        (\view ->
+                            Element.paragraph
+                                []
+                                (view model)
+                        )
+                        items
+                        ++ List.map (renderListItem config model) item.children
                     )
                 ]
 
@@ -839,8 +778,7 @@ addItem cursor indent (ListBuilder builder) maybeIcon styledParagraphs =
         [] ->
             ( newCursor
             , ListBuilder
-                { previousLineEmpty = False
-                , previousIndent = indent
+                { previousIndent = indent
                 , levels =
                     [ Level
                         [ newItem ]
@@ -853,8 +791,7 @@ addItem cursor indent (ListBuilder builder) maybeIcon styledParagraphs =
                 -- add to current level
                 ( newCursor
                 , ListBuilder
-                    { previousLineEmpty = False
-                    , previousIndent = indent
+                    { previousIndent = indent
                     , levels =
                         Level (newItem :: lvl)
                             :: remaining
@@ -865,8 +802,7 @@ addItem cursor indent (ListBuilder builder) maybeIcon styledParagraphs =
                 -- add new level
                 ( newCursor
                 , ListBuilder
-                    { previousLineEmpty = False
-                    , previousIndent = indent
+                    { previousIndent = indent
                     , levels =
                         Level [ newItem ]
                             :: Level lvl
@@ -879,8 +815,7 @@ addItem cursor indent (ListBuilder builder) maybeIcon styledParagraphs =
                 -- Then add an item to that level
                 ( newCursor
                 , ListBuilder
-                    { previousLineEmpty = False
-                    , previousIndent = indent
+                    { previousIndent = indent
                     , levels =
                         collapseLevel (abs deltaLevel) builder.levels
                             |> addToLevel newItem
