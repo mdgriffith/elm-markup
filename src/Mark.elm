@@ -40,7 +40,7 @@ parse source =
 
 {-| -}
 parseWith :
-    Mark.Custom.Root result
+    Mark.Custom.Document result
     -> String
     -> Result (List (Parser.DeadEnd Context Problem)) result
 parseWith options source =

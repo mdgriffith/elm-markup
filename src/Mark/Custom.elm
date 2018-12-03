@@ -1,72 +1,57 @@
 module Mark.Custom exposing
     ( parse
+    , Document, document
     , Block, block, oneOf, map, many
     , nested, Nested(..)
-    , Root, root
     , bool, int, float, string, multiline, exactly
-    , text, textWith, inline, Replacement, replacement, balanced
+    , field, record2, record3, record4, record5, record6
+    , Text, TextFormatting(..), InlineStyle(..)
+    , text, textWith, inline
+    , Replacement, replacement, balanced
     , advanced
     , Problem(..), Context(..)
-    , Text, TextFormatting(..), InlineStyle(..)
     )
 
 {-|
 
 @docs parse
 
+@docs Document, document
+
 @docs Block, block, oneOf, map, many
 
 @docs nested, Nested
 
-@docs Root, root
-
 @docs bool, int, float, string, multiline, exactly
 
-@docs text, textWith, inline, Replacement, replacement, balanced
+
+## Records
+
+@docs field, record2, record3, record4, record5, record6
+
+
+## Text
+
+@docs Text, TextFormatting, InlineStyle
+@docs text, textWith, inline
+
+@docs Replacement, replacement, balanced
+
+
+## Advanced
 
 @docs advanced
 
 @docs Problem, Context
-
-@docs Text, TextFormatting, InlineStyle
 
 -}
 
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
-
-{-
-
-   block "Header"
-       (\styled ->
-           Element.paragraph [ Region.heading 1 ] styled
-       )
-       text
-
-   block "Image"
-       (\src description ->
-           Element.image ...
-       )
-       |> field "src" file
-       |> field "description" string
-
-
-   advanced "List"
-       (listParser)
-
-    block "Section"
-        renderer
-        (many blocks)
-
-
-
--}
-
-
 {-| -}
-parse : Root result -> String -> Result (List (Parser.DeadEnd Context Problem)) result
-parse (Root blocks) source =
+parse : Document result -> String -> Result (List (Parser.DeadEnd Context Problem)) result
+parse (Document blocks) source =
     Parser.run blocks source
 
 
@@ -132,6 +117,7 @@ type InlineStyle
 type Context
     = InBlock String
     | InInline String
+    | InRecordField String
 
 
 {-| -}
@@ -147,6 +133,8 @@ type Problem
     | ExpectingBlockName String
     | ExpectingInlineName String
     | ExpectingFieldName String
+    | RecordField FieldError
+    | DoubleField String
     | Escape
     | EscapedChar
     | Dash
@@ -160,6 +148,11 @@ type Problem
     | InvalidNumber
     | ExpectingAlphaNumeric
     | CantStartTextWithSpace
+    | UnexpectedField
+        { found : String
+        , options : List String
+        , recordName : String
+        }
 
 
 {-| -}
@@ -188,8 +181,8 @@ block name renderer (Block childParser) =
 
 
 {-| -}
-type Root result
-    = Root (Parser Context Problem result)
+type Document result
+    = Document (Parser Context Problem result)
 
 
 {-| You must have a root parser for your document.
@@ -197,9 +190,9 @@ type Root result
 It parses everything at the top-level of indentation.
 
 -}
-root : (child -> result) -> Block child -> Root result
-root renderer (Block childParser) =
-    Root
+document : (child -> result) -> Block child -> Document result
+document renderer (Block childParser) =
+    Document
         (Parser.map renderer (Parser.withIndent 0 childParser))
 
 
@@ -620,6 +613,370 @@ string =
 
 
 {-| -}
+type Field value
+    = Field String (Block value)
+
+
+{-| -}
+record2 :
+    String
+    -> (one -> two -> data)
+    -> Field one
+    -> Field two
+    -> Block data
+record2 recordName renderer field1 field2 =
+    let
+        recordParser =
+            Parser.succeed renderer
+                |= fieldParser field1
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field2
+    in
+    masterRecordParser recordName [ fieldName field1, fieldName field2 ] recordParser
+
+
+{-| -}
+record3 :
+    String
+    -> (one -> two -> three -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Block data
+record3 recordName renderer field1 field2 field3 =
+    let
+        recordParser =
+            Parser.succeed renderer
+                |= fieldParser field1
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field2
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field3
+    in
+    masterRecordParser recordName [ fieldName field1, fieldName field2, fieldName field3 ] recordParser
+
+
+{-| -}
+record4 :
+    String
+    -> (one -> two -> three -> four -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Block data
+record4 recordName renderer field1 field2 field3 field4 =
+    let
+        recordParser =
+            Parser.succeed renderer
+                |= fieldParser field1
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field2
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field3
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field4
+    in
+    masterRecordParser recordName [ fieldName field1, fieldName field2, fieldName field3, fieldName field4 ] recordParser
+
+
+{-| -}
+record5 :
+    String
+    -> (one -> two -> three -> four -> five -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Block data
+record5 recordName renderer field1 field2 field3 field4 field5 =
+    let
+        recordParser =
+            Parser.succeed renderer
+                |= fieldParser field1
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field2
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field3
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field4
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field5
+    in
+    masterRecordParser recordName
+        [ fieldName field1
+        , fieldName field2
+        , fieldName field3
+        , fieldName field4
+        , fieldName field5
+        ]
+        recordParser
+
+
+{-| -}
+record6 :
+    String
+    ->
+        (one
+         -> two
+         -> three
+         -> four
+         -> five
+         -> six
+         -> data
+        )
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Block data
+record6 recordName renderer field1 field2 field3 field4 field5 field6 =
+    let
+        recordParser =
+            Parser.succeed renderer
+                |= fieldParser field1
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field2
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field3
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field4
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field5
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field6
+    in
+    masterRecordParser recordName
+        [ fieldName field1
+        , fieldName field2
+        , fieldName field3
+        , fieldName field4
+        , fieldName field5
+        , fieldName field6
+        ]
+        recordParser
+
+
+masterRecordParser recordName names recordParser =
+    Block
+        (Parser.getIndent
+            |> Parser.andThen
+                (\indent ->
+                    (Parser.succeed identity
+                        -- TODO: I'd rather not use backtrackable, but not entirely sure how to avoid it here.
+                        |. Parser.backtrackable (Parser.token (Parser.Token "|" (ExpectingBlockName recordName)))
+                        |. Parser.backtrackable
+                            (Parser.oneOf
+                                [ Parser.chompIf (\c -> c == ' ') Space
+                                , Parser.succeed ()
+                                ]
+                            )
+                        |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |. Parser.chompIf (\c -> c == '\n') Newline
+                        |= Parser.withIndent (indent + 4)
+                            (Parser.inContext (InBlock recordName)
+                                (Parser.loop [] (indentedFieldNames recordName (indent + 4) names))
+                            )
+                    )
+                        |> Parser.andThen
+                            (\fieldList ->
+                                let
+                                    join ( key, val ) str =
+                                        case str of
+                                            "" ->
+                                                key ++ " = " ++ val
+
+                                            _ ->
+                                                str ++ "\n" ++ key ++ " = " ++ val
+
+                                    recomposed =
+                                        fieldList
+                                            |> reorderFields names
+                                            |> Result.map (List.foldl join "")
+                                in
+                                case recomposed of
+                                    Ok str ->
+                                        case Parser.run recordParser str of
+                                            Ok ok ->
+                                                Parser.succeed ok
+
+                                            Err err ->
+                                                let
+                                                    _ =
+                                                        Debug.log "Recomposed" str
+
+                                                    _ =
+                                                        Debug.log "Error" err
+                                                in
+                                                Parser.problem (ExpectingFieldName "Charles")
+
+                                    Err recordError ->
+                                        Parser.problem (RecordField recordError)
+                            )
+                )
+        )
+
+
+type FieldError
+    = NonMatchingFields
+        { expecting : List String
+        , found : List String
+        }
+    | MissingField String
+
+
+reorderFields : List String -> List ( String, String ) -> Result FieldError (List ( String, String ))
+reorderFields desiredOrder found =
+    if List.length desiredOrder /= List.length found then
+        Err
+            (NonMatchingFields
+                { expecting = desiredOrder
+                , found = List.map Tuple.first found
+                }
+            )
+
+    else
+        List.foldl (gatherFields found) (Ok []) desiredOrder
+            |> Result.map List.reverse
+
+
+gatherFields : List ( String, String ) -> String -> Result FieldError (List ( String, String )) -> Result FieldError (List ( String, String ))
+gatherFields cache desired found =
+    case found of
+        Ok ok ->
+            case getField cache desired of
+                Ok newField ->
+                    Ok (newField :: ok)
+
+                Err str ->
+                    Err str
+
+        _ ->
+            found
+
+
+getField cache desired =
+    case cache of
+        [] ->
+            Err (MissingField desired)
+
+        ( name, top ) :: rest ->
+            if desired == name then
+                Ok ( name, top )
+
+            else
+                getField rest desired
+
+
+fieldParser (Field _ (Block parser)) =
+    parser
+
+
+fieldName (Field name _) =
+    name
+
+
+
+-- order
+
+
+{-| -}
+field : String -> Block value -> Field value
+field name (Block child) =
+    Field name (Block (withFieldName name child))
+
+
+withFieldName name parser =
+    Parser.getIndent
+        |> Parser.andThen
+            (\indent ->
+                Parser.succeed identity
+                    |. Parser.keyword (Parser.Token name (ExpectingFieldName name))
+                    |. Parser.chompIf (\c -> c == ' ') Space
+                    |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                    |. Parser.chompIf (\c -> c == ' ') Space
+                    |= Parser.inContext (InRecordField name) parser
+            )
+
+
+indentedFieldNames : String -> Int -> List String -> List ( String, String ) -> Parser Context Problem (Parser.Step (List ( String, String )) (List ( String, String )))
+indentedFieldNames recordName indent fields found =
+    let
+        _ =
+            Debug.log "record indent" indent
+
+        fieldNameParser name =
+            Parser.succeed
+                (\contentStr ->
+                    Parser.Loop (( name, contentStr ) :: found)
+                )
+                |. Parser.token (Parser.Token name (Expecting name))
+                |. Parser.chompWhile (\c -> c == ' ')
+                |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+
+        unexpectedField =
+            Parser.getChompedString
+                (Parser.chompWhile (\c -> c /= '=' && c /= '\n'))
+                |> Parser.andThen
+                    (\unexpected ->
+                        let
+                            trimmed =
+                                String.trim unexpected
+                        in
+                        Parser.problem
+                            (UnexpectedField
+                                { found = trimmed
+                                , options = fields
+                                , recordName = recordName
+                                }
+                            )
+                    )
+
+        content =
+            Parser.succeed
+                (\str ->
+                    case found of
+                        [] ->
+                            Parser.Loop found
+
+                        ( name, contentStr ) :: remain ->
+                            Parser.Loop (( name, contentStr ++ "\n" ++ str ) :: remain)
+                )
+                |. Parser.chompIf (\c -> c == ' ') ExpectedIndent
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+    in
+    Parser.oneOf
+        [ Parser.succeed
+            identity
+            |. Parser.token (Parser.Token (String.repeat indent " ") ExpectedIndent)
+            |= Parser.oneOf
+                (case found of
+                    [] ->
+                        List.map fieldNameParser fields ++ [ unexpectedField ]
+
+                    _ ->
+                        content
+                            :: List.map fieldNameParser fields
+                            ++ [ unexpectedField ]
+                )
+        , Parser.token (Parser.Token "\n" Newline)
+            |> Parser.map (\_ -> Parser.Loop found)
+        , Parser.succeed (Parser.Done found)
+        ]
+
+
+{-| -}
 multiline : Block String
 multiline =
     Block
@@ -747,7 +1104,6 @@ styledText options inheritedStyles until =
         meaningful =
             '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
     in
-    --  if found == emptyText then
     Parser.oneOf
         [ Parser.chompIf
             (\c -> c == ' ')
@@ -1206,28 +1562,6 @@ emptyTreeBuilder =
         }
 
 
-{-| -}
-type alias Cursor =
-    { current : Int
-    , stack : List Int
-    }
-
-
-emptyCursor : Cursor
-emptyCursor =
-    { current = 0
-    , stack = []
-    }
-
-
-cursorLevel ( current, nestedLevels ) =
-    List.length nestedLevels + 1
-
-
-mapCursor fn cursor =
-    List.map fn (cursor.current :: cursor.stack)
-
-
 {-| A list item started with a list icon.
 
 If indent stays the same
@@ -1415,30 +1749,3 @@ renderLevels levels =
                 (Level top) :: ignore ->
                     -- We just collapsed everything down to the top level.
                     List.reverse top
-
-
-advanceCursor indent cursor =
-    if indent == List.length cursor.stack + 1 then
-        { current = cursor.current + 1
-        , stack = cursor.stack
-        }
-
-    else if indent > List.length cursor.stack + 1 then
-        { current = 1
-        , stack = cursor.current :: cursor.stack
-        }
-
-    else
-        let
-            indentDelta =
-                List.length cursor.stack
-                    - indent
-        in
-        case List.drop (abs indentDelta) cursor.stack of
-            [] ->
-                cursor
-
-            lower :: remaining ->
-                { current = lower + 1
-                , stack = remaining
-                }

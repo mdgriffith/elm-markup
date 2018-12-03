@@ -23,9 +23,9 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| -}
-document : Mark.Custom.Root (model -> Element msg)
+document : Mark.Custom.Document (model -> Element msg)
 document =
-    Mark.Custom.root
+    Mark.Custom.document
         (\children model ->
             Element.textColumn []
                 (List.map (\view -> view model) children)
@@ -39,6 +39,12 @@ document =
                     , icon = renderIcon
                     }
                     defaultText
+                , Mark.Custom.record2 "Image"
+                    (\src description model ->
+                        Element.text (src ++ ":" ++ description)
+                    )
+                    (Mark.Custom.field "src" Mark.Custom.string)
+                    (Mark.Custom.field "description" Mark.Custom.string)
                 , monospace
                     [ Element.spacing 5
                     , Element.padding 24
@@ -441,7 +447,8 @@ renderIcon index symbol =
             Element.el [ pad ]
                 (Element.text
                     (index
-                        |> decorate numberConfig.decorations
+                        |> List.foldl applyDecoration ( List.reverse numberConfig.decorations, [] )
+                        |> Tuple.second
                         |> List.foldl formatIndex ""
                     )
                 )
@@ -453,13 +460,6 @@ formatIndex index formatted =
 
     else
         formatted
-
-
-decorate : List String -> List Int -> List { index : Int, decoration : String, show : Bool }
-decorate decorations index =
-    index
-        |> List.foldl applyDecoration ( List.reverse decorations, [] )
-        |> Tuple.second
 
 
 applyDecoration index ( decs, decorated ) =
