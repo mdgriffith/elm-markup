@@ -3,7 +3,7 @@ module Mark.Custom exposing
     , Block, block, oneOf, map, many
     , nested, Nested(..)
     , Root, root
-    , bool, int, float, string, multiline
+    , bool, int, float, string, multiline, exactly
     , text, textWith, inline, Replacement, replacement, balanced
     , advanced
     , Problem(..), Context(..)
@@ -20,7 +20,7 @@ module Mark.Custom exposing
 
 @docs Root, root
 
-@docs bool, int, float, string, multiline
+@docs bool, int, float, string, multiline, exactly
 
 @docs text, textWith, inline, Replacement, replacement, balanced
 
@@ -388,7 +388,7 @@ indentedBlocksOrNewlines (Block iconParser) (Block itemParser) ( indent, existin
                 ]
         , case existing of
             [] ->
-                -- Indent is already parsed(by block constructor) for first element, skip it
+                -- Indent is already parsed by the block constructor for first element, skip it
                 Parser.succeed
                     (\foundIcon foundBlock ->
                         let
@@ -570,6 +570,15 @@ blocksOrNewlines (Block myBlock) indent existing =
 oneOf : List (Block a) -> Block a
 oneOf blocks =
     Block (Parser.oneOf (List.map (\(Block parser) -> parser) blocks))
+
+
+{-| -}
+exactly : String -> value -> Block value
+exactly key val =
+    Block
+        (Parser.succeed val
+            |. Parser.token (Parser.Token key (Expecting key))
+        )
 
 
 {-| -}
@@ -1185,7 +1194,6 @@ type Nested item
     = Nested
         { content : item
         , children :
-            -- (mostRecent :: remaining)
             List (Nested item)
         }
 
@@ -1288,7 +1296,8 @@ addItem indent content (TreeBuilder builder) =
                 }
 
         deltaLevel =
-            indent - List.length builder.levels
+            indent
+                - List.length builder.levels
 
         addToLevel brandNewItem levels =
             case levels of
@@ -1406,3 +1415,30 @@ renderLevels levels =
                 (Level top) :: ignore ->
                     -- We just collapsed everything down to the top level.
                     List.reverse top
+
+
+advanceCursor indent cursor =
+    if indent == List.length cursor.stack + 1 then
+        { current = cursor.current + 1
+        , stack = cursor.stack
+        }
+
+    else if indent > List.length cursor.stack + 1 then
+        { current = 1
+        , stack = cursor.current :: cursor.stack
+        }
+
+    else
+        let
+            indentDelta =
+                List.length cursor.stack
+                    - indent
+        in
+        case List.drop (abs indentDelta) cursor.stack of
+            [] ->
+                cursor
+
+            lower :: remaining ->
+                { current = lower + 1
+                , stack = remaining
+                }
