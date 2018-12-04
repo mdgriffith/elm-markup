@@ -134,8 +134,7 @@ type Context
 type Problem
     = NoBlocks
     | EmptyBlock
-    | ExpectedIndent
-    | NonMatchingIndent Int Int
+    | ExpectingIndent Int
     | InlineStart
     | InlineBar
     | InlineEnd
@@ -180,7 +179,7 @@ block name renderer child =
                         |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |. Parser.chompIf (\c -> c == '\n') Newline
-                        |. Parser.token (Parser.Token (String.repeat (indent + 4) " ") ExpectedIndent)
+                        |. Parser.token (Parser.Token (String.repeat (indent + 4) " ") (ExpectingIndent (indent + 4)))
                         |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) (getParser child))
                 )
         )
@@ -473,9 +472,9 @@ expectIndentation base previous =
     Parser.succeed Tuple.pair
         |= Parser.oneOf
             ([ Parser.succeed (previous + 4)
-                |. Parser.token (Parser.Token (String.repeat (previous + 4) " ") ExpectedIndent)
+                |. Parser.token (Parser.Token (String.repeat (previous + 4) " ") (ExpectingIndent (previous + 4)))
              , Parser.succeed previous
-                |. Parser.token (Parser.Token (String.repeat previous " ") ExpectedIndent)
+                |. Parser.token (Parser.Token (String.repeat previous " ") (ExpectingIndent previous))
              ]
                 ++ descending base previous
             )
@@ -487,10 +486,7 @@ expectIndentation base previous =
 
                 else
                     Parser.problem
-                        (NonMatchingIndent
-                            base
-                            (base + indentLevel + String.length extraSpaces)
-                        )
+                        (ExpectingIndent (base + indentLevel))
             )
 
 
@@ -506,7 +502,7 @@ descending base prev =
                         x + 4
                 in
                 Parser.succeed level
-                    |. Parser.token (Parser.Token (String.repeat level " ") ExpectedIndent)
+                    |. Parser.token (Parser.Token (String.repeat level " ") (ExpectingIndent level))
             )
             (List.range 0 ((prev - base) // 4))
 
@@ -519,15 +515,15 @@ manyOf thing =
         (Parser.getIndent
             |> Parser.andThen
                 (\indent ->
-                    Parser.loop []
+                    Parser.loop ( False, [] )
                         (blocksOrNewlines (oneOf thing) indent)
                 )
         )
 
 
 {-| -}
-blocksOrNewlines : Block thing -> Int -> List thing -> Parser Context Problem (Parser.Step (List thing) (List thing))
-blocksOrNewlines myBlock indent existing =
+blocksOrNewlines : Block thing -> Int -> ( Bool, List thing ) -> Parser Context Problem (Parser.Step ( Bool, List thing ) (List thing))
+blocksOrNewlines myBlock indent ( parsedSomething, existing ) =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -537,7 +533,7 @@ blocksOrNewlines myBlock indent existing =
 
         -- Whitespace Line
         , Parser.succeed
-            (Parser.Loop existing)
+            (Parser.Loop ( True, existing ))
             |. Parser.token (Parser.Token "\n" Newline)
             |. Parser.oneOf
                 [ Parser.succeed ()
@@ -545,32 +541,31 @@ blocksOrNewlines myBlock indent existing =
                     |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
                 , Parser.succeed ()
                 ]
-        , case existing of
+        , if not parsedSomething then
             -- First thing already has indentation accounted for.
-            [] ->
-                getParser myBlock
-                    |> Parser.map
-                        (\foundBlock ->
-                            Parser.Loop (foundBlock :: existing)
-                        )
+            getParser myBlock
+                |> Parser.map
+                    (\foundBlock ->
+                        Parser.Loop ( True, foundBlock :: existing )
+                    )
 
-            _ ->
-                Parser.oneOf
-                    [ Parser.succeed
-                        (\foundBlock ->
-                            Parser.Loop (foundBlock :: existing)
-                        )
-                        |. Parser.token (Parser.Token (String.repeat indent " ") ExpectedIndent)
-                        |= getParser myBlock
+          else
+            Parser.oneOf
+                [ Parser.succeed
+                    (\foundBlock ->
+                        Parser.Loop ( True, foundBlock :: existing )
+                    )
+                    |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
+                    |= getParser myBlock
 
-                    -- We reach here because the indentation parsing was not successful,
-                    -- meaning the indentation has been lowered and the block is done
-                    , if indent == 0 then
-                        Parser.problem UnexpectedEnd
+                -- We reach here because the indentation parsing was not successful,
+                -- meaning the indentation has been lowered and the block is done
+                , if indent == 0 then
+                    Parser.problem UnexpectedEnd
 
-                      else
-                        Parser.succeed (Parser.Done (List.reverse existing))
-                    ]
+                  else
+                    Parser.succeed (Parser.Done (List.reverse existing))
+                ]
         ]
 
 
@@ -811,6 +806,9 @@ record6 recordName renderer field1 field2 field3 field4 field5 field6 =
         recordParser
 
 
+{-| Parser.withIndent (indent + 4) (Parser.inContext (InBlock name)
+-}
+masterRecordParser : String -> List String -> Parser Context Problem data -> Block data
 masterRecordParser recordName names recordParser =
     Block
         (Parser.getIndent
@@ -843,20 +841,14 @@ masterRecordParser recordName names recordParser =
                                 in
                                 case recomposed of
                                     Ok str ->
-                                        case Parser.run recordParser str of
+                                        case Parser.run (Parser.withIndent 0 (Parser.inContext (InBlock recordName) recordParser)) str of
                                             Ok ok ->
                                                 Parser.succeed ok
 
                                             Err err ->
-                                                let
-                                                    _ =
-                                                        Debug.log "Recomposed" str
-
-                                                    _ =
-                                                        Debug.log "Error" err
-                                                in
                                                 case err of
                                                     [] ->
+                                                        -- NOTE: this shouldn't happen
                                                         Parser.problem RecordError
 
                                                     fst :: _ ->
@@ -957,7 +949,7 @@ withFieldName name parser =
                     |. Parser.chompIf (\c -> c == ' ') Space
                     |. Parser.chompIf (\c -> c == '=') (Expecting "=")
                     |. Parser.chompIf (\c -> c == ' ') Space
-                    |= Parser.inContext (InRecordField name) parser
+                    |= Parser.withIndent (indent + 4) (Parser.inContext (InRecordField name) parser)
             )
 
 
@@ -1004,18 +996,18 @@ indentedFieldNames recordName indent fields found =
                             Parser.Loop found
 
                         ( name, contentStr ) :: remain ->
-                            Parser.Loop (( name, contentStr ++ "\n" ++ str ) :: remain)
+                            Parser.Loop (( name, contentStr ++ "\n " ++ str ) :: remain)
                 )
-                |. Parser.chompIf (\c -> c == ' ') ExpectedIndent
+                |. Parser.chompIf (\c -> c == ' ') (ExpectingIndent (indent + 4))
                 |= Parser.getChompedString
                     (Parser.chompWhile
                         (\c -> c /= '\n')
                     )
     in
     Parser.oneOf
-        [ Parser.succeed
+        ([ Parser.succeed
             identity
-            |. Parser.token (Parser.Token (String.repeat indent " ") ExpectedIndent)
+            |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
             |= Parser.oneOf
                 (case found of
                     [] ->
@@ -1026,10 +1018,20 @@ indentedFieldNames recordName indent fields found =
                             :: List.map fieldNameParser fields
                             ++ [ unexpectedField ]
                 )
-        , Parser.token (Parser.Token "\n" Newline)
+         , Parser.token (Parser.Token "\n" Newline)
             |> Parser.map (\_ -> Parser.Loop found)
-        , Parser.succeed (Parser.Done found)
-        ]
+         ]
+            ++ (if List.length found /= List.length fields then
+                    [ Parser.succeed (Parser.Done found)
+                        |. Parser.chompIf (\c -> c == ' ') (ExpectingIndent indent)
+                        |. Parser.problem (ExpectingIndent indent)
+                    , Parser.succeed (Parser.Done found)
+                    ]
+
+                else
+                    [ Parser.succeed (Parser.Done found) ]
+               )
+        )
 
 
 {-| -}
@@ -1048,7 +1050,7 @@ indentedString : Int -> String -> Parser Context Problem (Parser.Step String Str
 indentedString indent found =
     Parser.oneOf
         [ Parser.succeed (\str -> Parser.Loop (str ++ found))
-            |. Parser.token (Parser.Token (String.repeat indent " ") ExpectedIndent)
+            |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
             |= Parser.getChompedString
                 (Parser.chompWhile
                     (\c -> c /= '\n')
