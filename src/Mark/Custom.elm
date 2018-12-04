@@ -1,7 +1,7 @@
 module Mark.Custom exposing
     ( parse
     , Document, document
-    , Block, block, oneOf, map, many
+    , Block, block, oneOf, map, manyOf
     , nested, Nested(..)
     , bool, int, float, string, multiline, exactly
     , field, record2, record3, record4, record5, record6
@@ -9,7 +9,7 @@ module Mark.Custom exposing
     , text, textWith, inline
     , Replacement, replacement, balanced
     , advanced
-    , Problem(..), Context(..)
+    , Problem(..), Context(..), FieldError(..)
     )
 
 {-|
@@ -18,7 +18,7 @@ module Mark.Custom exposing
 
 @docs Document, document
 
-@docs Block, block, oneOf, map, many
+@docs Block, block, oneOf, map, manyOf
 
 @docs nested, Nested
 
@@ -42,7 +42,7 @@ module Mark.Custom exposing
 
 @docs advanced
 
-@docs Problem, Context
+@docs Problem, Context, FieldError
 
 -}
 
@@ -56,8 +56,27 @@ parse (Document blocks) source =
 
 
 {-| -}
-type Block result
+type
+    Block result
+    -- A block starts with `|` and has a name(already built into the parser)
     = Block (Parser Context Problem result)
+      -- A value is just a raw parser.
+    | Value (Parser Context Problem result)
+
+
+getParser fromBlock =
+    case fromBlock of
+        Block p ->
+            Parser.succeed identity
+                |. Parser.token (Parser.Token "|" StartBlock)
+                |. Parser.oneOf
+                    [ Parser.chompIf (\c -> c == ' ') Space
+                    , Parser.succeed ()
+                    ]
+                |= p
+
+        Value p ->
+            p
 
 
 {-| -}
@@ -71,15 +90,6 @@ type alias Text =
 type TextFormatting
     = NoFormatting String
     | Styles (List InlineStyle) String
-
-
-textFormttingString form =
-    case form of
-        NoFormatting str ->
-            str
-
-        Styles _ str ->
-            str
 
 
 {-| -}
@@ -129,11 +139,13 @@ type Problem
     | InlineStart
     | InlineBar
     | InlineEnd
+    | StartBlock
     | Expecting String
     | ExpectingBlockName String
     | ExpectingInlineName String
     | ExpectingFieldName String
     | RecordField FieldError
+    | RecordError
     | DoubleField String
     | Escape
     | EscapedChar
@@ -146,6 +158,7 @@ type Problem
     | Integer
     | FloatingPoint
     | InvalidNumber
+    | UnexpectedEnd
     | ExpectingAlphaNumeric
     | CantStartTextWithSpace
     | UnexpectedField
@@ -157,25 +170,18 @@ type Problem
 
 {-| -}
 block : String -> (child -> result) -> Block child -> Block result
-block name renderer (Block childParser) =
+block name renderer child =
     Block
         (Parser.getIndent
             |> Parser.andThen
                 (\indent ->
                     Parser.succeed renderer
                         -- TODO: I'd rather not use backtrackable, but not entirely sure how to avoid it here.
-                        |. Parser.backtrackable (Parser.token (Parser.Token "|" (ExpectingBlockName name)))
-                        |. Parser.backtrackable
-                            (Parser.oneOf
-                                [ Parser.chompIf (\c -> c == ' ') Space
-                                , Parser.succeed ()
-                                ]
-                            )
                         |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |. Parser.chompIf (\c -> c == '\n') Newline
                         |. Parser.token (Parser.Token (String.repeat (indent + 4) " ") ExpectedIndent)
-                        |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) childParser)
+                        |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) (getParser child))
                 )
         )
 
@@ -191,21 +197,26 @@ It parses everything at the top-level of indentation.
 
 -}
 document : (child -> result) -> Block child -> Document result
-document renderer (Block childParser) =
+document renderer child =
     Document
-        (Parser.map renderer (Parser.withIndent 0 childParser))
+        (Parser.map renderer (Parser.withIndent 0 (getParser child)))
 
 
 {-| -}
 advanced : Parser Context Problem result -> Block result
 advanced parser =
-    Block parser
+    Value parser
 
 
 {-| -}
 map : (a -> b) -> Block a -> Block b
-map fn (Block parser) =
-    Block (Parser.map fn parser)
+map fn child =
+    case child of
+        Block prs ->
+            Block (Parser.map fn prs)
+
+        Value prs ->
+            Value (Parser.map fn prs)
 
 
 {-| `text` and other `Blocks` don't allow starting with spaces.
@@ -259,7 +270,7 @@ nested :
     }
     -> Block (List (Nested ( icon, List item )))
 nested config =
-    Block
+    Value
         (Parser.getIndent
             |> Parser.andThen
                 (\baseIndent ->
@@ -354,7 +365,7 @@ indentedBlocksOrNewlines :
     -> Block thing
     -> ( NestedIndex, List ( Int, Maybe icon, thing ) )
     -> Parser Context Problem (Parser.Step ( NestedIndex, List ( Int, Maybe icon, thing ) ) (List ( Int, Maybe icon, thing )))
-indentedBlocksOrNewlines (Block iconParser) (Block itemParser) ( indent, existing ) =
+indentedBlocksOrNewlines icon item ( indent, existing ) =
     Parser.oneOf
         [ case existing of
             [] ->
@@ -392,8 +403,8 @@ indentedBlocksOrNewlines (Block iconParser) (Block itemParser) ( indent, existin
                         in
                         Parser.Loop ( newIndex, ( indent.base, Just foundIcon, foundBlock ) :: existing )
                     )
-                    |= iconParser
-                    |= itemParser
+                    |= getParser icon
+                    |= getParser item
 
             _ ->
                 Parser.oneOf
@@ -405,20 +416,20 @@ indentedBlocksOrNewlines (Block iconParser) (Block itemParser) ( indent, existin
                                 Parser.withIndent newIndent <|
                                     Parser.oneOf
                                         ((Parser.succeed
-                                            (\icon item ->
+                                            (\iconResult itemResult ->
                                                 let
                                                     newIndex =
                                                         { prev = newIndent
                                                         , base = indent.base
                                                         }
                                                 in
-                                                Parser.Loop ( newIndex, ( newIndent, Just icon, item ) :: existing )
+                                                Parser.Loop ( newIndex, ( newIndent, Just iconResult, itemResult ) :: existing )
                                             )
-                                            |= iconParser
-                                            |= itemParser
+                                            |= getParser icon
+                                            |= getParser item
                                          )
                                             :: (if newIndent == indent.prev then
-                                                    [ itemParser
+                                                    [ getParser item
                                                         |> Parser.map
                                                             (\foundBlock ->
                                                                 let
@@ -502,21 +513,21 @@ descending base prev =
 
 {-| Many blocks that are all at the same indentation level.
 -}
-many : Block a -> Block (List a)
-many thing =
-    Block
+manyOf : List (Block a) -> Block (List a)
+manyOf thing =
+    Value
         (Parser.getIndent
             |> Parser.andThen
                 (\indent ->
                     Parser.loop []
-                        (blocksOrNewlines thing indent)
+                        (blocksOrNewlines (oneOf thing) indent)
                 )
         )
 
 
 {-| -}
 blocksOrNewlines : Block thing -> Int -> List thing -> Parser Context Problem (Parser.Step (List thing) (List thing))
-blocksOrNewlines (Block myBlock) indent existing =
+blocksOrNewlines myBlock indent existing =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -537,7 +548,7 @@ blocksOrNewlines (Block myBlock) indent existing =
         , case existing of
             -- First thing already has indentation accounted for.
             [] ->
-                myBlock
+                getParser myBlock
                     |> Parser.map
                         (\foundBlock ->
                             Parser.Loop (foundBlock :: existing)
@@ -550,11 +561,15 @@ blocksOrNewlines (Block myBlock) indent existing =
                             Parser.Loop (foundBlock :: existing)
                         )
                         |. Parser.token (Parser.Token (String.repeat indent " ") ExpectedIndent)
-                        |= myBlock
+                        |= getParser myBlock
 
                     -- We reach here because the indentation parsing was not successful,
                     -- meaning the indentation has been lowered and the block is done
-                    , Parser.succeed (Parser.Done (List.reverse existing))
+                    , if indent == 0 then
+                        Parser.problem UnexpectedEnd
+
+                      else
+                        Parser.succeed (Parser.Done (List.reverse existing))
                     ]
         ]
 
@@ -562,13 +577,37 @@ blocksOrNewlines (Block myBlock) indent existing =
 {-| -}
 oneOf : List (Block a) -> Block a
 oneOf blocks =
-    Block (Parser.oneOf (List.map (\(Block parser) -> parser) blocks))
+    let
+        gatherParsers myBlock ( blks, vals ) =
+            case myBlock of
+                Block blkParser ->
+                    ( blkParser :: blks, vals )
+
+                Value valueParser ->
+                    ( blks, valueParser :: vals )
+
+        ( childBlocks, childValues ) =
+            List.foldl gatherParsers ( [], [] ) blocks
+
+        blockParser =
+            Parser.succeed identity
+                |. Parser.token (Parser.Token "|" StartBlock)
+                |. Parser.oneOf
+                    [ Parser.chompIf (\c -> c == ' ') Space
+                    , Parser.succeed ()
+                    ]
+                |= Parser.oneOf (List.reverse childBlocks)
+    in
+    Value
+        (Parser.oneOf
+            (blockParser :: List.reverse childValues)
+        )
 
 
 {-| -}
 exactly : String -> value -> Block value
 exactly key val =
-    Block
+    Value
         (Parser.succeed val
             |. Parser.token (Parser.Token key (Expecting key))
         )
@@ -577,21 +616,33 @@ exactly key val =
 {-| -}
 int : Block Int
 int =
-    Block
-        (Parser.int Integer InvalidNumber)
+    Value
+        (Parser.oneOf
+            [ Parser.succeed (\num -> negate num)
+                |. Parser.token (Parser.Token "-" (Expecting "-"))
+                |= Parser.int Integer InvalidNumber
+            , Parser.int Integer InvalidNumber
+            ]
+        )
 
 
 {-| -}
 float : Block Float
 float =
-    Block
-        (Parser.float FloatingPoint InvalidNumber)
+    Value
+        (Parser.oneOf
+            [ Parser.succeed (\num -> negate num)
+                |. Parser.token (Parser.Token "-" (Expecting "-"))
+                |= Parser.float FloatingPoint InvalidNumber
+            , Parser.float FloatingPoint InvalidNumber
+            ]
+        )
 
 
 {-| -}
 bool : Block Bool
 bool =
-    Block
+    Value
         (Parser.oneOf
             [ Parser.token (Parser.Token "True" (Expecting "True"))
                 |> Parser.map (always True)
@@ -604,7 +655,7 @@ bool =
 {-| -}
 string : Block String
 string =
-    Block
+    Value
         (Parser.getChompedString
             (Parser.chompWhile
                 (\c -> c /= '\n')
@@ -766,14 +817,6 @@ masterRecordParser recordName names recordParser =
             |> Parser.andThen
                 (\indent ->
                     (Parser.succeed identity
-                        -- TODO: I'd rather not use backtrackable, but not entirely sure how to avoid it here.
-                        |. Parser.backtrackable (Parser.token (Parser.Token "|" (ExpectingBlockName recordName)))
-                        |. Parser.backtrackable
-                            (Parser.oneOf
-                                [ Parser.chompIf (\c -> c == ' ') Space
-                                , Parser.succeed ()
-                                ]
-                            )
                         |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |. Parser.chompIf (\c -> c == '\n') Newline
@@ -812,13 +855,27 @@ masterRecordParser recordName names recordParser =
                                                     _ =
                                                         Debug.log "Error" err
                                                 in
-                                                Parser.problem (ExpectingFieldName "Charles")
+                                                case err of
+                                                    [] ->
+                                                        Parser.problem RecordError
+
+                                                    fst :: _ ->
+                                                        withContextStack fst.contextStack (Parser.problem fst.problem)
 
                                     Err recordError ->
                                         Parser.problem (RecordField recordError)
                             )
                 )
         )
+
+
+withContextStack stack parser =
+    case stack of
+        [] ->
+            parser
+
+        lvl :: remaining ->
+            Parser.inContext lvl.context (withContextStack remaining parser)
 
 
 type FieldError
@@ -872,22 +929,23 @@ getField cache desired =
                 getField rest desired
 
 
-fieldParser (Field _ (Block parser)) =
-    parser
+fieldParser (Field _ myBlock) =
+    getParser myBlock
 
 
 fieldName (Field name _) =
     name
 
 
-
--- order
-
-
 {-| -}
 field : String -> Block value -> Field value
-field name (Block child) =
-    Field name (Block (withFieldName name child))
+field name child =
+    case child of
+        Block childParser ->
+            Field name (Block (withFieldName name childParser))
+
+        Value childParser ->
+            Field name (Value (withFieldName name childParser))
 
 
 withFieldName name parser =
@@ -906,9 +964,6 @@ withFieldName name parser =
 indentedFieldNames : String -> Int -> List String -> List ( String, String ) -> Parser Context Problem (Parser.Step (List ( String, String )) (List ( String, String )))
 indentedFieldNames recordName indent fields found =
     let
-        _ =
-            Debug.log "record indent" indent
-
         fieldNameParser name =
             Parser.succeed
                 (\contentStr ->
@@ -917,6 +972,7 @@ indentedFieldNames recordName indent fields found =
                 |. Parser.token (Parser.Token name (Expecting name))
                 |. Parser.chompWhile (\c -> c == ' ')
                 |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                |. Parser.chompWhile (\c -> c == ' ')
                 |= Parser.getChompedString
                     (Parser.chompWhile
                         (\c -> c /= '\n')
@@ -1027,7 +1083,7 @@ textWith :
     }
     -> Block result
 textWith options =
-    Block (styledText options [] [])
+    Value (styledText options [] [])
 
 
 {-| -}

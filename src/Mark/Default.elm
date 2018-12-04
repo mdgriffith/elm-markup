@@ -1,6 +1,6 @@
 module Mark.Default exposing
     ( document
-    , title, header, list, monospace
+    , title, header, list, monospace, image
     , defaultText, replacements, text
     )
 
@@ -8,7 +8,7 @@ module Mark.Default exposing
 
 @docs document
 
-@docs title, header, list, monospace
+@docs title, header, list, monospace, image
 
 -}
 
@@ -30,42 +30,47 @@ document =
             Element.textColumn []
                 (List.map (\view -> view model) children)
         )
-        (Mark.Custom.many
-            (Mark.Custom.oneOf
-                [ title [ Font.size 48 ] defaultText
-                , header [ Font.size 36 ] defaultText
-                , list
-                    { style = listStyles
-                    , icon = renderIcon
-                    }
-                    defaultText
-                , Mark.Custom.record2 "Image"
-                    (\src description model ->
-                        Element.text (src ++ ":" ++ description)
-                    )
-                    (Mark.Custom.field "src" Mark.Custom.string)
-                    (Mark.Custom.field "description" Mark.Custom.string)
-                , monospace
-                    [ Element.spacing 5
-                    , Element.padding 24
-                    , Background.color
-                        (Element.rgba 0 0 0 0.04)
-                    , Border.rounded 2
-                    , Font.size 16
-                    , Font.family
-                        [ Font.external
-                            { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
-                            , name = "Source Code Pro"
-                            }
-                        , Font.sansSerif
-                        ]
+        (Mark.Custom.manyOf
+            [ title [ Font.size 48 ] defaultText
+            , header [ Font.size 36 ] defaultText
+            , list
+                { style = listStyles
+                , icon = renderIcon
+                }
+                defaultText
+            , image
+            , monospace
+                [ Element.spacing 5
+                , Element.padding 24
+                , Background.color
+                    (Element.rgba 0 0 0 0.04)
+                , Border.rounded 2
+                , Font.size 16
+                , Font.family
+                    [ Font.external
+                        { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
+                        , name = "Source Code Pro"
+                        }
+                    , Font.sansSerif
                     ]
-
-                -- Toplevel Text
-                , Mark.Custom.map (\viewEls model -> Element.paragraph [] (viewEls model)) defaultText
                 ]
-            )
+
+            -- Toplevel Text
+            , Mark.Custom.map (\viewEls model -> Element.paragraph [] (viewEls model)) defaultText
+            ]
         )
+
+
+image =
+    Mark.Custom.record2 "Image"
+        (\src description model ->
+            Element.image []
+                { src = src
+                , description = description
+                }
+        )
+        (Mark.Custom.field "src" Mark.Custom.string)
+        (Mark.Custom.field "description" Mark.Custom.string)
 
 
 defaultText =
