@@ -6,6 +6,22 @@ import Mark.Custom
 import Test exposing (..)
 
 
+withMetaData =
+    Mark.Custom.document
+        identity
+        (Mark.Custom.startsWith Tuple.pair
+            (Mark.Custom.record2 "Meta"
+                (\one two -> { one = one, two = two })
+                (Mark.Custom.field "one" Mark.Custom.string)
+                (Mark.Custom.field "two" Mark.Custom.string)
+            )
+            (Mark.Custom.manyOf
+                [ Mark.Custom.text
+                ]
+            )
+        )
+
+
 toplevelText =
     Mark.Custom.document
         identity
@@ -65,6 +81,56 @@ intDoc =
         )
 
 
+sectionDoc =
+    Mark.Custom.document
+        identity
+        (Mark.Custom.manyOf
+            [ Mark.Custom.text
+                |> Mark.Custom.map (always "text")
+            , Mark.Custom.record3 "Test"
+                (\one two three -> "record:one,two,three")
+                (Mark.Custom.field "one" Mark.Custom.string)
+                (Mark.Custom.field "two" Mark.Custom.string)
+                (Mark.Custom.field "three" Mark.Custom.string)
+            , Mark.Custom.block "Section"
+                (\x -> "embedded:" ++ String.join "," x)
+                (Mark.Custom.manyOf
+                    [ Mark.Custom.block "Embedded"
+                        (always "block")
+                        Mark.Custom.text
+                    , Mark.Custom.text
+                        |> Mark.Custom.map (always "text")
+                    ]
+                )
+            ]
+        )
+
+
+sectionWithRecordDoc =
+    Mark.Custom.document
+        identity
+        (Mark.Custom.manyOf
+            [ Mark.Custom.text
+                |> Mark.Custom.map (always "text")
+            , Mark.Custom.record3 "Test"
+                (\one two three -> "record:one,two,three")
+                (Mark.Custom.field "one" Mark.Custom.string)
+                (Mark.Custom.field "two" Mark.Custom.string)
+                (Mark.Custom.field "three" Mark.Custom.string)
+            , Mark.Custom.block "Section"
+                (\x -> "embedded:" ++ String.join "," x)
+                (Mark.Custom.manyOf
+                    [ Mark.Custom.block "Embedded"
+                        (always "block")
+                        Mark.Custom.text
+                    , Mark.Custom.text
+                        |> Mark.Custom.map (always "text")
+                    ]
+                )
+            ]
+        )
+
+
 suite : Test
 suite =
     describe "Mark.Custom"
@@ -96,6 +162,21 @@ suite =
                     in
                     Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse textDoc doc1))
                         (Err [ expectedProblem ])
+            , test "Extra line between name and value" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """| Test
+
+    Here's my extra line
+
+"""
+
+                        result =
+                            Ok [ { link = Nothing, style = Mark.Custom.NoFormatting "Here's my extra line" } ]
+                    in
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse textDoc doc1))
+                        result
             , test "Incorrect Indentation" <|
                 \_ ->
                     let
@@ -109,6 +190,93 @@ suite =
                     in
                     Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse textDoc doc1))
                         (Err [ expectedProblem ])
+            , test "Start with Metadata" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """| Meta
+    one = Test data
+    two = other data
+
+Then a bunch of
+
+paragraphs.
+
+Each with their own /styling/.
+"""
+
+                        result =
+                            Ok
+                                ( { one = "Test data", two = "other data" }
+                                , [ [ { link = Nothing
+                                      , style = Mark.Custom.NoFormatting "Then a bunch of"
+                                      }
+                                    ]
+                                  , [ { link = Nothing, style = Mark.Custom.NoFormatting "paragraphs." } ]
+                                  , [ { link = Nothing, style = Mark.Custom.NoFormatting "Each with their own " }
+                                    , { link = Nothing, style = Mark.Custom.Styles [ Mark.Custom.Italic ] "styling" }
+                                    , { link = Nothing, style = Mark.Custom.Styles [] "." }
+                                    ]
+                                  ]
+                                )
+                    in
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse withMetaData doc1))
+                        result
+            , test "Extra Newline to Start" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """
+| Meta
+    one = Test data
+    two = other data
+
+Then a bunch of
+
+paragraphs.
+
+Each with their own /styling/.
+"""
+
+                        result =
+                            Err [ Mark.Custom.ExpectingBlockName "Meta" ]
+                    in
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse withMetaData doc1))
+                        result
+            , test "Nested section blocks" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """
+| Test
+    one = Test data
+    two = other data
+    three = other test data
+
+Then a bunch of
+
+paragraphs.
+
+Each with their own /styling/.
+
+| Section
+    Then we have embedded stuff
+
+    and we can add other blocks like
+
+    | Embedded
+        This is embedded
+
+    and others
+
+Finally, a sentence
+"""
+
+                        result =
+                            Ok [ "record:one,two,three", "text", "text", "text", "embedded:text,text,block,text", "text" ]
+                    in
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse sectionDoc doc1))
+                        result
             ]
         , describe "Records"
             [ test "Missing fields should error" <|
@@ -130,6 +298,35 @@ suite =
                     in
                     Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
                         (Err [ expectedProblem ])
+            , test "Extra lines between fields" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """| Test
+    one = hello
+
+    two = world
+    
+    three = !
+"""
+                    in
+                    Expect.equal
+                        (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
+                        (Ok { one = "hello", three = "!", two = "world" })
+            , test "Extra line between two fields" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """| Test
+
+    one = hello
+    two = world
+
+    three = !
+"""
+                    in
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
+                        (Ok { one = "hello", three = "!", two = "world" })
             , test "Records with many text as a field" <|
                 \_ ->
                     let
