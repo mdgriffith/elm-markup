@@ -1,9 +1,9 @@
 module Mark.Custom exposing
     ( parse
     , Document, document
-    , Block, block, oneOf, map, manyOf
-    , nested, Nested(..)
     , bool, int, float, string, multiline, exactly
+    , Block, block, oneOf, manyOf, startsWith, map
+    , nested, Nested(..)
     , field, record2, record3, record4, record5, record6
     , Text, TextFormatting(..), InlineStyle(..)
     , text, textWith, inline
@@ -18,11 +18,17 @@ module Mark.Custom exposing
 
 @docs Document, document
 
-@docs Block, block, oneOf, map, manyOf
 
-@docs nested, Nested
+## Primitives
 
 @docs bool, int, float, string, multiline, exactly
+
+
+## Blocks
+
+@docs Block, block, oneOf, manyOf, startsWith, map
+
+@docs nested, Nested
 
 
 ## Records
@@ -59,20 +65,17 @@ parse (Document blocks) source =
 type
     Block result
     -- A block starts with `|` and has a name(already built into the parser)
-    = Block (Parser Context Problem result)
+    = Block String (Parser Context Problem result)
       -- A value is just a raw parser.
     | Value (Parser Context Problem result)
 
 
 getParser fromBlock =
     case fromBlock of
-        Block p ->
+        Block name p ->
             Parser.succeed identity
-                |. Parser.token (Parser.Token "|" StartBlock)
-                |. Parser.oneOf
-                    [ Parser.chompIf (\c -> c == ' ') Space
-                    , Parser.succeed ()
-                    ]
+                |. Parser.token (Parser.Token "|" (ExpectingBlockName name))
+                |. Parser.chompIf (\c -> c == ' ') Space
                 |= p
 
         Value p ->
@@ -132,8 +135,7 @@ type Context
 
 {-| -}
 type Problem
-    = NoBlocks
-    | EmptyBlock
+    = EmptyBlock
     | ExpectingIndent Int
     | InlineStart
     | InlineBar
@@ -145,7 +147,6 @@ type Problem
     | ExpectingFieldName String
     | RecordField FieldError
     | RecordError
-    | DoubleField String
     | Escape
     | EscapedChar
     | Dash
@@ -170,15 +171,20 @@ type Problem
 {-| -}
 block : String -> (child -> result) -> Block child -> Block result
 block name renderer child =
-    Block
+    Block name
         (Parser.getIndent
             |> Parser.andThen
                 (\indent ->
                     Parser.succeed renderer
-                        -- TODO: I'd rather not use backtrackable, but not entirely sure how to avoid it here.
                         |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |. Parser.chompIf (\c -> c == '\n') Newline
+                        |. Parser.oneOf
+                            [ Parser.succeed ()
+                                |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                                |. Parser.backtrackable (Parser.chompIf (\c -> c == '\n') Newline)
+                            , Parser.succeed ()
+                            ]
                         |. Parser.token (Parser.Token (String.repeat (indent + 4) " ") (ExpectingIndent (indent + 4)))
                         |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) (getParser child))
                 )
@@ -190,15 +196,21 @@ type Document result
     = Document (Parser Context Problem result)
 
 
-{-| You must have a root parser for your document.
-
-It parses everything at the top-level of indentation.
-
--}
+{-| -}
 document : (child -> result) -> Block child -> Document result
 document renderer child =
     Document
         (Parser.map renderer (Parser.withIndent 0 (getParser child)))
+
+
+{-| -}
+startsWith : (start -> rest -> result) -> Block start -> Block rest -> Block result
+startsWith fn start rest =
+    Value
+        (Parser.succeed fn
+            |= getParser start
+            |= getParser rest
+        )
 
 
 {-| -}
@@ -211,8 +223,8 @@ advanced parser =
 map : (a -> b) -> Block a -> Block b
 map fn child =
     case child of
-        Block prs ->
-            Block (Parser.map fn prs)
+        Block name prs ->
+            Block name (Parser.map fn prs)
 
         Value prs ->
             Value (Parser.map fn prs)
@@ -490,6 +502,9 @@ expectIndentation base previous =
             )
 
 
+{-| Parse all indentation levels between `prev` and `base` in increments of 4.
+-}
+descending : Int -> Int -> List (Parser Context Problem Int)
 descending base prev =
     if prev <= base then
         []
@@ -575,7 +590,7 @@ oneOf blocks =
     let
         gatherParsers myBlock ( blks, vals ) =
             case myBlock of
-                Block blkParser ->
+                Block name blkParser ->
                     ( blkParser :: blks, vals )
 
                 Value valueParser ->
@@ -810,7 +825,7 @@ record6 recordName renderer field1 field2 field3 field4 field5 field6 =
 -}
 masterRecordParser : String -> List String -> Parser Context Problem data -> Block data
 masterRecordParser recordName names recordParser =
-    Block
+    Block recordName
         (Parser.getIndent
             |> Parser.andThen
                 (\indent ->
@@ -933,8 +948,8 @@ fieldName (Field name _) =
 field : String -> Block value -> Field value
 field name child =
     case child of
-        Block childParser ->
-            Field name (Block (withFieldName name childParser))
+        Block blockName childParser ->
+            Field name (Block blockName (withFieldName name childParser))
 
         Value childParser ->
             Field name (Value (withFieldName name childParser))
@@ -1018,8 +1033,15 @@ indentedFieldNames recordName indent fields found =
                             :: List.map fieldNameParser fields
                             ++ [ unexpectedField ]
                 )
-         , Parser.token (Parser.Token "\n" Newline)
-            |> Parser.map (\_ -> Parser.Loop found)
+         , Parser.succeed
+            (Parser.Loop found)
+            |. Parser.token (Parser.Token "\n" Newline)
+            |. Parser.oneOf
+                [ Parser.succeed ()
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                , Parser.succeed ()
+                ]
          ]
             ++ (if List.length found /= List.length fields then
                     [ Parser.succeed (Parser.Done found)
@@ -1037,7 +1059,7 @@ indentedFieldNames recordName indent fields found =
 {-| -}
 multiline : Block String
 multiline =
-    Block
+    Value
         (Parser.getIndent
             |> Parser.andThen
                 (\indent ->
