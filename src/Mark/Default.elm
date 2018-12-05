@@ -195,9 +195,6 @@ textFragment config node model_ =
 
 toStyles config style =
     case style of
-        Mark.Custom.NoStyleChange ->
-            []
-
         Mark.Custom.Bold ->
             [ Font.bold ]
 
@@ -220,6 +217,7 @@ Escaping a character will skip the replacement, so this isn't mandatory.
   - `"<>"` -> A non-breaking space which glues words together so that they don't break when wrapping.
   - `"--"` -> en-dash, `–`
   - `"---"` -> em-dash, `—`
+  - `//` -> `/`
   - Quotation marks will be replaced with curly quotes.
   - `"..."` -> ellipses, `…`
   - `'` -> `’`
@@ -231,6 +229,7 @@ replacements =
     , Mark.Custom.replacement "<>" "\u{00A0}"
     , Mark.Custom.replacement "---" "—"
     , Mark.Custom.replacement "--" "–"
+    , Mark.Custom.replacement "//" "/"
     , Mark.Custom.replacement "'" "’"
     , Mark.Custom.balanced
         { start = ( "\"", "“" )

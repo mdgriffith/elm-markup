@@ -6,7 +6,8 @@ module Mark.Custom exposing
     , nested, Nested(..)
     , field, record2, record3, record4, record5, record6
     , Text, TextFormatting(..), InlineStyle(..)
-    , text, textWith, inline
+    , text, textWith
+    , inline
     , Replacement, replacement, balanced
     , advanced
     , Problem(..), Context(..), FieldError(..)
@@ -39,7 +40,9 @@ module Mark.Custom exposing
 ## Text
 
 @docs Text, TextFormatting, InlineStyle
-@docs text, textWith, inline
+@docs text, textWith
+
+@docs inline
 
 @docs Replacement, replacement, balanced
 
@@ -118,8 +121,8 @@ type Replacement
 
 {-| -}
 type InlineStyle
-    = NoStyleChange
-    | Bold
+    = -- NoStyleChange
+      Bold
     | Italic
     | Strike
     | Underline
@@ -1128,6 +1131,14 @@ inline name renderer =
         )
 
 
+
+-- inlineField : String -> Inline (val -> result) -> Inline result
+-- inlineField name (Inline inlineParser) =
+--     Inline
+--         (\styles ->
+--         )
+
+
 {-| -}
 replacement : String -> String -> Replacement
 replacement =
@@ -1223,11 +1234,11 @@ styledTextLoop options meaningful untilStrings found =
         , Parser.succeed
             (Parser.Loop << changeStyle options found)
             |= Parser.oneOf
-                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
-                , Parser.map (always Underline) (Parser.token (Parser.Token "_" (Expecting "_")))
-                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
-                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
-                , Parser.map (always Token) (Parser.token (Parser.Token "`" (Expecting "`")))
+                [ Parser.map (always (Just Italic)) (Parser.token (Parser.Token "/" (Expecting "/")))
+                , Parser.map (always (Just Underline)) (Parser.token (Parser.Token "_" (Expecting "_")))
+                , Parser.map (always (Just Strike)) (Parser.token (Parser.Token "~" (Expecting "~")))
+                , Parser.map (always (Just Bold)) (Parser.token (Parser.Token "*" (Expecting "*")))
+                , Parser.map (always (Just Token)) (Parser.token (Parser.Token "`" (Expecting "`")))
                 ]
 
         -- Custom inline block
@@ -1235,7 +1246,7 @@ styledTextLoop options meaningful untilStrings found =
             (\rendered ->
                 let
                     current =
-                        case changeStyle options found NoStyleChange of
+                        case changeStyle options found Nothing of
                             TextAccumulator accum ->
                                 accum
                 in
@@ -1257,7 +1268,7 @@ styledTextLoop options meaningful untilStrings found =
         -- Link
         , Parser.succeed
             (\textList url ->
-                case changeStyle options found NoStyleChange of
+                case changeStyle options found Nothing of
                     TextAccumulator current ->
                         Parser.Loop <|
                             TextAccumulator
@@ -1329,7 +1340,7 @@ finishText :
     -> TextAccumulator rendered
     -> result
 finishText opts accum =
-    case changeStyle opts accum NoStyleChange of
+    case changeStyle opts accum Nothing of
         TextAccumulator txt ->
             opts.merge (List.reverse txt.rendered)
 
@@ -1497,7 +1508,7 @@ addText newTxt (TextAccumulator cursor) =
             TextAccumulator { cursor | text = Styles styles (txt ++ newTxt) }
 
 
-changeStyle options (TextAccumulator cursor) styleToken =
+changeStyle options (TextAccumulator cursor) maybeStyleToken =
     let
         textIsEmpty =
             case cursor.text of
@@ -1511,24 +1522,26 @@ changeStyle options (TextAccumulator cursor) styleToken =
                     False
 
         newText =
-            case styleToken of
-                NoStyleChange ->
+            case maybeStyleToken of
+                Nothing ->
                     cursor.text
 
-                Bold ->
-                    flipStyle Bold cursor.text
+                Just sty ->
+                    case sty of
+                        Bold ->
+                            flipStyle Bold cursor.text
 
-                Italic ->
-                    flipStyle Italic cursor.text
+                        Italic ->
+                            flipStyle Italic cursor.text
 
-                Strike ->
-                    flipStyle Strike cursor.text
+                        Strike ->
+                            flipStyle Strike cursor.text
 
-                Underline ->
-                    flipStyle Underline cursor.text
+                        Underline ->
+                            flipStyle Underline cursor.text
 
-                Token ->
-                    flipStyle Token cursor.text
+                        Token ->
+                            flipStyle Token cursor.text
     in
     if textIsEmpty then
         TextAccumulator { rendered = cursor.rendered, text = newText, balancedReplacements = cursor.balancedReplacements }
