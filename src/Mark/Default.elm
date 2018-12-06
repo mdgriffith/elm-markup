@@ -1,14 +1,20 @@
 module Mark.Default exposing
     ( document
     , title, header, list, monospace, image
-    , defaultText, replacements, text
+    , replacements, text
     )
 
-{-|
+{-| This is a document that renders to [`elm-ui`'s](https://package.elm-lang.org/packages/mdgriffith/elm-ui/latest/) `Element msg`.
+
+It's a good starting point for writing something like a blog article, but one of the great powers of this library is in [writing custom blocks](https://package.elm-lang.org/packages/mdgriffith/elm-markup/latest/Mark-Custom) to suite your specific domain or style needs!
+
+Check out the source to this module to get an idea of how things fit together.
 
 @docs document
 
 @docs title, header, list, monospace, image
+
+@docs replacements, text
 
 -}
 
@@ -18,19 +24,20 @@ import Element.Border as Border
 import Element.Font as Font
 import Element.Region
 import Html.Attributes
-import Mark.Custom
+import Mark
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
-{-| -}
-document : Mark.Custom.Document (model -> Element msg)
+{-| Parsing this document results in a `view` function, `model -> Element msg`.
+-}
+document : Mark.Document (model -> Element msg)
 document =
-    Mark.Custom.document
+    Mark.document
         (\children model ->
             Element.textColumn []
                 (List.map (\view -> view model) children)
         )
-        (Mark.Custom.manyOf
+        (Mark.manyOf
             [ title [ Font.size 48 ] defaultText
             , header [ Font.size 36 ] defaultText
             , list
@@ -56,21 +63,29 @@ document =
                 ]
 
             -- Toplevel Text
-            , Mark.Custom.map (\viewEls model -> Element.paragraph [] (viewEls model)) defaultText
+            , Mark.map (\viewEls model -> Element.paragraph [] (viewEls model)) defaultText
             ]
         )
 
 
+{-| Create an image.
+
+    | Image
+        src = https://placekitten.com/200/300
+        description = A cute kitty cat.
+
+-}
+image : Mark.Block (model -> Element msg)
 image =
-    Mark.Custom.record2 "Image"
+    Mark.record2 "Image"
         (\src description model ->
             Element.image []
                 { src = src
                 , description = description
                 }
         )
-        (Mark.Custom.field "src" Mark.Custom.string)
-        (Mark.Custom.field "description" Mark.Custom.string)
+        (Mark.field "src" Mark.string)
+        (Mark.field "description" Mark.string)
 
 
 defaultText =
@@ -108,10 +123,15 @@ defaultText =
         }
 
 
-{-| -}
-title : List (Element.Attribute msg) -> Mark.Custom.Block (model -> List (Element msg)) -> Mark.Custom.Block (model -> Element msg)
+{-| The title of your document. Renders as an `h1`.
+
+    | Title
+        The title of my document.
+
+-}
+title : List (Element.Attribute msg) -> Mark.Block (model -> List (Element msg)) -> Mark.Block (model -> Element msg)
 title attrs titleText =
-    Mark.Custom.block "Title"
+    Mark.block "Title"
         (\elements model ->
             Element.paragraph
                 (Element.Region.heading 1 :: attrs)
@@ -120,10 +140,17 @@ title attrs titleText =
         titleText
 
 
-{-| -}
-header : List (Element.Attribute msg) -> Mark.Custom.Block (model -> List (Element msg)) -> Mark.Custom.Block (model -> Element msg)
+{-| A header.
+
+    | Header
+        My header
+
+Renders as an `h2`.
+
+-}
+header : List (Element.Attribute msg) -> Mark.Block (model -> List (Element msg)) -> Mark.Block (model -> Element msg)
 header attrs textParser =
-    Mark.Custom.block "Header"
+    Mark.block "Header"
         (\elements model ->
             Element.paragraph
                 (Element.Region.heading 2 :: attrs)
@@ -132,10 +159,11 @@ header attrs textParser =
         textParser
 
 
-{-| -}
-monospace : List (Element.Attribute msg) -> Mark.Custom.Block (model -> Element msg)
+{-| A monospaced code block without syntax highlighting.
+-}
+monospace : List (Element.Attribute msg) -> Mark.Block (model -> Element msg)
 monospace attrs =
-    Mark.Custom.block "Monospace"
+    Mark.block "Monospace"
         (\string model ->
             Element.paragraph
                 (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
@@ -144,7 +172,7 @@ monospace attrs =
                 )
                 [ Element.text string ]
         )
-        Mark.Custom.multiline
+        Mark.multiline
 
 
 {-| -}
@@ -152,86 +180,85 @@ text :
     { code : List (Element.Attribute msg)
     , link : List (Element.Attribute msg)
     }
-    -> Mark.Custom.Block (model -> List (Element msg))
+    -> Mark.Block (model -> List (Element msg))
 text style =
-    Mark.Custom.textWith
-        { view = textView style
-        , inlines = []
-        , merge =
-            \els model ->
-                List.map (\view -> view model) els
-        , replacements = replacements
-        }
+    Mark.map
+        (\els model ->
+            List.map (\view -> view model) els
+        )
+        (Mark.text
+            { view = textFragment style
+            , inlines =
+                [ link style
+                ]
+            , replacements = replacements
+            }
+        )
 
 
-textView config textNode =
-    textFragment config textNode
+link config =
+    Mark.inline "Link"
+        (\txt url model ->
+            Element.link config.link
+                { url = url
+                , label =
+                    Element.row []
+                        (List.map (\item -> textFragment config item model) txt)
+                }
+        )
+        |> Mark.inlineText
+        |> Mark.inlineString "url"
 
 
 textFragment config node model_ =
-    case node.style of
-        Mark.Custom.NoFormatting txt ->
-            case node.link of
-                Nothing ->
-                    Element.text txt
-
-                Just url ->
-                    Element.link config.link
-                        { url = url
-                        , label = Element.text txt
-                        }
-
-        Mark.Custom.Styles styles txt ->
-            case node.link of
-                Nothing ->
-                    Element.el (List.concatMap (toStyles config) styles) (Element.text txt)
-
-                Just url ->
-                    Element.link (config.link ++ List.concatMap (toStyles config) styles)
-                        { url = url
-                        , label = Element.text txt
-                        }
+    case node of
+        Mark.Text styles txt ->
+            Element.el (List.concatMap (toStyles config) styles) (Element.text txt)
 
 
 toStyles config style =
     case style of
-        Mark.Custom.Bold ->
+        Mark.Bold ->
             [ Font.bold ]
 
-        Mark.Custom.Italic ->
+        Mark.Italic ->
             [ Font.italic ]
 
-        Mark.Custom.Strike ->
+        Mark.Strike ->
             [ Font.strike ]
 
-        Mark.Custom.Underline ->
-            [ Font.underline ]
-
-        Mark.Custom.Token ->
+        -- Mark.Underline ->
+        --     [ Font.underline ]
+        Mark.Code ->
             config.code
 
 
-{-| Replace certain characters with improved typographical ones.
-Escaping a character will skip the replacement, so this isn't mandatory.
+{-| This will replace certain characters with improved typographical ones.
 
-  - `"<>"` -> A non-breaking space which glues words together so that they don't break when wrapping.
-  - `"--"` -> en-dash, `–`
-  - `"---"` -> em-dash, `—`
-  - `//` -> `/`
-  - Quotation marks will be replaced with curly quotes.
-  - `"..."` -> ellipses, `…`
-  - `'` -> `’`
+  - `...` is converted to the ellipses unicode character.
+  - `"` Straight double quotes are [replaced with curly quotes](https://practicaltypography.com/straight-and-curly-quotes.html)
+  - `'` Single Quotes are replaced with apostrophes. In the future we might differentiate between curly single quotes and apostrophes.
+  - `--` is replaced with an en-dash.
+  - `---` is replaced with an em-dash.
+  - `<>` - will create a non-breaking space (`&nbsp;`). This is not for manually increasing space (sequential `<>` tokens will only render as one `&nbsp;`), but to signify that the space between two words shouldn't break when wrapping. Think of this like glueing two words together.
+  - `//` will change to `/`. Normally `/` starts italic formatting. To escape this, we'd normally do `\/`, though that looks pretty funky. `//` just feels better!
+
+These transformations also don't apply inside inline `code` or inside the `monospace` block.
+
+**Note** Escaping the start of any of these characters will skip the replacement.
+
+**Note** If you're not familiar with `en-dash` or `em-dash`, I definitely [recommend reading a small bit about it](https://practicaltypography.com/hyphens-and-dashes.html)—they're incredibly useful.
 
 -}
-replacements : List Mark.Custom.Replacement
+replacements : List Mark.Replacement
 replacements =
-    [ Mark.Custom.replacement "..." "…"
-    , Mark.Custom.replacement "<>" "\u{00A0}"
-    , Mark.Custom.replacement "---" "—"
-    , Mark.Custom.replacement "--" "–"
-    , Mark.Custom.replacement "//" "/"
-    , Mark.Custom.replacement "'" "’"
-    , Mark.Custom.balanced
+    [ Mark.replacement "..." "…"
+    , Mark.replacement "<>" "\u{00A0}"
+    , Mark.replacement "---" "—"
+    , Mark.replacement "--" "–"
+    , Mark.replacement "//" "/"
+    , Mark.replacement "'" "’"
+    , Mark.balanced
         { start = ( "\"", "“" )
         , end = ( "\"", "”" )
         }
@@ -248,55 +275,65 @@ replacements =
 -}
 
 
-{-| Parse a nested list
+{-| A nested list with an expected indentation of 4 spaces per level. As far as icons:
+
+  - `-` indicates a bullet. You can have any number of dashes.
+  - `->` or `-->` will render as an ➙
+  - Any alphabetic character after the dash is considered part of a formatting string for numbered items.
+      - `-x.` will be auto-numbered as and renderd `1.`, or `2.` or whatever number you're at.
+      - Any punctuation that comes after the alpha character will be maintained. So, `x)` will format as `1)` and `x.` will format as `1.`
+      - Nested numbers can be rendered if they're in the right place. So `-x.y)` would render as `1.2)`
+      - A literal number instead of an alpha will reset the auto numbering to that literal number. So, `-9.` means start counting up from 9 from here on out.
+      - This can also applied in a nested manner as `-x.9`, which will reset the inner number.
+
 -}
 list :
     { icon : List Int -> ListIcon -> Element msg
     , style : List Int -> List (Element.Attribute msg)
     }
-    -> Mark.Custom.Block (model -> List (Element msg))
-    -> Mark.Custom.Block (model -> Element msg)
+    -> Mark.Block (model -> List (Element msg))
+    -> Mark.Block (model -> Element msg)
 list config textParser =
-    Mark.Custom.block "List"
+    Mark.block "List"
         (\items model ->
             Element.column
                 (config.style [])
                 (List.indexedMap (renderListItem config model []) items)
         )
-        (Mark.Custom.nested
+        (Mark.nested
             { item = textParser
             , start =
-                Mark.Custom.advanced
+                Mark.advanced
                     listIconParser
             }
         )
 
 
 {-| -}
-listIconParser : Parser Mark.Custom.Context Mark.Custom.Problem ListIcon
+listIconParser : Parser Mark.Context Mark.Problem ListIcon
 listIconParser =
     Parser.oneOf
         [ Parser.succeed Arrow
             |. Parser.oneOf
-                [ Parser.token (Parser.Token "->" (Mark.Custom.Expecting "->"))
-                , Parser.token (Parser.Token "-->" (Mark.Custom.Expecting "-->"))
+                [ Parser.token (Parser.Token "->" (Mark.Expecting "->"))
+                , Parser.token (Parser.Token "-->" (Mark.Expecting "-->"))
                 ]
-            |. Parser.chompIf (\c -> c == ' ') Mark.Custom.Space
+            |. Parser.chompIf (\c -> c == ' ') Mark.Space
         , Parser.succeed identity
-            |. Parser.token (Parser.Token "-" (Mark.Custom.Expecting "-"))
+            |. Parser.token (Parser.Token "-" (Mark.Expecting "-"))
             |= Parser.oneOf
                 [ Parser.succeed Bullet
                     |. Parser.oneOf
-                        [ Parser.token (Parser.Token " " Mark.Custom.Space)
-                        , Parser.token (Parser.Token "-" Mark.Custom.Dash)
+                        [ Parser.token (Parser.Token " " Mark.Space)
+                        , Parser.token (Parser.Token "-" Mark.Dash)
                         ]
-                    |. Parser.chompIf (\c -> c == ' ') Mark.Custom.Space
+                    |. Parser.chompIf (\c -> c == ' ') Mark.Space
                 , Parser.succeed
                     (\( reset, decorations ) ->
                         Number { reset = reset, decorations = decorations }
                     )
                     |= Parser.loop ( [], [] ) numberIconParser
-                    |. Parser.chompIf (\c -> c == ' ') Mark.Custom.Space
+                    |. Parser.chompIf (\c -> c == ' ') Mark.Space
                 ]
         ]
 
@@ -304,7 +341,7 @@ listIconParser =
 {-| -}
 numberIconParser :
     ( List (Maybe Int), List String )
-    -> Parser Mark.Custom.Context Mark.Custom.Problem (Parser.Step ( List (Maybe Int), List String ) ( List (Maybe Int), List String ))
+    -> Parser Mark.Context Mark.Problem (Parser.Step ( List (Maybe Int), List String ) ( List (Maybe Int), List String ))
 numberIconParser ( cursorReset, decorations ) =
     Parser.oneOf
         [ Parser.succeed
@@ -327,10 +364,10 @@ numberIconParser ( cursorReset, decorations ) =
                             _ ->
                                 Nothing
                     )
-                    |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Custom.Integer)
+                    |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Integer)
                     |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
                 , Parser.succeed Nothing
-                    |. Parser.chompIf Char.isAlpha Mark.Custom.ExpectingAlphaNumeric
+                    |. Parser.chompIf Char.isAlpha Mark.ExpectingAlphaNumeric
                     |. Parser.chompWhile Char.isAlpha
                 ]
             |= Parser.getChompedString
@@ -381,7 +418,7 @@ edges =
     }
 
 
-renderListItem config model stack index (Mark.Custom.Nested item) =
+renderListItem config model stack index (Mark.Nested item) =
     case item.content of
         ( icon, items ) ->
             Element.row []
