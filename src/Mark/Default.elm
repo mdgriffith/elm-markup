@@ -6,7 +6,7 @@ module Mark.Default exposing
 
 {-| This is a document that renders to [`elm-ui`'s](https://package.elm-lang.org/packages/mdgriffith/elm-ui/latest/) `Element msg`.
 
-**Though remember**, one of the great powers of this library is in [writing custom blocks](https://package.elm-lang.org/packages/mdgriffith/elm-markup/latest/Mark) to suite your specific domain or style needs! You can parse a document to any data structure.
+**Though remember**, one of the great powers of this library is in [writing custom blocks](https://package.elm-lang.org/packages/mdgriffith/elm-markup/latest/Mark) to suit your specific domain or style needs! You can parse a document to any data structure.
 
 Think of this module as a **starting point** for writing something like a blog article.
 
