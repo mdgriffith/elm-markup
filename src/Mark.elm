@@ -270,7 +270,7 @@ Here's a brief example of a document that will parse many `MyBlock` blocks, and 
     parse source =
         Mark.parse document source
 
-Which will parse a document with many of either raw strings or`MyBlock` blocks. The `idenity` function usage above means that this will result in a `List String`, but you could change that function to make this parser result in anything you want!
+Which will parse a document with many of either raw strings or`MyBlock` blocks. The `identity` function usage above means that this will result in a `List String`, but you could change that function to make this parser result in anything you want!
 
     | MyBlock
         Here's text captured in a MyBlock
