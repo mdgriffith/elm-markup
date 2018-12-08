@@ -1,9 +1,9 @@
 {
     "type": "package",
     "name": "mdgriffith/elm-markup",
-    "summary": "An Elm-friendly markup parser and format. Write articles and embed Elm views.",
+    "summary": "An Elm-friendly markup parser and format. Write articles and embed Elm views. Have typed data in your markup!",
     "license": "BSD-3-Clause",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "exposed-modules": [
         "Mark",
         "Mark.Default"
