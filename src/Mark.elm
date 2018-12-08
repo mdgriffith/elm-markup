@@ -1,13 +1,13 @@
 module Mark exposing
     ( parse
     , Document, document
-    , Block, block, bool, int, float, string, multiline, exactly, map
+    , Block, block, bool, int, float, string, multiline, exactly, stub, map, andThen
     , text, Text(..), Style(..)
     , Inline, inline, inlineString, inlineText
     , Replacement, replacement, balanced
     , oneOf, manyOf, startWith
     , nested, Nested(..)
-    , Field, field, record2, record3, record4, record5, record6, record7, record8
+    , Field, field, record2, record3, record4, record5, record6, record7, record8, record9, record10
     , Context(..), Problem(..)
     , advanced
     )
@@ -23,7 +23,7 @@ The `elm-markup` language relies heavily on indentation, which always some multi
 
 @docs Document, document
 
-@docs Block, block, bool, int, float, string, multiline, exactly, map
+@docs Block, block, bool, int, float, string, multiline, exactly, stub, map, andThen
 
 
 # Text
@@ -67,7 +67,7 @@ Which would parse
         description = A super cute kitten.
         src = http://placekitten/200/500
 
-@docs Field, field, record2, record3, record4, record5, record6, record7, record8
+@docs Field, field, record2, record3, record4, record5, record6, record7, record8, record9, record10
 
 
 # Errors
@@ -231,6 +231,20 @@ block name renderer child =
         )
 
 
+{-| An empty block. This could be useful for inserting something that doesn't need parameters.
+
+    | Logo
+
+-}
+stub : String -> result -> Block result
+stub name result =
+    Block name
+        (Parser.succeed result
+            |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
+            |. Parser.chompWhile (\c -> c == ' ')
+        )
+
+
 {-| -}
 type Document result
     = Document (Parser Context Problem result)
@@ -333,6 +347,20 @@ advanced parser =
     Value parser
 
 
+{-| Expect a different block based on the result of a previous one.
+-}
+andThen : (a -> Block b) -> Block a -> Block b
+andThen fn myBlock =
+    case myBlock of
+        Block name blockParser ->
+            Block name
+                (Parser.andThen (getParser << fn) blockParser)
+
+        Value blockParser ->
+            Value
+                (Parser.andThen (getParser << fn) blockParser)
+
+
 {-| Change the result of a block by applying a function to it.
 -}
 map : (a -> b) -> Block a -> Block b
@@ -419,7 +447,7 @@ nested config =
                                                         , icon = icon
                                                         , items = [ item ]
                                                         , accumulated =
-                                                            ( cursor.indent, cursor.icon, List.reverse cursor.items )
+                                                            ( cursor.indent, cursor.icon, cursor.items )
                                                                 :: cursor.accumulated
                                                         }
 
@@ -434,7 +462,7 @@ nested config =
                                                     cursor.accumulated
 
                                                 _ ->
-                                                    ( cursor.indent, cursor.icon, List.reverse cursor.items )
+                                                    ( cursor.indent, cursor.icon, cursor.items )
                                                         :: cursor.accumulated
 
                                 tree =
@@ -618,16 +646,18 @@ descending base prev =
         []
 
     else
-        List.map
-            (\x ->
-                let
-                    level =
-                        x + 4
-                in
-                Parser.succeed level
-                    |. Parser.token (Parser.Token (String.repeat level " ") (ExpectingIndent level))
+        List.reverse
+            (List.map
+                (\x ->
+                    let
+                        level =
+                            base + (x * 4)
+                    in
+                    Parser.succeed level
+                        |. Parser.token (Parser.Token (String.repeat level " ") (ExpectingIndent level))
+                )
+                (List.range 0 (((prev - 4) - base) // 4))
             )
-            (List.range 0 ((prev - base) // 4))
 
 
 {-| Many blocks that are all at the same indentation level.
@@ -848,7 +878,11 @@ type Field value
     = Field String (Block value)
 
 
-{-| -}
+{-| A record with two fields.
+
+**Note** there's no `record1`, because that's basically just a `block`.
+
+-}
 record2 :
     String
     -> (one -> two -> data)
@@ -1094,6 +1128,133 @@ record8 recordName renderer field1 field2 field3 field4 field5 field6 field7 fie
         , fieldName field6
         , fieldName field7
         , fieldName field8
+        ]
+        recordParser
+
+
+{-| -}
+record9 :
+    String
+    ->
+        (one
+         -> two
+         -> three
+         -> four
+         -> five
+         -> six
+         -> seven
+         -> eight
+         -> nine
+         -> data
+        )
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Field eight
+    -> Field nine
+    -> Block data
+record9 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 field9 =
+    let
+        recordParser =
+            Parser.succeed renderer
+                |= fieldParser field1
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field2
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field3
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field4
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field5
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field6
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field7
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field8
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field9
+    in
+    masterRecordParser recordName
+        [ fieldName field1
+        , fieldName field2
+        , fieldName field3
+        , fieldName field4
+        , fieldName field5
+        , fieldName field6
+        , fieldName field7
+        , fieldName field8
+        , fieldName field9
+        ]
+        recordParser
+
+
+{-| -}
+record10 :
+    String
+    ->
+        (one
+         -> two
+         -> three
+         -> four
+         -> five
+         -> six
+         -> seven
+         -> eight
+         -> nine
+         -> ten
+         -> data
+        )
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Field eight
+    -> Field nine
+    -> Field ten
+    -> Block data
+record10 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 field9 field10 =
+    let
+        recordParser =
+            Parser.succeed renderer
+                |= fieldParser field1
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field2
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field3
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field4
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field5
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field6
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field7
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field8
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field9
+                |. Parser.chompIf (\c -> c == '\n') Newline
+                |= fieldParser field10
+    in
+    masterRecordParser recordName
+        [ fieldName field1
+        , fieldName field2
+        , fieldName field3
+        , fieldName field4
+        , fieldName field5
+        , fieldName field6
+        , fieldName field7
+        , fieldName field8
+        , fieldName field9
+        , fieldName field10
         ]
         recordParser
 
@@ -1591,19 +1752,6 @@ currentStyles (TextAccumulator formatted) =
             s
 
 
-finishText :
-    { view : Text -> rendered
-    , inlines : List (Inline rendered)
-    , replacements : List Replacement
-    }
-    -> TextAccumulator rendered
-    -> List rendered
-finishText opts accum =
-    case changeStyle opts accum Nothing of
-        TextAccumulator txt ->
-            List.reverse txt.rendered
-
-
 {-| -}
 almostReplacement : List Replacement -> TextAccumulator rendered -> List (Parser Context Problem (TextAccumulator rendered))
 almostReplacement replacements existing =
@@ -2020,7 +2168,7 @@ addItem indent content (TreeBuilder builder) =
                 TreeBuilder
                     { previousIndent = indent
                     , levels =
-                        collapseLevel (abs deltaLevel) builder.levels
+                        collapseLevel (abs deltaLevel // 4) builder.levels
                             |> addToLevel newItem
                     }
 
@@ -2088,4 +2236,16 @@ renderLevels levels =
 
                 (Level top) :: ignore ->
                     -- We just collapsed everything down to the top level.
-                    List.reverse top
+                    List.foldl rev [] top
+
+
+reverseTree (Nested nest) =
+    Nested
+        { content = nest.content
+        , children =
+            List.foldl rev [] nest.children
+        }
+
+
+rev nest found =
+    reverseTree nest :: found
