@@ -14,11 +14,11 @@ In that way, this isn't really a replacement for Markdown or Asciidoc.  You defi
 Let's check out an example.  Here's a `Mark.Document` which results in `Html msg`, and parses a `Title`, `Image`s, and `Text`.
 
 ```elm
-document : Mark.Custom.Document (Html msg)
+document : Mark.Document (Html msg)
 document =
-    Mark.Custom.document
+    Mark.document
         (Html.article [])
-        (Mark.Custom.manyOf
+        (Mark.manyOf
             [ Mark.block "Title"
                 (Html.h1 [])
                 text
@@ -33,7 +33,7 @@ document =
                 (Mark.field "description" Mark.string)
 
             -- Toplevel Text
-            , Mark.Custom.map (Html.p []) text
+            , Mark.map (Html.p []) text
             ]
         )
 
