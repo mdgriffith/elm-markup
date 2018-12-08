@@ -3,12 +3,12 @@ module Mark exposing
     , Document, document
     , Block, block, bool, int, float, string, multiline, exactly, map
     , text, Text(..), Style(..)
-    , inline, inlineString, inlineText
+    , Inline, inline, inlineString, inlineText
     , Replacement, replacement, balanced
-    , oneOf, manyOf, startsWith
+    , oneOf, manyOf, startWith
     , nested, Nested(..)
     , Field, field, record2, record3, record4, record5, record6, record7, record8
-    , Problem(..), Context(..), FieldError(..)
+    , Context(..), Problem(..)
     , advanced
     )
 
@@ -30,21 +30,23 @@ The `elm-markup` language relies heavily on indentation, which always some multi
 
 @docs text, Text, Style
 
-@docs inline, inlineString, inlineText
+@docs Inline, inline, inlineString, inlineText
 
 @docs Replacement, replacement, balanced
 
 
 # Blocks
 
-@docs oneOf, manyOf, startsWith
+@docs oneOf, manyOf, startWith
 
 @docs nested, Nested
 
 
 # Records
 
-Embed a data record. Here's an implementation to render an `<img>`
+Embed a data record.
+
+Here's an implementation to render an `<img>`
 
     Mark.record2 "Image"
         (\src description ->
@@ -70,7 +72,7 @@ Which would parse
 
 # Errors
 
-@docs Problem, Context, FieldError
+@docs Context, Problem
 
 
 # Advanced
@@ -145,8 +147,11 @@ type Style
     = Bold
     | Italic
     | Strike
-      -- | Underline
-    | Code
+
+
+
+-- | Underline
+-- | Code
 
 
 {-| -}
@@ -158,23 +163,22 @@ type Context
 
 {-| -}
 type Problem
-    = EmptyBlock
-    | ExpectingIndent Int
+    = ExpectingIndent Int
     | InlineStart
-    | InlineBar
     | InlineEnd
-    | StartBlock
+    | BlockStart
     | Expecting String
     | ExpectingBlockName String
     | ExpectingInlineName String
     | ExpectingFieldName String
-    | RecordField FieldError
+    | NonMatchingFields
+        { expecting : List String
+        , found : List String
+        }
+    | MissingField String
     | RecordError
     | Escape
     | EscapedChar
-    | Dash
-    | DoubleQuote
-    | Apostrophe
     | Newline
     | Space
     | End
@@ -182,8 +186,8 @@ type Problem
     | FloatingPoint
     | InvalidNumber
     | UnexpectedEnd
-    | ExpectingAlphaNumeric
     | CantStartTextWithSpace
+    | UnclosedStyles (List Style)
     | UnexpectedField
         { found : String
         , options : List String
@@ -194,13 +198,15 @@ type Problem
 {-| A named block.
 
     Mark.block "MyBlock"
-        (\str -> Html.text str)
+        Html.text
         Mark.string
 
 Will parse the following and render it as `Html.text`
 
     | MyBlock
         Here is an unformatted string!
+
+**Note** block names should be capitalized. In the future this may be enforced.
 
 -}
 block : String -> (child -> result) -> Block child -> Block result
@@ -273,7 +279,7 @@ This can be useful to do things like require that a specific block comes first.
 
 So, the classic case of a blog post that has some meta data at the start could be done like this
 
-    Mark.startsWith
+    Mark.startWith
         (\metadata article ->
             { meta = metadata
             , article = article
@@ -304,8 +310,8 @@ Which would parse the following doc:
     Secondly, who knew that flex-box could wrap a sofa?
 
 -}
-startsWith : (start -> rest -> result) -> Block start -> Block rest -> Block result
-startsWith fn start rest =
+startWith : (start -> rest -> result) -> Block start -> Block rest -> Block result
+startWith fn start rest =
     Value
         (Parser.succeed fn
             |= getParser start
@@ -339,11 +345,7 @@ map fn child =
             Value (Parser.map fn prs)
 
 
-{-| `text` and other `Blocks` don't allow starting with spaces.
-
-However, it can be useful to capture indentation for things like a nested list.
-
-So, for example, here's a list.
+{-| It can be useful to parse a tree structure. For example, here's a nested list.
 
     | List
         - item one
@@ -353,23 +355,20 @@ So, for example, here's a list.
         - item three
             - nested item three
 
-In order to support blocks like this, you can use `nested`, which
-captures the indentation and returns it as an `Int`,
-which is the number of spaces that it's indented in the block.
-
 In order to parse the above, you could define a block as
 
     Mark.block "List"
-        (\items ->
-            -- items : List (Int, (), Text)
+        (\(Nested nested) ->
+            -- Do something with nested.content and nested.children
         )
-        (nested
+        (Mark.nested
             { item = text
-            , delimiter = Mark.exactly "-"
+            , start = Mark.exactly "-" ()
             }
         )
 
-_Note_ the indentation is always a multiple of 4.
+**Note** the indentation is always a multiple of 4.
+**Another Note** `text` in the above code is defined elsewhere.
 
 -}
 nested :
@@ -491,7 +490,7 @@ indentedBlocksOrNewlines icon item ( indent, existing ) =
             [] ->
                 Parser.end End
                     |> Parser.andThen
-                        (\_ -> Parser.problem EmptyBlock)
+                        (\_ -> Parser.problem UnexpectedEnd)
 
             _ ->
                 Parser.end End
@@ -710,7 +709,7 @@ oneOf blocks =
 
         blockParser =
             Parser.succeed identity
-                |. Parser.token (Parser.Token "|" StartBlock)
+                |. Parser.token (Parser.Token "|" BlockStart)
                 |. Parser.oneOf
                     [ Parser.chompIf (\c -> c == ' ') Space
                     , Parser.succeed ()
@@ -1147,7 +1146,7 @@ masterRecordParser recordName names recordParser =
                                                         withContextStack fst.contextStack (Parser.problem fst.problem)
 
                                     Err recordError ->
-                                        Parser.problem (RecordField recordError)
+                                        Parser.problem recordError
                             )
                 )
         )
@@ -1162,16 +1161,7 @@ withContextStack stack parser =
             Parser.inContext lvl.context (withContextStack remaining parser)
 
 
-{-| -}
-type FieldError
-    = NonMatchingFields
-        { expecting : List String
-        , found : List String
-        }
-    | MissingField String
-
-
-reorderFields : List String -> List ( String, String ) -> Result FieldError (List ( String, String ))
+reorderFields : List String -> List ( String, String ) -> Result Problem (List ( String, String ))
 reorderFields desiredOrder found =
     if List.length desiredOrder /= List.length found then
         Err
@@ -1186,7 +1176,7 @@ reorderFields desiredOrder found =
             |> Result.map List.reverse
 
 
-gatherFields : List ( String, String ) -> String -> Result FieldError (List ( String, String )) -> Result FieldError (List ( String, String ))
+gatherFields : List ( String, String ) -> String -> Result Problem (List ( String, String )) -> Result Problem (List ( String, String ))
 gatherFields cache desired found =
     case found of
         Ok ok ->
@@ -1351,9 +1341,9 @@ In order to render this, the above sentence is chopped up into `Text` fragments 
 
   - `view` is the function to render an individual fragment.
   - `inlines` are custom inline blocks. These are how links are implemented in `Mark.Default`!
-  - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, "…".
+  - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
 
-**Note** check out `Mark.Default.text` to see an example implementation.
+**Note** check out `Mark.Default.text` to see an example.
 
 -}
 text :
@@ -1368,7 +1358,7 @@ text options =
 
 {-| -}
 type Inline result
-    = Inline (List Style -> Parser Context Problem result)
+    = Inline String (List Style -> Parser Context Problem result)
 
 
 {-| Create a custom inline element.
@@ -1389,7 +1379,7 @@ Here's an example of a sentence with the above link:
 -}
 inline : String -> result -> Inline result
 inline name renderer =
-    Inline
+    Inline name
         (\styles ->
             Parser.succeed renderer
                 |. Parser.keyword (Parser.Token name (ExpectingInlineName name))
@@ -1399,8 +1389,8 @@ inline name renderer =
 {-| Parse an inline String field
 -}
 inlineString : String -> Inline (String -> result) -> Inline result
-inlineString name (Inline inlineParser) =
-    Inline
+inlineString name (Inline inlineName inlineParser) =
+    Inline inlineName
         (\styles ->
             Parser.succeed
                 (<|)
@@ -1418,8 +1408,8 @@ inlineString name (Inline inlineParser) =
 
 {-| -}
 inlineText : Inline (List Text -> result) -> Inline result
-inlineText (Inline inlineParser) =
-    Inline
+inlineText (Inline inlineName inlineParser) =
+    Inline inlineName
         (\styles ->
             Parser.succeed
                 (<|)
@@ -1429,22 +1419,34 @@ inlineText (Inline inlineParser) =
         )
 
 
-{-| -}
+{-| Replace a string with another string. This can be useful to have shortcuts to unicode characters.
+
+For example, in `Mark.Default`, this is used to replace `...` with the unicode ellipses character: `…`.
+
+-}
 replacement : String -> String -> Replacement
 replacement =
     Replacement
 
 
-{-| -}
+{-| A balanced replacement. This is used in `Mark.Default` to do auto-curly quotes.
+
+    Mark.balanced
+        { start = ( "\"", "“" )
+        , end = ( "\"", "”" )
+        }
+
+-}
 balanced :
-    { end : ( String, String )
-    , start : ( String, String )
+    { start : ( String, String )
+    , end : ( String, String )
     }
     -> Replacement
 balanced =
     Balanced
 
 
+empty : Text
 empty =
     Text [] ""
 
@@ -1526,7 +1528,8 @@ styledTextLoop options meaningful untilStrings found =
                 -- , Parser.map (always (Just Underline)) (Parser.token (Parser.Token "_" (Expecting "_")))
                 , Parser.map (always (Just Strike)) (Parser.token (Parser.Token "~" (Expecting "~")))
                 , Parser.map (always (Just Bold)) (Parser.token (Parser.Token "*" (Expecting "*")))
-                , Parser.map (always (Just Code)) (Parser.token (Parser.Token "`" (Expecting "`")))
+
+                -- , Parser.map (always (Just Code)) (Parser.token (Parser.Token "`" (Expecting "`")))
                 ]
 
         -- Custom inline block
@@ -1551,60 +1554,33 @@ styledTextLoop options meaningful untilStrings found =
             |. Parser.token
                 (Parser.Token "{" InlineStart)
             |= Parser.oneOf
-                (List.map (\(Inline inlineParser) -> inlineParser (currentStyles found)) options.inlines)
+                (List.map (\(Inline inlineName inlineParser) -> Parser.inContext (InInline inlineName) (inlineParser (currentStyles found))) options.inlines)
             |. Parser.token (Parser.Token "}" InlineEnd)
-
-        -- -- Link
-        -- , Parser.succeed
-        --     (\textList url ->
-        --         case changeStyle options found Nothing of
-        --             TextAccumulator current ->
-        --                 Parser.Loop <|
-        --                     TextAccumulator
-        --                         { rendered =
-        --                             List.map
-        --                                 (\textNode ->
-        --                                     options.view
-        --                                         { link = Just url
-        --                                         , style = textNode.style
-        --                                         }
-        --                                 )
-        --                                 (List.reverse textList)
-        --                                 ++ current.rendered
-        --                         , text =
-        --                             case List.map .style (List.reverse textList) of
-        --                                 [] ->
-        --                                     NoFormatting ""
-        --                                 (NoFormatting _) :: _ ->
-        --                                     NoFormatting ""
-        --                                 (Styles styles _) :: _ ->
-        --                                     Styles styles ""
-        --                         , balancedReplacements = current.balancedReplacements
-        --                         }
-        --     )
-        --     |. Parser.token (Parser.Token "[" (Expecting "["))
-        --     |= styledText basicTextOptions (currentStyles found) [ ']' ]
-        --     |. Parser.token (Parser.Token "]" (Expecting "]"))
-        --     |. Parser.token (Parser.Token "(" (Expecting "("))
-        --     |= Parser.getChompedString
-        --         (Parser.chompWhile (\c -> c /= ')' && c /= '\n' && c /= ' '))
-        --     |. Parser.token (Parser.Token ")" (Expecting ")"))
         , -- chomp until a meaningful character
           Parser.chompWhile
             (\c ->
                 not (List.member c meaningful)
             )
             |> Parser.getChompedString
-            |> Parser.map
+            |> Parser.andThen
                 (\new ->
                     if new == "" || new == "\n" then
-                        Parser.Done (finishText options found)
+                        case changeStyle options found Nothing of
+                            TextAccumulator txt ->
+                                let
+                                    styling =
+                                        case txt.text of
+                                            Text s _ ->
+                                                s
+                                in
+                                if List.isEmpty styling then
+                                    Parser.succeed (Parser.Done (List.reverse txt.rendered))
 
-                    else if List.member (String.right 1 new) untilStrings then
-                        Parser.Done (finishText options (addText (String.dropRight 1 new) found))
+                                else
+                                    Parser.problem (UnclosedStyles styling)
 
                     else
-                        Parser.Loop (addText new found)
+                        Parser.succeed (Parser.Loop (addText new found))
                 )
         ]
 
@@ -1638,7 +1614,7 @@ almostReplacement replacements existing =
                     addText c existing
                 )
                 |= Parser.getChompedString
-                    (Parser.chompIf (\c -> c == char && char /= '{') EscapedChar)
+                    (Parser.chompIf (\c -> c == char && char /= '{' && char /= '*' && char /= '/') EscapedChar)
 
         first repl =
             case repl of
@@ -1746,7 +1722,8 @@ stylingChars =
     , '*'
     , '\n'
     , '{'
-    , '`'
+
+    -- , '`'
     ]
 
 
@@ -1814,10 +1791,10 @@ changeStyle options (TextAccumulator cursor) maybeStyleToken =
                         Strike ->
                             flipStyle Strike cursor.text
 
-                        -- Underline ->
-                        --     flipStyle Underline cursor.text
-                        Code ->
-                            flipStyle Code cursor.text
+        -- Underline ->
+        --     flipStyle Underline cursor.text
+        -- Code ->
+        --     flipStyle Code cursor.text
     in
     if textIsEmpty then
         TextAccumulator { rendered = cursor.rendered, text = newText, balancedReplacements = cursor.balancedReplacements }
@@ -1994,7 +1971,7 @@ addItem indent content (TreeBuilder builder) =
 
         deltaLevel =
             indent
-                - List.length builder.levels
+                - builder.previousIndent
 
         addToLevel brandNewItem levels =
             case levels of

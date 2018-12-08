@@ -2,104 +2,127 @@ module Tests exposing (suite)
 
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, int, list, string)
-import Mark.Custom
+import Mark
 import Test exposing (..)
 
 
-withMetaData =
-    Mark.Custom.document
+text =
+    Mark.text
+        { view = identity
+        , replacements = []
+        , inlines = []
+        }
+
+
+inlines =
+    Mark.document
         identity
-        (Mark.Custom.startsWith Tuple.pair
-            (Mark.Custom.record2 "Meta"
+        (Mark.text
+            { view = List.singleton
+            , replacements = []
+            , inlines =
+                [ Mark.inline "Highlight"
+                    identity
+                    |> Mark.inlineText
+                ]
+            }
+        )
+
+
+withMetaData =
+    Mark.document
+        identity
+        (Mark.startsWith Tuple.pair
+            (Mark.record2 "Meta"
                 (\one two -> { one = one, two = two })
-                (Mark.Custom.field "one" Mark.Custom.string)
-                (Mark.Custom.field "two" Mark.Custom.string)
+                (Mark.field "one" Mark.string)
+                (Mark.field "two" Mark.string)
             )
-            (Mark.Custom.manyOf
-                [ Mark.Custom.text
+            (Mark.manyOf
+                [ text
                 ]
             )
         )
 
 
 toplevelText =
-    Mark.Custom.document
+    Mark.document
         identity
-        Mark.Custom.text
+        text
 
 
 textDoc =
-    Mark.Custom.document
+    Mark.document
         identity
-        (Mark.Custom.block "Test"
+        (Mark.block "Test"
             identity
-            Mark.Custom.text
+            text
         )
 
 
 recordDoc =
-    Mark.Custom.document
+    Mark.document
         identity
-        (Mark.Custom.record3 "Test"
+        (Mark.record3 "Test"
             (\one two three -> { one = one, two = two, three = three })
-            (Mark.Custom.field "one" Mark.Custom.string)
-            (Mark.Custom.field "two" Mark.Custom.string)
-            (Mark.Custom.field "three" Mark.Custom.string)
+            (Mark.field "one" Mark.string)
+            (Mark.field "two" Mark.string)
+            (Mark.field "three" Mark.string)
         )
 
 
 recordManyTextDoc =
-    Mark.Custom.document
+    Mark.document
         identity
-        (Mark.Custom.record3 "Test"
+        (Mark.record3 "Test"
             (\one two three -> { one = one, two = two, three = three })
-            (Mark.Custom.field "one" Mark.Custom.string)
-            (Mark.Custom.field "two" Mark.Custom.string)
-            (Mark.Custom.field "three" (Mark.Custom.manyOf [ Mark.Custom.text ]))
+            (Mark.field "one" Mark.string)
+            (Mark.field "two" Mark.string)
+            (Mark.field "three" (Mark.manyOf [ text ]))
         )
 
 
 floatDoc =
-    Mark.Custom.document
+    Mark.document
         identity
-        (Mark.Custom.record3 "Test"
+        (Mark.record3 "Test"
             (\one two three -> { one = one, two = two, three = three })
-            (Mark.Custom.field "one" Mark.Custom.float)
-            (Mark.Custom.field "two" Mark.Custom.float)
-            (Mark.Custom.field "three" Mark.Custom.float)
+            (Mark.field "one" Mark.float)
+            (Mark.field "two" Mark.float)
+            (Mark.field "three" Mark.float)
         )
 
 
 intDoc =
-    Mark.Custom.document
+    Mark.document
         identity
-        (Mark.Custom.record3 "Test"
+        (Mark.record3 "Test"
             (\one two three -> { one = one, two = two, three = three })
-            (Mark.Custom.field "one" Mark.Custom.int)
-            (Mark.Custom.field "two" Mark.Custom.int)
-            (Mark.Custom.field "three" Mark.Custom.int)
+            (Mark.field "one" Mark.int)
+            (Mark.field "two" Mark.int)
+            (Mark.field "three" Mark.int)
         )
 
 
 sectionDoc =
-    Mark.Custom.document
+    Mark.document
         identity
-        (Mark.Custom.manyOf
-            [ Mark.Custom.text
-                |> Mark.Custom.map (always "text")
-            , Mark.Custom.record3 "Test"
+        (Mark.manyOf
+            [ text
+                |> Mark.map (always "text")
+            , Mark.record3 "Test"
                 (\one two three -> "record:one,two,three")
-                (Mark.Custom.field "one" Mark.Custom.string)
-                (Mark.Custom.field "two" Mark.Custom.string)
-                (Mark.Custom.field "three" Mark.Custom.string)
-            , Mark.Custom.block "Section"
-                (\x -> "embedded:" ++ String.join "," x)
-                (Mark.Custom.manyOf
-                    [ Mark.Custom.block "Embedded"
-                        (always "block")
-                        Mark.Custom.text
-                    , Mark.Custom.text
-                        |> Mark.Custom.map (always "text")
+                (Mark.field "one" Mark.string)
+                (Mark.field "two" Mark.string)
+                (Mark.field "three" Mark.string)
+            , Mark.block "Section"
+                (\x -> "section:" ++ String.join "," x)
+                (Mark.manyOf
+                    [ Mark.block "Embedded"
+                        (always "embedded")
+                        text
+                    , text
+                        |> Mark.map (always "text")
                     ]
                 )
             ]
@@ -107,24 +130,24 @@ sectionDoc =
 
 
 sectionWithRecordDoc =
-    Mark.Custom.document
+    Mark.document
         identity
-        (Mark.Custom.manyOf
-            [ Mark.Custom.text
-                |> Mark.Custom.map (always "text")
-            , Mark.Custom.record3 "Test"
+        (Mark.manyOf
+            [ text
+                |> Mark.map (always "text")
+            , Mark.record3 "Test"
                 (\one two three -> "record:one,two,three")
-                (Mark.Custom.field "one" Mark.Custom.string)
-                (Mark.Custom.field "two" Mark.Custom.string)
-                (Mark.Custom.field "three" Mark.Custom.string)
-            , Mark.Custom.block "Section"
+                (Mark.field "one" Mark.string)
+                (Mark.field "two" Mark.string)
+                (Mark.field "three" Mark.string)
+            , Mark.block "Section"
                 (\x -> "embedded:" ++ String.join "," x)
-                (Mark.Custom.manyOf
-                    [ Mark.Custom.block "Embedded"
+                (Mark.manyOf
+                    [ Mark.block "Embedded"
                         (always "block")
-                        Mark.Custom.text
-                    , Mark.Custom.text
-                        |> Mark.Custom.map (always "text")
+                        text
+                    , text
+                        |> Mark.map (always "text")
                     ]
                 )
             ]
@@ -133,19 +156,51 @@ sectionWithRecordDoc =
 
 suite : Test
 suite =
-    describe "Mark.Custom"
+    describe "Mark"
         [ describe "Text"
             [ test "Starts with Space" <|
                 \_ ->
-                    let
-                        doc1 =
-                            """ one too many spaces..."""
-
-                        expectedProblem =
-                            Mark.Custom.CantStartTextWithSpace
-                    in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse toplevelText doc1))
-                        (Err [ expectedProblem ])
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse toplevelText " one too many spaces...")
+                        )
+                        (Err [ Mark.CantStartTextWithSpace ])
+            , test "Unclosed Italic" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse toplevelText "/Start italics, but don't finish")
+                        )
+                        (Err
+                            [ Mark.Escape
+                            , Mark.Expecting "/"
+                            , Mark.Expecting "~"
+                            , Mark.Expecting "*"
+                            , Mark.InlineStart
+                            , Mark.UnclosedStyles [ Mark.Italic ]
+                            ]
+                        )
+            , test "Inline elements should maintain their source order." <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse inlines "{Highlight|my} highlighted {Highlight|sentence} {Highlight|order}")
+                        )
+                        (Ok
+                            [ [ Mark.Text [] "my" ]
+                            , [ Mark.Text [] " highlighted " ]
+                            , [ Mark.Text [] "sentence" ]
+                            , [ Mark.Text [] " " ]
+                            , [ Mark.Text [] "order" ]
+                            ]
+                        )
+            , test "Incorrect inline element name" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse inlines "{Highlurt|my} highlighted sentence")
+                        )
+                        (Err [ Mark.ExpectingInlineName "Highlight" ])
             ]
         , describe "Blocks"
             [ test "Misspelled Block" <|
@@ -156,12 +211,9 @@ suite =
     one = hello
     two = world
                         """
-
-                        expectedProblem =
-                            Mark.Custom.ExpectingBlockName "Test"
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse textDoc doc1))
-                        (Err [ expectedProblem ])
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse textDoc doc1))
+                        (Err [ Mark.ExpectingBlockName "Test" ])
             , test "Extra line between name and value" <|
                 \_ ->
                     let
@@ -173,9 +225,9 @@ suite =
 """
 
                         result =
-                            Ok [ { link = Nothing, style = Mark.Custom.NoFormatting "Here's my extra line" } ]
+                            Ok [ Mark.Text [] "Here's my extra line" ]
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse textDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse textDoc doc1))
                         result
             , test "Incorrect Indentation" <|
                 \_ ->
@@ -186,9 +238,9 @@ suite =
                         """
 
                         expectedProblem =
-                            Mark.Custom.ExpectingIndent 4
+                            Mark.ExpectingIndent 4
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse textDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse textDoc doc1))
                         (Err [ expectedProblem ])
             , test "Start with Metadata" <|
                 \_ ->
@@ -208,19 +260,18 @@ Each with their own /styling/.
                         result =
                             Ok
                                 ( { one = "Test data", two = "other data" }
-                                , [ [ { link = Nothing
-                                      , style = Mark.Custom.NoFormatting "Then a bunch of"
-                                      }
+                                , [ [ Mark.Text [] "Then a bunch of"
                                     ]
-                                  , [ { link = Nothing, style = Mark.Custom.NoFormatting "paragraphs." } ]
-                                  , [ { link = Nothing, style = Mark.Custom.NoFormatting "Each with their own " }
-                                    , { link = Nothing, style = Mark.Custom.Styles [ Mark.Custom.Italic ] "styling" }
-                                    , { link = Nothing, style = Mark.Custom.Styles [] "." }
+                                  , [ Mark.Text [] "paragraphs." ]
+                                  , [ Mark.Text [] "Each with their own "
+                                    , Mark.Text [ Mark.Italic ] "styling"
+                                    , Mark.Text [] "."
                                     ]
                                   ]
                                 )
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse withMetaData doc1))
+                    Expect.equal
+                        (Result.mapError (List.map .problem) (Mark.parse withMetaData doc1))
                         result
             , test "Extra Newline to Start" <|
                 \_ ->
@@ -239,9 +290,9 @@ Each with their own /styling/.
 """
 
                         result =
-                            Err [ Mark.Custom.ExpectingBlockName "Meta" ]
+                            Err [ Mark.ExpectingBlockName "Meta" ]
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse withMetaData doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse withMetaData doc1))
                         result
             , test "Nested section blocks" <|
                 \_ ->
@@ -273,9 +324,9 @@ Finally, a sentence
 """
 
                         result =
-                            Ok [ "record:one,two,three", "text", "text", "text", "embedded:text,text,block,text", "text" ]
+                            Ok [ "record:one,two,three", "text", "text", "text", "section:text,text,embedded,text", "text" ]
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse sectionDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse sectionDoc doc1))
                         result
             ]
         , describe "Records"
@@ -289,14 +340,12 @@ Finally, a sentence
                         """
 
                         expectedProblem =
-                            Mark.Custom.RecordField
-                                (Mark.Custom.NonMatchingFields
-                                    { expecting = [ "one", "two", "three" ]
-                                    , found = [ "two", "one" ]
-                                    }
-                                )
+                            Mark.NonMatchingFields
+                                { expecting = [ "one", "two", "three" ]
+                                , found = [ "two", "one" ]
+                                }
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse recordDoc doc1))
                         (Err [ expectedProblem ])
             , test "Extra lines between fields" <|
                 \_ ->
@@ -311,7 +360,7 @@ Finally, a sentence
 """
                     in
                     Expect.equal
-                        (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
+                        (Result.mapError (List.map .problem) (Mark.parse recordDoc doc1))
                         (Ok { one = "hello", three = "!", two = "world" })
             , test "Extra line between two fields" <|
                 \_ ->
@@ -325,7 +374,7 @@ Finally, a sentence
     three = !
 """
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse recordDoc doc1))
                         (Ok { one = "hello", three = "!", two = "world" })
             , test "Records with many text as a field" <|
                 \_ ->
@@ -339,8 +388,8 @@ Finally, a sentence
 
 """
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordManyTextDoc doc1))
-                        (Ok { one = "hello", three = [ [ { link = Nothing, style = Mark.Custom.NoFormatting "Here is a bunch of text" } ] ], two = "world" })
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse recordManyTextDoc doc1))
+                        (Ok { one = "hello", three = [ [ Mark.Text [] "Here is a bunch of text" ] ], two = "world" })
             , test "Records with many text as a field (starting on same line)" <|
                 \_ ->
                     let
@@ -351,11 +400,11 @@ Finally, a sentence
     three = Here is a bunch of text
 """
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordManyTextDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse recordManyTextDoc doc1))
                         (Ok
                             { one = "hello"
                             , three =
-                                [ [ { link = Nothing, style = Mark.Custom.NoFormatting "Here is a bunch of text" } ] ]
+                                [ [ Mark.Text [] "Here is a bunch of text" ] ]
                             , two = "world"
                             }
                         )
@@ -373,12 +422,12 @@ Finally, a sentence
 
 """
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordManyTextDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse recordManyTextDoc doc1))
                         (Ok
                             { one = "hello"
                             , three =
-                                [ [ { link = Nothing, style = Mark.Custom.NoFormatting "Here is a bunch of text" } ]
-                                , [ { link = Nothing, style = Mark.Custom.NoFormatting "And some more on another line" } ]
+                                [ [ Mark.Text [] "Here is a bunch of text" ]
+                                , [ Mark.Text [] "And some more on another line" ]
                                 ]
                             , two = "world"
                             }
@@ -393,9 +442,9 @@ Finally, a sentence
                         """
 
                         expectedProblem =
-                            Mark.Custom.ExpectingIndent 4
+                            Mark.ExpectingIndent 4
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse recordDoc doc1))
                         (Err [ expectedProblem ])
             , test "Incorrect Indentation v2" <|
                 \_ ->
@@ -407,9 +456,9 @@ Finally, a sentence
                         """
 
                         expectedProblem =
-                            Mark.Custom.ExpectingIndent 4
+                            Mark.ExpectingIndent 4
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse recordDoc doc1))
                         (Err [ expectedProblem ])
             , test "Additional fields should error" <|
                 \_ ->
@@ -423,13 +472,13 @@ Finally, a sentence
                         """
 
                         expectedProblem =
-                            Mark.Custom.UnexpectedField
+                            Mark.UnexpectedField
                                 { options = [ "one", "two", "three" ]
                                 , found = "four"
                                 , recordName = "Test"
                                 }
                     in
-                    Expect.equal (Result.mapError (List.map .problem) (Mark.Custom.parse recordDoc doc1))
+                    Expect.equal (Result.mapError (List.map .problem) (Mark.parse recordDoc doc1))
                         (Err [ expectedProblem ])
             , test "Order of fields in source shouldn't matter" <|
                 \_ ->
@@ -449,8 +498,8 @@ Finally, a sentence
                         """
 
                         parsed =
-                            ( Mark.Custom.parse recordDoc doc1
-                            , Mark.Custom.parse recordDoc doc2
+                            ( Mark.parse recordDoc doc1
+                            , Mark.parse recordDoc doc2
                             )
                     in
                     Expect.all
@@ -471,7 +520,7 @@ Finally, a sentence
     three = 2
                         """
                     in
-                    Expect.equal (Mark.Custom.parse floatDoc doc1)
+                    Expect.equal (Mark.parse floatDoc doc1)
                         (Ok { one = 15.25, two = -1, three = 2 })
             , test "Ints are parsed as expected" <|
                 \_ ->
@@ -483,7 +532,7 @@ Finally, a sentence
     three = 2
                         """
                     in
-                    Expect.equal (Mark.Custom.parse intDoc doc1)
+                    Expect.equal (Mark.parse intDoc doc1)
                         (Ok { one = 15, two = -1, three = 2 })
             ]
         ]

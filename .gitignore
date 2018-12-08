@@ -4,3 +4,7 @@ elm-stuff
 repl-temp-*
 
 index.html
+
+examples/elm.js
+
+docs.json

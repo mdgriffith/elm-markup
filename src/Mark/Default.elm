@@ -1,20 +1,34 @@
 module Mark.Default exposing
     ( document
-    , title, header, list, monospace, image
-    , replacements, text
+    , title, header, monospace, image, ListIcon(..), list, listIcon
+    , textWith, defaultTextStyle, code, link, textFragment
     )
 
 {-| This is a document that renders to [`elm-ui`'s](https://package.elm-lang.org/packages/mdgriffith/elm-ui/latest/) `Element msg`.
 
-It's a good starting point for writing something like a blog article, but one of the great powers of this library is in [writing custom blocks](https://package.elm-lang.org/packages/mdgriffith/elm-markup/latest/Mark-Custom) to suite your specific domain or style needs!
+**Though remember**, one of the great powers of this library is in [writing custom blocks](https://package.elm-lang.org/packages/mdgriffith/elm-markup/latest/Mark) to suite your specific domain or style needs! You can parse a document to any data structure.
 
-Check out the source to this module to get an idea of how things fit together.
+Think of this module as a **starting point** for writing something like a blog article.
+
+Check out the source to get an idea of how things fit together.
+
+_Then feel free to borrow or copy anything you see._
 
 @docs document
 
-@docs title, header, list, monospace, image
 
-@docs replacements, text
+# Common Blocks
+
+These are some common blocks that you might need.
+
+Feel free to define your own document and pick and choose what blocks make sense for you.
+
+@docs title, header, monospace, image, ListIcon, list, listIcon
+
+
+# Text and Inlines
+
+@docs textWith, defaultTextStyle, code, link, textFragment
 
 -}
 
@@ -28,43 +42,57 @@ import Mark
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
-{-| Parsing this document results in a `view` function, `model -> Element msg`.
+{-| This document results in a `view` function, `model -> Element msg`.
+
+It includes all the blocks and inline blocks referenced in this module.
+
+**Note** this document requires a `title` as the first block of each document by using `Mark.startWith`. If that isn't what you want, create your own document with your own constraints.
+
 -}
 document : Mark.Document (model -> Element msg)
 document =
+    let
+        defaultText =
+            textWith defaultTextStyle
+    in
     Mark.document
         (\children model ->
             Element.textColumn []
                 (List.map (\view -> view model) children)
         )
-        (Mark.manyOf
-            [ title [ Font.size 48 ] defaultText
-            , header [ Font.size 36 ] defaultText
-            , list
-                { style = listStyles
-                , icon = renderIcon
-                }
-                defaultText
-            , image
-            , monospace
-                [ Element.spacing 5
-                , Element.padding 24
-                , Background.color
-                    (Element.rgba 0 0 0 0.04)
-                , Border.rounded 2
-                , Font.size 16
-                , Font.family
-                    [ Font.external
-                        { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
-                        , name = "Source Code Pro"
-                        }
-                    , Font.sansSerif
+        (Mark.startWith
+            (\myTitle myContent ->
+                myTitle :: myContent
+            )
+            (title [ Font.size 48 ] defaultText)
+            (Mark.manyOf
+                [ header [ Font.size 36 ] defaultText
+                , list
+                    { style = listStyles
+                    , icon = listIcon
+                    }
+                    defaultText
+                , image []
+                , monospace
+                    [ Element.spacing 5
+                    , Element.padding 24
+                    , Background.color
+                        (Element.rgba 0 0 0 0.04)
+                    , Border.rounded 2
+                    , Font.size 16
+                    , Font.family
+                        [ Font.external
+                            { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
+                            , name = "Source Code Pro"
+                            }
+                        , Font.sansSerif
+                        ]
                     ]
-                ]
 
-            -- Toplevel Text
-            , Mark.map (\viewEls model -> Element.paragraph [] (viewEls model)) defaultText
-            ]
+                -- Toplevel Text
+                , Mark.map (\viewEls model -> Element.paragraph [] (viewEls model)) defaultText
+                ]
+            )
         )
 
 
@@ -75,52 +103,17 @@ document =
         description = A cute kitty cat.
 
 -}
-image : Mark.Block (model -> Element msg)
-image =
+image : List (Element.Attribute msg) -> Mark.Block (model -> Element msg)
+image attrs =
     Mark.record2 "Image"
         (\src description model ->
-            Element.image []
+            Element.image attrs
                 { src = src
                 , description = description
                 }
         )
         (Mark.field "src" Mark.string)
         (Mark.field "description" Mark.string)
-
-
-defaultText =
-    text
-        { code =
-            [ Background.color
-                (Element.rgba 0 0 0 0.04)
-            , Border.rounded 2
-            , Element.paddingXY 5 3
-            , Font.size 16
-            , Font.family
-                [ Font.external
-                    { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
-                    , name = "Source Code Pro"
-                    }
-                , Font.sansSerif
-                ]
-            ]
-        , link =
-            [ Font.color
-                (Element.rgb
-                    (17 / 255)
-                    (132 / 255)
-                    (206 / 255)
-                )
-            , Element.mouseOver
-                [ Font.color
-                    (Element.rgb
-                        (234 / 255)
-                        (21 / 255)
-                        (122 / 255)
-                    )
-                ]
-            ]
-        }
 
 
 {-| The title of your document. Renders as an `h1`.
@@ -160,6 +153,14 @@ header attrs textParser =
 
 
 {-| A monospaced code block without syntax highlighting.
+
+    | Monospace
+        Everything in this block will be rendered monospaced.
+
+        Including this line.
+
+        And this one.
+
 -}
 monospace : List (Element.Attribute msg) -> Mark.Block (model -> Element msg)
 monospace attrs =
@@ -175,65 +176,9 @@ monospace attrs =
         Mark.multiline
 
 
-{-| -}
-text :
-    { code : List (Element.Attribute msg)
-    , link : List (Element.Attribute msg)
-    }
-    -> Mark.Block (model -> List (Element msg))
-text style =
-    Mark.map
-        (\els model ->
-            List.map (\view -> view model) els
-        )
-        (Mark.text
-            { view = textFragment style
-            , inlines =
-                [ link style
-                ]
-            , replacements = replacements
-            }
-        )
+{-| Some default styling for `code` and `link` inline blocks.
 
-
-link config =
-    Mark.inline "Link"
-        (\txt url model ->
-            Element.link config.link
-                { url = url
-                , label =
-                    Element.row []
-                        (List.map (\item -> textFragment config item model) txt)
-                }
-        )
-        |> Mark.inlineText
-        |> Mark.inlineString "url"
-
-
-textFragment config node model_ =
-    case node of
-        Mark.Text styles txt ->
-            Element.el (List.concatMap (toStyles config) styles) (Element.text txt)
-
-
-toStyles config style =
-    case style of
-        Mark.Bold ->
-            [ Font.bold ]
-
-        Mark.Italic ->
-            [ Font.italic ]
-
-        Mark.Strike ->
-            [ Font.strike ]
-
-        -- Mark.Underline ->
-        --     [ Font.underline ]
-        Mark.Code ->
-            config.code
-
-
-{-| This will replace certain characters with improved typographical ones.
+Also replaces certain characters with some typographical niceties.
 
   - `...` is converted to the ellipses unicode character.
   - `"` Straight double quotes are [replaced with curly quotes](https://practicaltypography.com/straight-and-curly-quotes.html)
@@ -247,22 +192,151 @@ These transformations also don't apply inside inline `code` or inside the `monos
 
 **Note** Escaping the start of any of these characters will skip the replacement.
 
-**Note** If you're not familiar with `en-dash` or `em-dash`, I definitely [recommend reading a small bit about it](https://practicaltypography.com/hyphens-and-dashes.html)—they're incredibly useful.
+**Also Note** If you're not familiar with `en-dash` or `em-dash`, I definitely [recommend reading a small bit about it](https://practicaltypography.com/hyphens-and-dashes.html)—they're incredibly useful.
 
 -}
-replacements : List Mark.Replacement
-replacements =
-    [ Mark.replacement "..." "…"
-    , Mark.replacement "<>" "\u{00A0}"
-    , Mark.replacement "---" "—"
-    , Mark.replacement "--" "–"
-    , Mark.replacement "//" "/"
-    , Mark.replacement "'" "’"
-    , Mark.balanced
-        { start = ( "\"", "“" )
-        , end = ( "\"", "”" )
-        }
-    ]
+defaultTextStyle :
+    { code : List (Element.Attribute msg1)
+    , link : List (Element.Attribute msg)
+    , inlines : List (Mark.Inline (a -> Element msg))
+    , replacements : List Mark.Replacement
+    }
+defaultTextStyle =
+    { code =
+        [ Background.color
+            (Element.rgba 0 0 0 0.04)
+        , Border.rounded 2
+        , Element.paddingXY 5 3
+        , Font.size 16
+        , Font.family
+            [ Font.external
+                { url = "https://fonts.googleapis.com/css?family=Source+Code+Pro"
+                , name = "Source Code Pro"
+                }
+            , Font.sansSerif
+            ]
+        ]
+    , link =
+        [ Font.color
+            (Element.rgb
+                (17 / 255)
+                (132 / 255)
+                (206 / 255)
+            )
+        , Element.mouseOver
+            [ Font.color
+                (Element.rgb
+                    (234 / 255)
+                    (21 / 255)
+                    (122 / 255)
+                )
+            ]
+        ]
+    , inlines = []
+    , replacements =
+        [ Mark.replacement "..." "…"
+        , Mark.replacement "<>" "\u{00A0}"
+        , Mark.replacement "---" "—"
+        , Mark.replacement "--" "–"
+        , Mark.replacement "//" "/"
+        , Mark.replacement "'" "’"
+        , Mark.balanced
+            { start = ( "\"", "“" )
+            , end = ( "\"", "”" )
+            }
+        ]
+    }
+
+
+{-| Render text into `Element msg`.
+
+Includes `Mark.Default.link` and `Mark.Default.code` inline blocks, which can be styled as you'd like.
+
+**Note** this is not a complicated function. If it doesn't meet your needs, don't be afraid to write your own using `Mark.text`!
+
+-}
+textWith :
+    { code : List (Element.Attribute msg)
+    , link : List (Element.Attribute msg)
+    , inlines : List (Mark.Inline (model -> Element msg))
+    , replacements : List Mark.Replacement
+    }
+    -> Mark.Block (model -> List (Element msg))
+textWith config =
+    Mark.map
+        (\els model ->
+            List.map (\view -> view model) els
+        )
+        (Mark.text
+            { view = textFragment
+            , inlines =
+                [ link config.link
+                , code config.code
+                ]
+                    ++ config.inlines
+            , replacements = config.replacements
+            }
+        )
+
+
+{-| A custom inline block for code. This is analagous to `backticks` in markdown.
+
+Though, style it however you'd like.
+
+`{Code| Here is my styled inline code block }`
+
+-}
+code : List (Element.Attribute msg) -> Mark.Inline (model -> Element msg)
+code style =
+    Mark.inline "Code"
+        (\txt model ->
+            Element.row style
+                (List.map (\item -> textFragment item model) txt)
+        )
+        |> Mark.inlineText
+
+
+{-| A custom inline block for links.
+
+`{Link|My link text|url=http://google.com}`
+
+-}
+link : List (Element.Attribute msg) -> Mark.Inline (model -> Element msg)
+link style =
+    Mark.inline "Link"
+        (\txt url model ->
+            Element.link style
+                { url = url
+                , label =
+                    Element.row [ Element.htmlAttribute (Html.Attributes.style "display" "inline-flex") ]
+                        (List.map (\item -> textFragment item model) txt)
+                }
+        )
+        |> Mark.inlineText
+        |> Mark.inlineString "url"
+
+
+{-| Render a text fragment.
+-}
+textFragment : Mark.Text -> model -> Element msg
+textFragment node model_ =
+    case node of
+        Mark.Text styles txt ->
+            Element.el (List.concatMap toStyles styles) (Element.text txt)
+
+
+{-| -}
+toStyles : Mark.Style -> List (Element.Attribute msg)
+toStyles style =
+    case style of
+        Mark.Bold ->
+            [ Font.bold ]
+
+        Mark.Italic ->
+            [ Font.italic ]
+
+        Mark.Strike ->
+            [ Font.strike ]
 
 
 
@@ -277,14 +351,18 @@ replacements =
 
 {-| A nested list with an expected indentation of 4 spaces per level. As far as icons:
 
-  - `-` indicates a bullet. You can have any number of dashes.
+  - `-` or `--` indicates a bullet.
   - `->` or `-->` will render as an ➙
-  - Any alphabetic character after the dash is considered part of a formatting string for numbered items.
-      - `-x.` will be auto-numbered as and renderd `1.`, or `2.` or whatever number you're at.
-      - Any punctuation that comes after the alpha character will be maintained. So, `x)` will format as `1)` and `x.` will format as `1.`
-      - Nested numbers can be rendered if they're in the right place. So `-x.y)` would render as `1.2)`
-      - A literal number instead of an alpha will reset the auto numbering to that literal number. So, `-9.` means start counting up from 9 from here on out.
-      - This can also applied in a nested manner as `-x.9`, which will reset the inner number.
+  - `#.` will be auto-numbered as and rendered `1.`, or `2.` or whatever number you're at.
+      - Any punctuation that comes after the alpha character will be maintained. So, `#)` will format as `1)` and `#.` will format as `1.`
+      - Nested numbers can be rendered if they're in the right place. So `#.#)` would render as `1.2)`
+  - A literal number instead of an alpha will reset the auto numbering to that literal number. So, `9.` means start counting up from 9 from here on out.
+  - This can also applied in a nested manner as `#.9`, which will reset the inner number.
+
+For configuring this block.
+
+  - `icon` takes in a `List Int`, which is the current index of where that element is in the nested list. So, `[1,2]` means you're at postion `1.2`.
+  - `style` is
 
 -}
 list :
@@ -298,50 +376,76 @@ list config textParser =
         (\items model ->
             Element.column
                 (config.style [])
-                (List.indexedMap (renderListItem config model []) items)
+                (List.reverse (Tuple.second (List.foldl (renderListItem config model []) ( 0, [] ) items)))
         )
         (Mark.nested
             { item = textParser
             , start =
-                Mark.advanced
-                    listIconParser
+                Mark.oneOf
+                    [ Mark.exactly "-> " Arrow
+                    , Mark.exactly "--> " Arrow
+                    , Mark.exactly "- " Bullet
+                    , Mark.exactly "-- " Bullet
+                    , Mark.advanced
+                        (Parser.loop ( [], [] ) numberIconParser)
+                    ]
             }
         )
 
 
-{-| -}
-listIconParser : Parser Mark.Context Mark.Problem ListIcon
-listIconParser =
-    Parser.oneOf
-        [ Parser.succeed Arrow
-            |. Parser.oneOf
-                [ Parser.token (Parser.Token "->" (Mark.Expecting "->"))
-                , Parser.token (Parser.Token "-->" (Mark.Expecting "-->"))
-                ]
-            |. Parser.chompIf (\c -> c == ' ') Mark.Space
-        , Parser.succeed identity
-            |. Parser.token (Parser.Token "-" (Mark.Expecting "-"))
-            |= Parser.oneOf
-                [ Parser.succeed Bullet
-                    |. Parser.oneOf
-                        [ Parser.token (Parser.Token " " Mark.Space)
-                        , Parser.token (Parser.Token "-" Mark.Dash)
-                        ]
-                    |. Parser.chompIf (\c -> c == ' ') Mark.Space
-                , Parser.succeed
-                    (\( reset, decorations ) ->
-                        Number { reset = reset, decorations = decorations }
+renderListItem config model stack (Mark.Nested item) ( index, accumulated ) =
+    case item.content of
+        ( icon, items ) ->
+            let
+                ( newIndex, newStack ) =
+                    advanceIndex icon index stack
+            in
+            ( newIndex
+            , Element.row []
+                [ Element.el [ Element.alignTop ]
+                    (config.icon (newIndex :: newStack) icon)
+                , Element.textColumn
+                    (config.style (index :: stack))
+                    (List.map
+                        (\view ->
+                            Element.paragraph
+                                []
+                                (view model)
+                        )
+                        items
+                        ++ List.reverse (Tuple.second (List.foldl (renderListItem config model (newIndex :: newStack)) ( 0, [] ) item.children))
                     )
-                    |= Parser.loop ( [], [] ) numberIconParser
-                    |. Parser.chompIf (\c -> c == ' ') Mark.Space
                 ]
-        ]
+                :: accumulated
+            )
+
+
+advanceIndex icon index stack =
+    case icon of
+        Number { reset } ->
+            resetIndex reset (index + 1) stack
+
+        _ ->
+            ( index + 1, stack )
+
+
+resetIndex reset cursor stack =
+    case List.reverse reset of
+        [] ->
+            ( cursor, stack )
+
+        top :: remaining ->
+            ( Maybe.withDefault cursor top
+            , stack
+                |> List.foldr resetStack ( remaining, [] )
+                |> Tuple.second
+            )
 
 
 {-| -}
 numberIconParser :
     ( List (Maybe Int), List String )
-    -> Parser Mark.Context Mark.Problem (Parser.Step ( List (Maybe Int), List String ) ( List (Maybe Int), List String ))
+    -> Parser Mark.Context Mark.Problem (Parser.Step ( List (Maybe Int), List String ) ListIcon)
 numberIconParser ( cursorReset, decorations ) =
     Parser.oneOf
         [ Parser.succeed
@@ -367,24 +471,26 @@ numberIconParser ( cursorReset, decorations ) =
                     |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Integer)
                     |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
                 , Parser.succeed Nothing
-                    |. Parser.chompIf Char.isAlpha Mark.ExpectingAlphaNumeric
-                    |. Parser.chompWhile Char.isAlpha
+                    |. Parser.chompIf (\c -> c == '#') (Mark.Expecting "#")
                 ]
             |= Parser.getChompedString
                 (Parser.chompWhile
                     (\c ->
                         c
                             /= ' '
-                            && not (Char.isAlpha c)
+                            && (c /= '#')
                             && not (Char.isDigit c)
                     )
                 )
         , Parser.succeed
             (Parser.Done
-                ( List.reverse cursorReset
-                , List.reverse decorations
+                (Number
+                    { reset = List.reverse cursorReset
+                    , decorations = List.reverse decorations
+                    }
                 )
             )
+            |. Parser.chompIf (\c -> c == ' ') Mark.Space
         ]
 
 
@@ -418,26 +524,6 @@ edges =
     }
 
 
-renderListItem config model stack index (Mark.Nested item) =
-    case item.content of
-        ( icon, items ) ->
-            Element.row []
-                [ Element.el [ Element.alignTop ]
-                    (renderIcon (index :: stack) icon)
-                , Element.textColumn
-                    (config.style [])
-                    (List.map
-                        (\view ->
-                            Element.paragraph
-                                []
-                                (view model)
-                        )
-                        items
-                        ++ List.indexedMap (renderListItem config model (index :: stack)) item.children
-                    )
-                ]
-
-
 type alias Index =
     { decoration : String
     , index : Int
@@ -445,7 +531,25 @@ type alias Index =
     }
 
 
-{-| -}
+{-| List icon options.
+
+For `Number`, we have
+
+  - `reset`, which is the desired index reset if there is one.
+  - `decorations`, which are the strings to append after each number.
+
+So, a list item like:
+
+`#.5)`
+
+Would result in the following `ListIcon`:
+
+    Number
+        { reset = [ Nothing, Just 5 ]
+        , decorations = [ ".", ")" ]
+        }
+
+-}
 type ListIcon
     = Bullet
     | Arrow
@@ -455,9 +559,10 @@ type ListIcon
         }
 
 
-{-| -}
-renderIcon : List Int -> ListIcon -> Element msg
-renderIcon index symbol =
+{-| A default list icon renderer.
+-}
+listIcon : List Int -> ListIcon -> Element msg
+listIcon index symbol =
     let
         pad =
             Element.paddingEach
@@ -508,7 +613,7 @@ applyDecoration index ( decs, decorated ) =
         [] ->
             -- If there are no decorations, skip.
             ( decs
-            , { index = index + 1
+            , { index = index
               , decoration = ""
               , show = False
               }
@@ -517,27 +622,12 @@ applyDecoration index ( decs, decorated ) =
 
         currentDec :: remaining ->
             ( remaining
-            , { index = index + 1
+            , { index = index
               , decoration = currentDec
               , show = True
               }
                 :: decorated
             )
-
-
-resetCursor reset cursor =
-    case List.reverse reset of
-        [] ->
-            cursor
-
-        top :: remaining ->
-            { current =
-                Maybe.withDefault cursor.current top
-            , stack =
-                cursor.stack
-                    |> List.foldr resetStack ( remaining, [] )
-                    |> Tuple.second
-            }
 
 
 resetStack index ( reset, found ) =
@@ -550,30 +640,3 @@ resetStack index ( reset, found ) =
 
         (Just new) :: remain ->
             ( remain, new :: found )
-
-
-advanceCursor indent cursor =
-    if indent == List.length cursor.stack + 1 then
-        { current = cursor.current + 1
-        , stack = cursor.stack
-        }
-
-    else if indent > List.length cursor.stack + 1 then
-        { current = 1
-        , stack = cursor.current :: cursor.stack
-        }
-
-    else
-        let
-            indentDelta =
-                List.length cursor.stack
-                    - indent
-        in
-        case List.drop (abs indentDelta) cursor.stack of
-            [] ->
-                cursor
-
-            lower :: remaining ->
-                { current = lower + 1
-                , stack = remaining
-                }

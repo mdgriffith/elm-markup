@@ -6,7 +6,7 @@
     "version": "1.0.0",
     "exposed-modules": [
         "Mark",
-        "Mark.Custom"
+        "Mark.Default"
     ],
     "elm-version": "0.19.0 <= v < 0.20.0",
     "dependencies": {
@@ -15,5 +15,7 @@
         "elm/parser": "1.1.0 <= v < 2.0.0",
         "mdgriffith/elm-ui": "1.1.0 <= v < 2.0.0"
     },
-    "test-dependencies": {}
+    "test-dependencies": {
+        "elm-explorations/test": "1.2.0 <= v < 2.0.0"
+    }
 }
