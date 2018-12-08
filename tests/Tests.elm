@@ -32,7 +32,7 @@ inlines =
 withMetaData =
     Mark.document
         identity
-        (Mark.startsWith Tuple.pair
+        (Mark.startWith Tuple.pair
             (Mark.record2 "Meta"
                 (\one two -> { one = one, two = two })
                 (Mark.field "one" Mark.string)
@@ -129,6 +129,72 @@ sectionDoc =
         )
 
 
+nested : Mark.Document (List Indexed)
+nested =
+    Mark.document
+        (List.indexedMap (renderIndex []))
+        (Mark.block "Nested"
+            identity
+            (Mark.nested
+                { start = Mark.exactly "- " True
+                , item = Mark.exactly "*" True
+                }
+            )
+        )
+
+
+type Indexed
+    = Indexed Int (List Indexed)
+
+
+renderIndex stack i (Mark.Nested node) =
+    case node.children of
+        [] ->
+            Indexed i []
+
+        _ ->
+            Indexed i (List.indexedMap (renderIndex (i :: stack)) node.children)
+
+
+simpleNestedDoc =
+    """| Nested
+    - *
+    - *
+    - *
+"""
+
+
+complexNestedDoc =
+    """| Nested
+    - *
+        - *
+        - *
+        - *
+        - *
+            - *
+    - *
+        - *
+    - *
+"""
+
+
+dedentingNestedDoc =
+    """| Nested
+    - *
+        - *
+        - *
+        - *
+        - *
+            - *
+        - *
+            - *
+        - *
+    - *
+        - *
+    - *
+"""
+
+
 sectionWithRecordDoc =
     Mark.document
         identity
@@ -201,6 +267,51 @@ suite =
                             (Mark.parse inlines "{Highlurt|my} highlighted sentence")
                         )
                         (Err [ Mark.ExpectingInlineName "Highlight" ])
+            ]
+        , describe "Nested"
+            [ test "Simple list parsing.  No Nesting." <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse nested simpleNestedDoc)
+                        )
+                        (Ok [ Indexed 0 [], Indexed 1 [], Indexed 2 [] ])
+            , test "Nested list parsing" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse nested complexNestedDoc)
+                        )
+                        (Ok
+                            [ Indexed 0
+                                [ Indexed 0 []
+                                , Indexed 1 []
+                                , Indexed 2 []
+                                , Indexed 3 [ Indexed 0 [] ]
+                                ]
+                            , Indexed 1 [ Indexed 0 [] ]
+                            , Indexed 2 []
+                            ]
+                        )
+            , test "Nested list dedenting correctly" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse nested dedentingNestedDoc)
+                        )
+                        (Ok
+                            [ Indexed 0
+                                [ Indexed 0 []
+                                , Indexed 1 []
+                                , Indexed 2 []
+                                , Indexed 3 [ Indexed 0 [] ]
+                                , Indexed 4 [ Indexed 0 [] ]
+                                , Indexed 5 []
+                                ]
+                            , Indexed 1 [ Indexed 0 [] ]
+                            , Indexed 2 []
+                            ]
+                        )
             ]
         , describe "Blocks"
             [ test "Misspelled Block" <|
