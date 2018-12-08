@@ -252,7 +252,7 @@ type Document result
 
 {-| Create a markup `Document`. You're first goal is to describe a document in terms of the blocks you're expecting.
 
-Here's a brief example of a document that
+Here's a brief example of a document that will parse many `MyBlock` blocks, and capture the string that's indented inside the block.
 
     document : Mark.Document (List String)
     document =
