@@ -39,6 +39,10 @@ What does a list look like?
     #. Another thing.
         #.#. sublist
         #.#. more sublist
+            #.#.#. indented
+        #.#. other sublist
+            #.#.#. subthing
+            #.#.#. other subthing
     #. and yet, another
         #.#. and another one
 
