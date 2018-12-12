@@ -166,12 +166,12 @@ monospace : List (Element.Attribute msg) -> Mark.Block (model -> Element msg)
 monospace attrs =
     Mark.block "Monospace"
         (\string model ->
-            Element.paragraph
+            Element.el
                 (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
                     :: Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
                     :: attrs
                 )
-                [ Element.text string ]
+                (Element.text (String.trimRight string))
         )
         Mark.multiline
 
