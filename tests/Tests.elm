@@ -93,6 +93,34 @@ floatDoc =
         )
 
 
+codeDoc =
+    Mark.document
+        identity
+        (Mark.block "Monospace"
+            identity
+            Mark.multiline
+        )
+
+
+codeAndTextDoc =
+    Mark.document
+        identity
+        (Mark.startWith
+            (\mono extra ->
+                mono ++ ":" ++ String.join "," extra
+            )
+            (Mark.block "Monospace"
+                identity
+                Mark.multiline
+            )
+            (Mark.manyOf
+                [ text
+                    |> Mark.map (always "text")
+                ]
+            )
+        )
+
+
 intDoc =
     Mark.document
         identity
@@ -267,6 +295,42 @@ suite =
                             (Mark.parse inlines "{Highlurt|my} highlighted sentence")
                         )
                         (Err [ Mark.ExpectingInlineName "Highlight" ])
+            ]
+        , describe "Multiline"
+            [ test "Correctly parse code block" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse codeDoc """| Monospace
+    Here is my first line.
+    Here is my second.
+
+    Here is my third.
+  
+    Here is my fourth.
+
+        And my indented line.
+""")
+                        )
+                        (Ok "Here is my first line.\nHere is my second.\n\nHere is my third.\n\nHere is my fourth.\n\n    And my indented line.\n")
+            , test "Parse code block and then normal text" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse codeAndTextDoc """| Monospace
+    Here is my first line.
+    Here is my second.
+
+    Here is my third.
+  
+    Here is my fourth.
+
+        And my indented line.
+
+Then some text.
+""")
+                        )
+                        (Ok "Here is my first line.\nHere is my second.\n\nHere is my third.\n\nHere is my fourth.\n\n    And my indented line.\n\n:text")
             ]
         , describe "Nested"
             [ test "Simple list parsing.  No Nesting." <|

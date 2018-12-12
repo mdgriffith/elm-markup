@@ -861,14 +861,41 @@ multiline =
 indentedString : Int -> String -> Parser Context Problem (Parser.Step String String)
 indentedString indent found =
     Parser.oneOf
-        [ Parser.succeed (\str -> Parser.Loop (str ++ found))
-            |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
-            |= Parser.getChompedString
-                (Parser.chompWhile
-                    (\c -> c /= '\n')
-                )
-        , Parser.token (Parser.Token "\n" Newline)
-            |> Parser.map (\_ -> Parser.Loop (found ++ "\n"))
+        -- First line, indentation is already handled by the block constructor.
+        [ if found == "" then
+            Parser.succeed (\str -> Parser.Loop (found ++ str))
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+
+          else
+            Parser.succeed (\str -> Parser.Loop (found ++ str))
+                |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+
+        -- , Parser.back
+        -- , Parser.token (Parser.Token "\n" Newline)
+        --     |> Parser.map (\_ -> Parser.Loop (found ++ "\n"))
+        , Parser.succeed
+            (\extra ->
+                Parser.Loop <|
+                    if extra then
+                        found ++ "\n\n"
+
+                    else
+                        found ++ "\n"
+            )
+            |. Parser.token (Parser.Token "\n" Newline)
+            |= Parser.oneOf
+                [ Parser.succeed True
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                , Parser.succeed False
+                ]
         , Parser.succeed (Parser.Done found)
         ]
 
