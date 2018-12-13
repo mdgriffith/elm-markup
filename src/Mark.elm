@@ -570,22 +570,28 @@ indentedBlocksOrNewlines icon item ( indent, existing ) =
                                                         , base = indent.base
                                                         }
                                                 in
-                                                Parser.Loop ( newIndex, ( newIndent, Just iconResult, itemResult ) :: existing )
+                                                Parser.Loop
+                                                    ( newIndex
+                                                    , ( newIndent, Just iconResult, itemResult ) :: existing
+                                                    )
                                             )
                                             |= getParser icon
                                             |= getParser item
                                          )
-                                            :: (if newIndent == indent.prev then
+                                            :: (if newIndent - 4 == indent.prev then
                                                     [ getParser item
                                                         |> Parser.map
                                                             (\foundBlock ->
                                                                 let
                                                                     newIndex =
-                                                                        { prev = newIndent
+                                                                        { prev = indent.prev
                                                                         , base = indent.base
                                                                         }
                                                                 in
-                                                                Parser.Loop ( newIndex, ( newIndent, Nothing, foundBlock ) :: existing )
+                                                                Parser.Loop
+                                                                    ( newIndex
+                                                                    , ( indent.prev, Nothing, foundBlock ) :: existing
+                                                                    )
                                                             )
                                                     ]
 

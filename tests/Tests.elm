@@ -214,9 +214,25 @@ renderIndex stack i (Mark.Nested node) =
 simpleNestedOrderedDoc =
     """| Nested
     - 1
-    2
+        2
     - 3
-    - 4
+        4
+        5
+    - 6
+"""
+
+
+complexNestedOrderedDoc =
+    """| Nested
+    - 1
+        2
+    - 3
+        4
+        - 5
+            6
+        - 7
+            8
+    - 9
 """
 
 
@@ -382,7 +398,27 @@ Then some text.
                         (Result.mapError (List.map .problem)
                             (Mark.parse nestedOrdering simpleNestedOrderedDoc)
                         )
-                        (Ok [ Ordered [ 1, 2 ] [], Ordered [ 3 ] [], Ordered [ 4 ] [] ])
+                        (Ok
+                            [ Ordered [ 1, 2 ] []
+                            , Ordered [ 3, 4, 5 ] []
+                            , Ordered [ 6 ] []
+                            ]
+                        )
+            , test "Complex list parsing, maintains order" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse nestedOrdering complexNestedOrderedDoc)
+                        )
+                        (Ok
+                            [ Ordered [ 1, 2 ] []
+                            , Ordered [ 3, 4 ]
+                                [ Ordered [ 5, 6 ] []
+                                , Ordered [ 7, 8 ] []
+                                ]
+                            , Ordered [ 9 ] []
+                            ]
+                        )
             , test "Nested list parsing" <|
                 \_ ->
                     Expect.equal
