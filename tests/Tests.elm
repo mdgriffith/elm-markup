@@ -171,8 +171,35 @@ nested =
         )
 
 
+nestedOrdering : Mark.Document (List Ordered)
+nestedOrdering =
+    Mark.document
+        (List.indexedMap (renderContent []))
+        (Mark.block "Nested"
+            identity
+            (Mark.nested
+                { start = Mark.exactly "- " True
+                , item = Mark.int
+                }
+            )
+        )
+
+
 type Indexed
     = Indexed Int (List Indexed)
+
+
+type Ordered
+    = Ordered (List Int) (List Ordered)
+
+
+renderContent stack i (Mark.Nested node) =
+    case node.children of
+        [] ->
+            Ordered (Tuple.second node.content) []
+
+        _ ->
+            Ordered (Tuple.second node.content) (List.indexedMap (renderContent (i :: stack)) node.children)
 
 
 renderIndex stack i (Mark.Nested node) =
@@ -182,6 +209,15 @@ renderIndex stack i (Mark.Nested node) =
 
         _ ->
             Indexed i (List.indexedMap (renderIndex (i :: stack)) node.children)
+
+
+simpleNestedOrderedDoc =
+    """| Nested
+    - 1
+    2
+    - 3
+    - 4
+"""
 
 
 simpleNestedDoc =
@@ -340,6 +376,13 @@ Then some text.
                             (Mark.parse nested simpleNestedDoc)
                         )
                         (Ok [ Indexed 0 [], Indexed 1 [], Indexed 2 [] ])
+            , test "Simple list parsing, maintains order" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse nestedOrdering simpleNestedOrderedDoc)
+                        )
+                        (Ok [ Ordered [ 1, 2 ] [], Ordered [ 3 ] [], Ordered [ 4 ] [] ])
             , test "Nested list parsing" <|
                 \_ ->
                     Expect.equal

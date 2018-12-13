@@ -2268,7 +2268,7 @@ renderLevels levels =
 
 reverseTree (Nested nest) =
     Nested
-        { content = nest.content
+        { content = Tuple.mapSecond List.reverse nest.content
         , children =
             List.foldl rev [] nest.children
         }
