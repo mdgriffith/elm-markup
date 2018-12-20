@@ -1855,14 +1855,14 @@ replace replacements existing =
                             addText y existing
                         )
                         |. Parser.token (Parser.Token x (Expecting x))
-                        |. Parser.loop ()
-                            (\_ ->
-                                Parser.oneOf
-                                    [ Parser.token (Parser.Token x (Expecting x))
-                                        |> Parser.map (always (Parser.Loop ()))
-                                    , Parser.succeed (Parser.Done ())
-                                    ]
-                            )
+                        -- |. Parser.loop ()
+                        --     (\_ ->
+                        --         Parser.oneOf
+                        --             [ Parser.token (Parser.Token x (Expecting x))
+                        --                 |> Parser.map (always (Parser.Loop ()))
+                        --             , Parser.succeed (Parser.Done ())
+                        --             ]
+                        --     )
                         |= Parser.succeed ()
 
                 Balanced range ->

@@ -370,6 +370,20 @@ suite =
                             , [ Mark.Text [] "order" ]
                             ]
                         )
+            , test "Inline elements should maintain multiple replacements" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse inlines "{Highlight|my ////} highlighted {Highlight|sentence} {Highlight|order}")
+                        )
+                        (Ok
+                            [ [ Mark.Text [] "my //" ]
+                            , [ Mark.Text [] " highlighted " ]
+                            , [ Mark.Text [] "sentence" ]
+                            , [ Mark.Text [] " " ]
+                            , [ Mark.Text [] "order" ]
+                            ]
+                        )
             , test "Inline elements should maintain escaped characters" <|
                 \_ ->
                     Expect.equal

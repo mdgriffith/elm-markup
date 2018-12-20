@@ -3,7 +3,7 @@
     "name": "mdgriffith/elm-markup",
     "summary": "An Elm-friendly markup language for typed data and content.",
     "license": "BSD-3-Clause",
-    "version": "2.0.4",
+    "version": "2.0.5",
     "exposed-modules": [
         "Mark",
         "Mark.Default"
