@@ -3,6 +3,8 @@ module Tests exposing (suite)
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, int, list, string)
 import Mark
+import Mark.Default
+import Mark.Error
 import Test exposing (..)
 
 
@@ -19,7 +21,7 @@ inlines =
         identity
         (Mark.text
             { view = List.singleton
-            , replacements = []
+            , replacements = Mark.Default.defaultTextStyle.replacements
             , inlines =
                 [ Mark.inline "Highlight"
                     identity
@@ -334,6 +336,48 @@ suite =
                         )
                         (Ok
                             [ [ Mark.Text [] "my" ]
+                            , [ Mark.Text [] " highlighted " ]
+                            , [ Mark.Text [] "sentence" ]
+                            , [ Mark.Text [] " " ]
+                            , [ Mark.Text [] "order" ]
+                            ]
+                        )
+            , test "Basic replacement" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse inlines "my test//text")
+                        )
+                        (Ok [ [ Mark.Text [] "my test/text" ] ])
+            , test "replace dash" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse inlines "my test--text")
+                        )
+                        (Ok [ [ Mark.Text [] "my test–text" ] ])
+            , test "Inline elements should maintain escaped italics" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse inlines "{Highlight|my //} highlighted {Highlight|sentence} {Highlight|order}")
+                        )
+                        (Ok
+                            [ [ Mark.Text [] "my /" ]
+                            , [ Mark.Text [] " highlighted " ]
+                            , [ Mark.Text [] "sentence" ]
+                            , [ Mark.Text [] " " ]
+                            , [ Mark.Text [] "order" ]
+                            ]
+                        )
+            , test "Inline elements should maintain escaped characters" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse inlines "{Highlight|my \\/} highlighted {Highlight|sentence} {Highlight|order}")
+                        )
+                        (Ok
+                            [ [ Mark.Text [] "my /" ]
                             , [ Mark.Text [] " highlighted " ]
                             , [ Mark.Text [] "sentence" ]
                             , [ Mark.Text [] " " ]

@@ -1521,7 +1521,7 @@ indentedFieldNames recordName indent fields found =
 basicTextOptions =
     { view = identity
     , inlines = []
-    , replacements = []
+    , replacements = [ replacement "//" "/" ]
     }
 
 
@@ -1677,7 +1677,7 @@ styledText options inheritedStyles until =
             List.map String.fromChar until
 
         meaningful =
-            '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
+            '\\' :: '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
     in
     Parser.oneOf
         [ Parser.chompIf
@@ -1748,7 +1748,14 @@ styledTextLoop options meaningful untilStrings found =
             |. Parser.token
                 (Parser.Token "{" InlineStart)
             |= Parser.oneOf
-                (List.map (\(Inline inlineName inlineParser) -> Parser.inContext (InInline inlineName) (inlineParser (currentStyles found))) options.inlines)
+                (List.map
+                    (\(Inline inlineName inlineParser) ->
+                        Parser.inContext
+                            (InInline inlineName)
+                            (inlineParser (currentStyles found))
+                    )
+                    options.inlines
+                )
             |. Parser.token (Parser.Token "}" InlineEnd)
         , -- chomp until a meaningful character
           Parser.chompWhile
@@ -1844,7 +1851,9 @@ replace replacements existing =
             case repl of
                 Replacement x y ->
                     Parser.succeed
-                        (addText y existing)
+                        (\_ ->
+                            addText y existing
+                        )
                         |. Parser.token (Parser.Token x (Expecting x))
                         |. Parser.loop ()
                             (\_ ->
@@ -1854,6 +1863,7 @@ replace replacements existing =
                                     , Parser.succeed (Parser.Done ())
                                     ]
                             )
+                        |= Parser.succeed ()
 
                 Balanced range ->
                     let
