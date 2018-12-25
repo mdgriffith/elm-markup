@@ -1,7 +1,7 @@
 module Mark exposing
     ( parse
     , Document, document
-    , Block, block, bool, int, float, string, multiline, exactly, stub, map, andThen
+    , Block, block, bool, int, float, floatBetween, string, multiline, exactly, stub, map, andThen
     , text, Text(..), Style(..)
     , Inline, inline, inlineString, inlineText
     , Replacement, replacement, balanced
@@ -23,7 +23,7 @@ The `elm-markup` language relies heavily on indentation, which always some multi
 
 @docs Document, document
 
-@docs Block, block, bool, int, float, string, multiline, exactly, stub, map, andThen
+@docs Block, block, bool, int, intBetweem, float, floatBetween, string, multiline, exactly, stub, map, andThen
 
 
 # Text
@@ -188,6 +188,16 @@ type Problem
     | UnexpectedEnd
     | CantStartTextWithSpace
     | UnclosedStyles (List Style)
+    | IntOutOfRange
+        { found : Int
+        , min : Int
+        , max : Int
+        }
+    | FloatOutOfRange
+        { found : Float
+        , min : Float
+        , max : Float
+        }
     | UnexpectedField
         { found : String
         , options : List String
@@ -790,6 +800,46 @@ int =
         )
 
 
+{-| Parse an `Int`, but it has to be within a certain, inclusive range.
+
+    Mark.intBetween 0 100
+
+Will parse any number between 0 and 100.
+
+-}
+intBetween : Int -> Int -> Block Int
+intBetween one two =
+    let
+        top =
+            max one two
+
+        bottom =
+            min one two
+    in
+    Value <|
+        Parser.andThen
+            (\i ->
+                if i >= bottom && i <= top then
+                    Parser.succeed i
+
+                else
+                    Parser.problem
+                        (IntOutOfRange
+                            { found = i
+                            , min = bottom
+                            , max = top
+                            }
+                        )
+            )
+            (Parser.oneOf
+                [ Parser.succeed (\num -> negate num)
+                    |. Parser.token (Parser.Token "-" (Expecting "-"))
+                    |= Parser.int Integer InvalidNumber
+                , Parser.int Integer InvalidNumber
+                ]
+            )
+
+
 {-| -}
 float : Block Float
 float =
@@ -801,6 +851,46 @@ float =
             , Parser.float FloatingPoint InvalidNumber
             ]
         )
+
+
+{-| Parse an `Flaot`, but it has to be within a certain, inclusive range.
+
+    Mark.floatBetween 0 1
+
+Will parse any Float between 0 and 1.
+
+-}
+floatBetween : Float -> Float -> Block Float
+floatBetween one two =
+    let
+        top =
+            max one two
+
+        bottom =
+            min one two
+    in
+    Value <|
+        Parser.andThen
+            (\i ->
+                if i >= bottom && i <= top then
+                    Parser.succeed i
+
+                else
+                    Parser.problem
+                        (FloatOutOfRange
+                            { found = i
+                            , min = bottom
+                            , max = top
+                            }
+                        )
+            )
+            (Parser.oneOf
+                [ Parser.succeed (\num -> negate num)
+                    |. Parser.token (Parser.Token "-" (Expecting "-"))
+                    |= Parser.float FloatingPoint InvalidNumber
+                , Parser.float FloatingPoint InvalidNumber
+                ]
+            )
 
 
 {-| Parse either `True` or `False`.
