@@ -13,8 +13,8 @@ elm-live src/Main.elm --open true --pushstate
 
 You can then preview the documents in `article` by going to 
 
-```
-http://localhost:8000/preview/articles/MyArticle
-```
+`http://localhost:8000/preview/articles/MyArticle`
+
+which will parse `articles/MyArticle.emu`.
 
 Make sure to leave off the `.emu` suffix.

@@ -59,6 +59,17 @@ type Problem
     | ExpectingIndent Int
     | CantStartTextWithSpace
     | UnclosedStyle (List Mark.Style)
+    | BadDate String
+    | IntOutOfRange
+        { found : Int
+        , min : Int
+        , max : Int
+        }
+    | FloatOutOfRange
+        { found : Float
+        , min : Float
+        , max : Float
+        }
 
 
 type alias Similarity =
@@ -372,6 +383,58 @@ renderErrors lines current =
                     |> String.join "\n"
                     |> text
                     |> yellow
+                ]
+            }
+
+        BadDate found ->
+            let
+                line =
+                    getLine current.row lines
+            in
+            { title = "BAD DATE"
+            , region =
+                focusWord current line
+            , message =
+                [ text "I was trying to parse a date, but this format looks off.\n\n"
+                , singleLine current.row (line ++ "\n")
+                , highlightWord current line
+                , text "Dates should be in ISO 8601 format:\n\n"
+                , text (indent 4 "YYYY-MM-DDTHH:mm:ss.SSSZ")
+                    |> yellow
+                ]
+            }
+
+        IntOutOfRange found ->
+            let
+                line =
+                    getLine current.row lines
+            in
+            { title = "INTEGER OUT OF RANGE"
+            , region =
+                focusWord current line
+            , message =
+                [ text "I was expecting an "
+                , yellow (text "Int")
+                , text (" between " ++ String.fromInt found.min ++ " and " ++ String.fromInt found.max ++ ", but found:\n\n")
+                , singleLine current.row (line ++ "\n")
+                , highlightWord current line
+                ]
+            }
+
+        FloatOutOfRange found ->
+            let
+                line =
+                    getLine current.row lines
+            in
+            { title = "FLOAT OUT OF RANGE"
+            , region =
+                focusWord current line
+            , message =
+                [ text "I was expecting a "
+                , yellow (text "Float")
+                , text (" between " ++ String.fromFloat found.min ++ " and " ++ String.fromFloat found.max ++ ", but found:\n\n")
+                , singleLine current.row (line ++ "\n")
+                , highlightWord current line
                 ]
             }
 

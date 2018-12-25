@@ -1,7 +1,10 @@
 module Mark exposing
     ( parse
     , Document, document
-    , Block, block, bool, int, float, floatBetween, string, multiline, exactly, stub, map, andThen
+    , Block, block, stub, bool, date
+    , int, float, floatBetween
+    , string, multiline, exactly
+    , map, andThen
     , text, Text(..), Style(..)
     , Inline, inline, inlineString, inlineText
     , Replacement, replacement, balanced
@@ -23,7 +26,22 @@ The `elm-markup` language relies heavily on indentation, which always some multi
 
 @docs Document, document
 
-@docs Block, block, bool, int, intBetweem, float, floatBetween, string, multiline, exactly, stub, map, andThen
+@docs Block, block, stub, bool, date
+
+
+# Numbers
+
+@docs int, intBetweem, float, floatBetween
+
+
+# Strings
+
+@docs string, multiline, exactly
+
+
+# Mapping
+
+@docs map, andThen
 
 
 # Text
@@ -81,7 +99,9 @@ Which would parse
 
 -}
 
+import Iso8601
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+import Time
 
 
 {-| -}
@@ -188,6 +208,7 @@ type Problem
     | UnexpectedEnd
     | CantStartTextWithSpace
     | UnclosedStyles (List Style)
+    | BadDate String
     | IntOutOfRange
         { found : Int
         , min : Int
@@ -738,6 +759,35 @@ blocksOrNewlines myBlock indent ( parsedSomething, existing ) =
         ]
 
 
+{-| Parse an ISO-8601 date string.
+
+Format: `YYYY-MM-DDTHH:mm:ss.SSSZ`
+
+Though you don't need to specify all segments, so `YYYY-MM-DD` works as well.
+
+Results in a `Posix` integer, which works well with [elm/time](https://package.elm-lang.org/packages/elm/time/latest/).
+
+-}
+date : Block Time.Posix
+date =
+    Value
+        (Parser.getChompedString
+            (Parser.chompWhile
+                (\c -> c /= '\n')
+            )
+            |> Parser.andThen
+                (\str ->
+                    case Iso8601.toTime str of
+                        Err err ->
+                            Parser.problem
+                                (BadDate str)
+
+                        Ok parsedPosix ->
+                            Parser.succeed parsedPosix
+                )
+        )
+
+
 {-| -}
 oneOf : List (Block a) -> Block a
 oneOf blocks =
@@ -800,11 +850,11 @@ int =
         )
 
 
-{-| Parse an `Int`, but it has to be within a certain, inclusive range.
+{-| Parse an `Int` within an inclusive range.
 
     Mark.intBetween 0 100
 
-Will parse any number between 0 and 100.
+Will parse any Int between 0 and 100.
 
 -}
 intBetween : Int -> Int -> Block Int
@@ -853,7 +903,7 @@ float =
         )
 
 
-{-| Parse an `Flaot`, but it has to be within a certain, inclusive range.
+{-| Parse a `Float` within an inclusive range.
 
     Mark.floatBetween 0 1
 
