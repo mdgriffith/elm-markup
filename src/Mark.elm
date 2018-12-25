@@ -333,7 +333,7 @@ startWith fn start rest =
         )
 
 
-{-| Define your own parser using [\`elm/parser'](https://package.elm-lang.org/packages/elm/parser/latest/).
+{-| Define your own parser using [`elm/parser`](https://package.elm-lang.org/packages/elm/parser/latest/).
 
 This would be the place to start if you wanted to create a parser for syntax highlighting for an Elm block.
 
@@ -2292,3 +2292,46 @@ reverseTree (Nested nest) =
 
 rev nest found =
     reverseTree nest :: found
+
+
+
+{- Fault tolerant, Incremental Parsing Sketch
+
+   A Document is essentially a tree with this structure
+
+
+   type Doc result =
+       Node result (List Doc)
+
+
+   Except each node isn't necessarily a `result`, it can be anything, so we have to do things a little differently.
+
+
+       So, we can have the mapping function decide what to do.
+
+       Currently, we define a block as
+
+           block : String -> (child -> result) -> Block child -> Block result
+
+       What are the situations that we'd like to capture
+
+           1. [x] - Block is parsed successfully
+           2. [ ] - Block fails to parse for some reason
+               -> [x] - Deliver an error at the top level
+               -> [ ] -
+
+
+           block : String -> (Result Error child -> result) -> Block child -> Block result
+
+
+
+
+
+-}
+-- original: Document result -> String -> Result (List (Parser.DeadEnd Context Problem)) result
+-- type Parsed result =
+--      Success result
+--     | Errors
+--         { result :
+--         }
+-- parse : Document result -> String -> Result (List (Parser.DeadEnd Context Problem)) result
