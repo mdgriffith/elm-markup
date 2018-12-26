@@ -1578,8 +1578,8 @@ indentedFieldNames recordName indent fields found =
                 (\contentStr ->
                     Parser.Loop (( name, contentStr ) :: found)
                 )
-                |. Parser.token (Parser.Token name (Expecting name))
-                |. Parser.chompWhile (\c -> c == ' ')
+                |. Parser.token (Parser.Token (name ++ " ") (Expecting name))
+                -- |. Parser.chompIf (\c -> c == ' ') Space
                 |. Parser.chompIf (\c -> c == '=') (Expecting "=")
                 |. Parser.chompWhile (\c -> c == ' ')
                 |= Parser.getChompedString

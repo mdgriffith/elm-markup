@@ -1,15 +1,14 @@
-module Mark.Error exposing (Error, Text, toJson)
+module Mark.Error exposing (Error, Text, Theme(..), toHtml, toJson, toString)
 
 {-| -}
 
 -- import Json.Decode as Decode
 -- import Json.Encode as Json
 
+import Html
+import Html.Attributes
 import Mark
-
-
-
--- import Parser.Advanced as Parser
+import Parser.Advanced as Parser
 
 
 {-| -}
@@ -26,16 +25,141 @@ toJson source errors =
 
 
 
--- {-| -}
--- toString : String -> List (Parser.DeadEnd Mark.Context Mark.Problem) -> List String
 -- toString source errors =
---     errors
---         |> List.foldl mergeErrors []
---         |> List.map (errorToString << renderErrors (String.lines source))
--- errorToString error =
---     String.toUpper error.title
---         ++ "\n"
---         ++ String.join "" (List.map .text error.message)
+--     toJson source errors
+--         |>
+
+
+{-| -}
+toString : String -> List (Parser.DeadEnd Mark.Context Mark.Problem) -> List String
+toString source errors =
+    errors
+        |> List.foldl mergeErrors []
+        |> List.map (errorToString << renderErrors (String.lines source))
+
+
+errorToString error =
+    String.toUpper error.title
+        ++ "\n\n"
+        ++ String.join "" (List.map .text error.message)
+
+
+type Theme
+    = Dark
+    | Light
+
+
+toHtml theme source errors =
+    errors
+        |> List.foldl mergeErrors []
+        |> List.map (errorToHtml theme << renderErrors (String.lines source))
+
+
+errorToHtml theme error =
+    Html.div []
+        (Html.span [ Html.Attributes.style "color" (foregroundClr theme) ]
+            [ Html.text
+                (String.toUpper error.title
+                    ++ "\n\n"
+                )
+            ]
+            :: List.map (renderMessageHtml theme) error.message
+        )
+
+
+redClr theme =
+    case theme of
+        Dark ->
+            "#ef2929"
+
+        Light ->
+            "#cc0000"
+
+
+
+-- "rgba(199,26,0, 0.9)"
+-- yellowClr =
+-- "rgba(199,197,1, 0.9)"
+
+
+yellowClr theme =
+    case theme of
+        Dark ->
+            "#edd400"
+
+        Light ->
+            "#c4a000"
+
+
+foregroundClr theme =
+    case theme of
+        Dark ->
+            -- "rgba(197,197,197,0.9)"
+            "#eeeeec"
+
+        Light ->
+            "rgba(16,16,16, 0.9)"
+
+
+renderMessageHtml theme message =
+    Html.span
+        (List.filterMap identity
+            [ if message.bold then
+                Just (Html.Attributes.style "font-weight" "bold")
+
+              else
+                Nothing
+            , if message.underline then
+                Just (Html.Attributes.style "text-decoration" "underline")
+
+              else
+                Nothing
+            , case message.color of
+                Nothing ->
+                    Just <| Html.Attributes.style "color" (foregroundClr theme)
+
+                Just "red" ->
+                    Just <| Html.Attributes.style "color" (redClr theme)
+
+                Just "yellow" ->
+                    Just <| Html.Attributes.style "color" (yellowClr theme)
+
+                _ ->
+                    Nothing
+            ]
+        )
+        [ Html.text message.text ]
+
+
+type alias Message =
+    { row : Int
+    , col : Int
+    , problem : Problem
+    }
+
+
+type alias Text =
+    { text : String
+    , bold : Bool
+    , underline : Bool
+    , color : Maybe String
+    }
+
+
+type alias Error =
+    { message : List Text
+    , region : { start : Position, end : Position }
+    , title : String
+    }
+
+
+type alias Position =
+    { line : Int
+    , column : Int
+    }
+
+
+
 -- {-| -}
 -- toMessages : List (Parser.DeadEnd Mark.Context Mark.Problem) -> List Message
 -- toMessages errors =
@@ -117,34 +241,6 @@ similarity source target =
     in
     -- List.foldl (+) 0 [ length, firstChar, lastChar ]
     List.foldl addCompared 0 (List.map2 Tuple.pair (String.toList source) (String.toList target))
-
-
-type alias Message =
-    { row : Int
-    , col : Int
-    , problem : Problem
-    }
-
-
-type alias Text =
-    { text : String
-    , bold : Bool
-    , underline : Bool
-    , color : Maybe String
-    }
-
-
-type alias Error =
-    { message : List Text
-    , region : { start : Position, end : Position }
-    , title : String
-    }
-
-
-type alias Position =
-    { line : Int
-    , column : Int
-    }
 
 
 mergeErrors current merged =
@@ -279,10 +375,10 @@ renderErrors lines current =
             , region =
                 focusWord current line
             , message =
-                [ text "I ran into an unexpected block name.\n\n"
+                [ text "I don't recognize this block name.\n\n"
                 , singleLine current.row (line ++ "\n")
                 , highlightWord current line
-                , text "But I was expecting one of these instead:\n\n"
+                , text "Do you mean one of these instead?\n\n"
                 , expecting
                     |> List.sortBy (\exp -> 0 - similarity word exp)
                     |> List.map (indent 4)
@@ -303,8 +399,8 @@ renderErrors lines current =
             , message =
                 [ text "I ran into an unexpected inline name.\n\n"
                 , singleLine current.row (line ++ "\n")
-                , highlightWord current line
-                , text "But I was expecting one of these instead:\n"
+                , highlightUntil '|' { current | col = current.col + 1 } line
+                , text "But I was expecting one of these instead:\n\n"
                 , expecting
                     |> List.sortBy (\exp -> 0 - similarity line exp)
                     |> List.map (indent 4)
@@ -365,20 +461,23 @@ renderErrors lines current =
             let
                 line =
                     getLine current.row lines
+
+                word =
+                    getPrevWord current line
             in
             { title = "UNKNOWN FIELD"
             , region =
-                focusWord current line
+                focusPrevWord current line
             , message =
                 [ text "I ran into an unexpected field name for a "
                 , text field.recordName
                     |> yellow
                 , text " record\n\n"
                 , singleLine current.row (line ++ "\n")
-                , highlightWord current line
-                , text "Do you mean one of these instead?\n"
+                , highlightPreviousWord current line
+                , text "Do you mean one of these instead?\n\n"
                 , field.options
-                    |> List.sortBy (\exp -> 0 - similarity line exp)
+                    |> List.sortBy (\exp -> 0 - similarity word exp)
                     |> List.map (indent 4)
                     |> String.join "\n"
                     |> text
@@ -639,6 +738,61 @@ highlightWord cursor line =
     red <| text (String.repeat (rowNumLength + cursor.col - 1) " " ++ String.repeat highlightLength "^" ++ "\n")
 
 
+highlightPreviousWord cursor line =
+    let
+        rowNumLength =
+            String.length (String.fromInt cursor.row)
+
+        start =
+            String.length line - String.length (String.trimLeft line)
+
+        highlightLength =
+            line
+                |> String.dropRight (String.length line - (cursor.col - 2))
+                |> String.trimLeft
+                |> String.length
+    in
+    red <| text (String.repeat (rowNumLength + start + 1) " " ++ String.repeat highlightLength "^" ++ "\n")
+
+
+focusPrevWord cursor line =
+    let
+        start =
+            String.length line - String.length (String.trimLeft line)
+
+        highlightLength =
+            line
+                |> String.dropRight (String.length line - (cursor.col - 2))
+                |> String.trimLeft
+                |> String.length
+    in
+    { start =
+        { column = start
+        , line = cursor.row
+        }
+    , end =
+        { column = start + highlightLength
+        , line = cursor.row
+        }
+    }
+
+
+highlightUntil end cursor line =
+    let
+        rowNumLength =
+            String.length (String.fromInt cursor.row)
+
+        highlightLength =
+            line
+                |> String.dropLeft (cursor.col - rowNumLength)
+                |> String.split (String.fromChar end)
+                |> List.head
+                |> Maybe.map (\str -> String.length str + 1)
+                |> Maybe.withDefault 1
+    in
+    red <| text (String.repeat (rowNumLength + cursor.col - 1) " " ++ String.repeat highlightLength "^" ++ "\n")
+
+
 newline =
     { text = "\n"
     , color = Nothing
@@ -696,3 +850,17 @@ getWord cursor line =
             cursor.col + highlightLength
     in
     String.slice (cursor.col - 1) end line
+
+
+getPrevWord cursor line =
+    let
+        start =
+            String.length line - String.length (String.trimLeft line)
+
+        highlightLength =
+            line
+                |> String.dropRight (String.length line - (cursor.col - 2))
+                |> String.trimLeft
+                |> String.length
+    in
+    String.slice start (start + highlightLength) line
