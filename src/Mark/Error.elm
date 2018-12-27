@@ -159,14 +159,6 @@ type alias Position =
     }
 
 
-
--- {-| -}
--- toMessages : List (Parser.DeadEnd Mark.Context Mark.Problem) -> List Message
--- toMessages errors =
---     errors
---         |> List.foldl mergeErrors []
-
-
 {-| -}
 type Problem
     = UnknownBlock (List String)
@@ -243,77 +235,128 @@ similarity source target =
     List.foldl addCompared 0 (List.map2 Tuple.pair (String.toList source) (String.toList target))
 
 
+getRemap context found =
+    case found of
+        Nothing ->
+            case context.context of
+                Mark.InRemapped remapped ->
+                    Just remapped
+
+                _ ->
+                    found
+
+        _ ->
+            found
+
+
+getErrorPosition current =
+    case List.foldl getRemap Nothing current.contextStack of
+        Nothing ->
+            ( current.row, current.col )
+
+        Just remap ->
+            ( remap.line, remap.column )
+
+
 mergeErrors current merged =
+    let
+        ( row, col ) =
+            getErrorPosition current
+    in
     case merged of
         [] ->
             case current.problem of
                 Mark.ExpectingBlockName block ->
-                    [ { row = current.row
-                      , col = current.col
+                    [ { row = row
+                      , col = col
                       , problem =
                             UnknownBlock [ block ]
                       }
                     ]
 
                 Mark.ExpectingInlineName inline ->
-                    [ { row = current.row
-                      , col = current.col
+                    [ { row = row
+                      , col = col
                       , problem =
                             UnknownInline [ inline ]
                       }
                     ]
 
                 Mark.NonMatchingFields fields ->
-                    [ { row = current.row
-                      , col = current.col
+                    [ { row = row
+                      , col = col
                       , problem =
                             NonMatchingFields fields
                       }
                     ]
 
                 Mark.UnexpectedField fields ->
-                    [ { row = current.row
-                      , col = current.col
+                    [ { row = row
+                      , col = col
                       , problem =
                             UnexpectedField fields
                       }
                     ]
 
                 Mark.ExpectingIndent indentation ->
-                    [ { row = current.row
-                      , col = current.col
+                    [ { row = row
+                      , col = col
                       , problem =
                             ExpectingIndent indentation
                       }
                     ]
 
                 Mark.CantStartTextWithSpace ->
-                    [ { row = current.row
-                      , col = current.col
+                    [ { row = row
+                      , col = col
                       , problem =
                             CantStartTextWithSpace
                       }
                     ]
 
                 Mark.UnclosedStyles styles ->
-                    [ { row = current.row
-                      , col = current.col
+                    [ { row = row
+                      , col = col
                       , problem =
                             UnclosedStyle styles
                       }
                     ]
 
+                Mark.BadDate str ->
+                    [ { row = row
+                      , col = col
+                      , problem =
+                            BadDate str
+                      }
+                    ]
+
+                Mark.IntOutOfRange found ->
+                    [ { row = row
+                      , col = col
+                      , problem =
+                            IntOutOfRange found
+                      }
+                    ]
+
+                Mark.FloatOutOfRange found ->
+                    [ { row = row
+                      , col = col
+                      , problem =
+                            FloatOutOfRange found
+                      }
+                    ]
+
                 _ ->
-                    merged
+                    []
 
         last :: remaining ->
-            if last.col == current.col && last.row == current.row then
+            if last.col == col && last.row == row then
                 case current.problem of
                     Mark.ExpectingBlockName block ->
                         case last.problem of
                             UnknownBlock blocks ->
-                                { row = current.row
-                                , col = current.col
+                                { row = row
+                                , col = col
                                 , problem =
                                     UnknownBlock (block :: blocks)
                                 }
@@ -325,8 +368,8 @@ mergeErrors current merged =
                     Mark.ExpectingInlineName block ->
                         case last.problem of
                             UnknownInline blocks ->
-                                { row = current.row
-                                , col = current.col
+                                { row = row
+                                , col = col
                                 , problem =
                                     UnknownInline (block :: blocks)
                                 }
@@ -336,8 +379,8 @@ mergeErrors current merged =
                                 remaining
 
                     Mark.ExpectingIndent indentation ->
-                        [ { row = current.row
-                          , col = current.col
+                        [ { row = row
+                          , col = col
                           , problem =
                                 ExpectingIndent indentation
                           }
@@ -349,8 +392,8 @@ mergeErrors current merged =
             else
                 case current.problem of
                     Mark.ExpectingBlockName block ->
-                        { row = current.row
-                        , col = current.col
+                        { row = row
+                        , col = col
                         , problem =
                             UnknownBlock [ block ]
                         }
@@ -514,7 +557,13 @@ renderErrors lines current =
             , message =
                 [ text "I was expecting an "
                 , yellow (text "Int")
-                , text (" between " ++ String.fromInt found.min ++ " and " ++ String.fromInt found.max ++ ", but found:\n\n")
+                , text " between "
+                , text (String.fromInt found.min)
+                    |> yellow
+                , text " and "
+                , text (String.fromInt found.max)
+                    |> yellow
+                , text ", but found:\n\n"
                 , singleLine current.row (line ++ "\n")
                 , highlightWord current line
                 ]
@@ -531,7 +580,13 @@ renderErrors lines current =
             , message =
                 [ text "I was expecting a "
                 , yellow (text "Float")
-                , text (" between " ++ String.fromFloat found.min ++ " and " ++ String.fromFloat found.max ++ ", but found:\n\n")
+                , text " between "
+                , text (String.fromFloat found.min)
+                    |> yellow
+                , text " and "
+                , text (String.fromFloat found.max)
+                    |> yellow
+                , text ", but found:\n\n"
                 , singleLine current.row (line ++ "\n")
                 , highlightWord current line
                 ]
@@ -544,7 +599,7 @@ renderErrors lines current =
 
                 remaining =
                     List.filter
-                        (\f -> List.member f fields.found)
+                        (\f -> not <| List.member f fields.found)
                         fields.expecting
             in
             { title = "MISSING FIELD"

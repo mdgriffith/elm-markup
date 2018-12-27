@@ -2,7 +2,7 @@ module Mark exposing
     ( parse
     , Document, document
     , Block, block, stub, bool, date
-    , int, float, floatBetween
+    , int, intBetween, float, floatBetween
     , string, multiline, exactly
     , map, andThen
     , text, Text(..), Style(..)
@@ -31,7 +31,7 @@ The `elm-markup` language relies heavily on indentation, which always some multi
 
 # Numbers
 
-@docs int, intBetweem, float, floatBetween
+@docs int, intBetween, float, floatBetween
 
 
 # Strings
@@ -178,7 +178,9 @@ type Style
 type Context
     = InBlock String
     | InInline String
+    | InRecord String
     | InRecordField String
+    | InRemapped Landmark
 
 
 {-| -}
@@ -559,15 +561,7 @@ indentedBlocksOrNewlines icon item ( indent, existing ) =
                         )
 
         -- Whitespace Line
-        , Parser.succeed
-            (Parser.Loop ( indent, existing ))
-            |. Parser.token (Parser.Token "\n" Newline)
-            |. Parser.oneOf
-                [ Parser.succeed ()
-                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
-                , Parser.succeed ()
-                ]
+        , skipBlankLinesWith (Parser.Loop ( indent, existing ))
         , case existing of
             [] ->
                 -- Indent is already parsed by the block constructor for first element, skip it
@@ -1439,34 +1433,39 @@ masterRecordParser recordName names recordParser =
         (Parser.getIndent
             |> Parser.andThen
                 (\indent ->
-                    (Parser.succeed identity
+                    (Parser.succeed (\source x y z -> ( source, ( x, y, z ) ))
+                        |= Parser.getSource
+                        |= Parser.getOffset
                         |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |. Parser.chompIf (\c -> c == '\n') Newline
                         |= Parser.withIndent (indent + 4)
-                            (Parser.inContext (InBlock recordName)
+                            (Parser.inContext (InRecord recordName)
                                 (Parser.loop [] (indentedFieldNames recordName (indent + 4) names))
                             )
+                        |= Parser.getOffset
                     )
                         |> Parser.andThen
-                            (\fieldList ->
+                            (\( source, ( start, fieldList, end ) ) ->
                                 let
-                                    join ( key, val ) str =
+                                    join captured str =
                                         case str of
                                             "" ->
-                                                key ++ " = " ++ val
+                                                captured.name ++ " = " ++ captured.value
 
                                             _ ->
-                                                str ++ "\n" ++ key ++ " = " ++ val
+                                                str ++ "\n" ++ captured.name ++ " = " ++ captured.value
 
-                                    recomposed =
-                                        fieldList
-                                            |> reorderFields names
-                                            |> Result.map (List.foldl join "")
+                                    reorderedResult =
+                                        reorderFields names fieldList
                                 in
-                                case recomposed of
-                                    Ok str ->
-                                        case Parser.run (Parser.withIndent 0 (Parser.inContext (InBlock recordName) recordParser)) str of
+                                case reorderedResult of
+                                    Ok reordered ->
+                                        let
+                                            str =
+                                                List.foldl join "" reordered
+                                        in
+                                        case Parser.run (Parser.withIndent 0 (Parser.inContext (InRecord recordName) recordParser)) str of
                                             Ok ok ->
                                                 Parser.succeed ok
 
@@ -1477,13 +1476,58 @@ masterRecordParser recordName names recordParser =
                                                         Parser.problem RecordError
 
                                                     fst :: _ ->
-                                                        withContextStack fst.contextStack (Parser.problem fst.problem)
+                                                        Parser.inContext
+                                                            (InRemapped (remap reordered fst))
+                                                            (withContextStack
+                                                                fst.contextStack
+                                                                (Parser.problem fst.problem)
+                                                            )
 
                                     Err recordError ->
                                         Parser.problem recordError
                             )
                 )
         )
+
+
+remap : List ReorderedField -> Parser.DeadEnd Context Problem -> Landmark
+remap fields prob =
+    let
+        findMapping refield found =
+            case found of
+                Nothing ->
+                    let
+                        lineLen =
+                            refield.originalPosition.end.line - refield.originalPosition.start.line
+                    in
+                    if prob.row >= refield.newLineStart && prob.row <= refield.newLineStart + lineLen then
+                        let
+                            newRow =
+                                refield.originalPosition.start.line
+                                    + (prob.row - refield.newLineStart)
+                                    - 1
+
+                            newCol =
+                                prob.col + 1
+                        in
+                        Just
+                            { line = newRow
+                            , column = newCol
+                            , offset = refield.originalPosition.start.offset
+                            }
+
+                    else
+                        found
+
+                _ ->
+                    found
+    in
+    List.foldl findMapping Nothing fields
+        |> Maybe.withDefault
+            { offset = 0
+            , line = 0
+            , column = 0
+            }
 
 
 withContextStack stack parser =
@@ -1495,34 +1539,78 @@ withContextStack stack parser =
             Parser.inContext lvl.context (withContextStack remaining parser)
 
 
-reorderFields : List String -> List ( String, String ) -> Result Problem (List ( String, String ))
+type alias CapturedField =
+    { originalPosition : Range Landmark
+    , name : String
+    , value : String
+    }
+
+
+type alias ReorderedField =
+    { originalPosition : Range Landmark
+    , name : String
+    , value : String
+    , newLineStart : Int
+    , indentAdjustment : Int
+    }
+
+
+{-| Reorder fields based on the desired order.
+
+Maintain the line number of the original
+
+-}
+reorderFields : List String -> List CapturedField -> Result Problem (List ReorderedField)
 reorderFields desiredOrder found =
     if List.length desiredOrder /= List.length found then
         Err
             (NonMatchingFields
                 { expecting = desiredOrder
-                , found = List.map Tuple.first found
+                , found = List.map .name found
                 }
             )
 
     else
-        List.foldl (gatherFields found) (Ok []) desiredOrder
+        List.foldl (gatherFields found) ( Ok [], Nothing ) desiredOrder
+            |> Tuple.first
             |> Result.map List.reverse
 
 
-gatherFields : List ( String, String ) -> String -> Result Problem (List ( String, String )) -> Result Problem (List ( String, String ))
-gatherFields cache desired found =
+gatherFields : List CapturedField -> String -> ( Result Problem (List ReorderedField), Maybe Int ) -> ( Result Problem (List ReorderedField), Maybe Int )
+gatherFields cache desired ( found, foundStartLine ) =
     case found of
         Ok ok ->
             case getField cache desired of
                 Ok newField ->
-                    Ok (newField :: ok)
+                    let
+                        currentStartLine =
+                            case foundStartLine of
+                                Nothing ->
+                                    0
+
+                                Just i ->
+                                    i
+                    in
+                    ( Ok
+                        ({ originalPosition = newField.originalPosition
+                         , name = newField.name
+                         , value = newField.value
+                         , newLineStart =
+                            currentStartLine
+                         , indentAdjustment = 0
+                         }
+                            :: ok
+                        )
+                    , Just <|
+                        currentStartLine
+                            + (newField.originalPosition.end.line - newField.originalPosition.start.line)
+                    )
 
                 Err str ->
-                    Err str
+                    ( Err str, foundStartLine )
 
         _ ->
-            found
+            ( found, foundStartLine )
 
 
 getField cache desired =
@@ -1530,9 +1618,9 @@ getField cache desired =
         [] ->
             Err (MissingField desired)
 
-        ( name, top ) :: rest ->
-            if desired == name then
-                Ok ( name, top )
+        capturedField :: rest ->
+            if desired == capturedField.name then
+                Ok capturedField
 
             else
                 getField rest desired
@@ -1570,22 +1658,76 @@ withFieldName name parser =
             )
 
 
-indentedFieldNames : String -> Int -> List String -> List ( String, String ) -> Parser Context Problem (Parser.Step (List ( String, String )) (List ( String, String )))
+skipBlankLinesWith x =
+    Parser.succeed x
+        |. Parser.token (Parser.Token "\n" Newline)
+        |. Parser.oneOf
+            [ Parser.succeed ()
+                |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+            , Parser.succeed ()
+            ]
+
+
+type alias Landmark =
+    { offset : Int
+    , line : Int
+    , column : Int
+    }
+
+
+type alias Mapped =
+    { original : Range Landmark
+    , new : Range Landmark
+    }
+
+
+type alias Range x =
+    { start : x
+    , end : x
+    }
+
+
+getLandmark =
+    Parser.succeed
+        (\offset ( row, col ) ->
+            { offset = offset
+            , line = row
+            , column = col
+            }
+        )
+        |= Parser.getOffset
+        |= Parser.getPosition
+
+
+indentedFieldNames :
+    String
+    -> Int
+    -> List String
+    -> List CapturedField
+    -> Parser Context Problem (Parser.Step (List CapturedField) (List CapturedField))
 indentedFieldNames recordName indent fields found =
     let
         fieldNameParser name =
             Parser.succeed
-                (\contentStr ->
-                    Parser.Loop (( name, contentStr ) :: found)
+                (\startPoint contentStr endPoint ->
+                    Parser.Loop
+                        ({ name = name
+                         , value = String.trim contentStr
+                         , originalPosition =
+                            { start = startPoint
+                            , end = endPoint
+                            }
+                         }
+                            :: found
+                        )
                 )
+                |= getLandmark
                 |. Parser.token (Parser.Token (name ++ " ") (Expecting name))
-                -- |. Parser.chompIf (\c -> c == ' ') Space
                 |. Parser.chompIf (\c -> c == '=') (Expecting "=")
                 |. Parser.chompWhile (\c -> c == ' ')
-                |= Parser.getChompedString
-                    (Parser.chompWhile
-                        (\c -> c /= '\n')
-                    )
+                |= Parser.loop "" (indentedString (indent + 4))
+                |= getLandmark
 
         unexpectedField =
             Parser.getChompedString
@@ -1604,46 +1746,14 @@ indentedFieldNames recordName indent fields found =
                                 }
                             )
                     )
-
-        content =
-            Parser.succeed
-                (\str ->
-                    case found of
-                        [] ->
-                            Parser.Loop found
-
-                        ( name, contentStr ) :: remain ->
-                            Parser.Loop (( name, contentStr ++ "\n " ++ str ) :: remain)
-                )
-                |. Parser.chompIf (\c -> c == ' ') (ExpectingIndent (indent + 4))
-                |= Parser.getChompedString
-                    (Parser.chompWhile
-                        (\c -> c /= '\n')
-                    )
     in
     Parser.oneOf
         ([ Parser.succeed
             identity
             |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
             |= Parser.oneOf
-                (case found of
-                    [] ->
-                        List.map fieldNameParser fields ++ [ unexpectedField ]
-
-                    _ ->
-                        content
-                            :: List.map fieldNameParser fields
-                            ++ [ unexpectedField ]
-                )
-         , Parser.succeed
-            (Parser.Loop found)
-            |. Parser.token (Parser.Token "\n" Newline)
-            |. Parser.oneOf
-                [ Parser.succeed ()
-                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
-                , Parser.succeed ()
-                ]
+                (List.map fieldNameParser fields ++ [ unexpectedField ])
+         , skipBlankLinesWith (Parser.Loop found)
          ]
             ++ (if List.length found /= List.length fields then
                     [ Parser.succeed (Parser.Done found)
