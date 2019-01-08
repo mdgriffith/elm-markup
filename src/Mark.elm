@@ -11,7 +11,7 @@ module Mark exposing
     , oneOf, manyOf, startWith
     , nested, Nested(..)
     , Field, field, record2, record3, record4, record5, record6, record7, record8, record9, record10
-    , Error, errorToString, errorToHtml, Theme(..), errorToMessage
+    , Error, errorToString, errorToHtml, Theme(..)
     , Context(..), Problem(..)
     , advanced
     )
@@ -91,7 +91,7 @@ Which would parse
 
 # Errors
 
-@docs Error, errorToString, errorToHtml, Theme, errorToMessage
+@docs Error, errorToString, errorToHtml, Theme
 
 @docs Context, Problem
 
@@ -116,10 +116,57 @@ type Error
 
 
 {-| -}
-parse : Document result -> String -> Result Error result
+parse : Document result -> String -> Result (List ErrorMessage) result
 parse (Document blocks) source =
     Parser.run blocks source
-        |> Result.mapError (Error source)
+        |> Result.mapError
+            (\errors ->
+                errors
+                    |> List.foldl mergeErrors []
+                    |> List.map (renderErrors (String.lines source))
+            )
+
+
+{-| -}
+type Document result
+    = Document (Parser Context Problem result)
+
+
+{-| Create a markup `Document`. You're first goal is to describe a document in terms of the blocks you're expecting.
+
+Here's a brief example of a document that will parse many `MyBlock` blocks, and capture the string that's indented inside the block.
+
+    document : Mark.Document (List String)
+    document =
+        Mark.document
+            identity
+            (Mark.manyOf
+                [ Mark.block "MyBlock"
+                    identity
+                    Mark.string
+                , Mark.string
+                ]
+            )
+
+    parse : String -> Result (DeadEnd Context Problem) (List String)
+    parse source =
+        Mark.parse document source
+
+Which will parse a document with many of either raw strings or`MyBlock` blocks. The `identity` function usage above means that this will result in a `List String`, but you could change that function to make this parser result in anything you want!
+
+    | MyBlock
+        Here's text captured in a MyBlock
+
+    This text is captured at the top level.
+
+    | MyBlock
+        Here's some more text in a MyBlock.
+
+-}
+document : (child -> result) -> Block child -> Document result
+document renderer child =
+    Document
+        (Parser.map renderer (Parser.withIndent 0 (getParser child)))
 
 
 {-| A `Block data` is just a parser that results in `data`.
@@ -181,18 +228,13 @@ type Style
     | Strike
 
 
-
--- | Underline
--- | Code
-
-
 {-| -}
 type Context
     = InBlock String
     | InInline String
     | InRecord String
     | InRecordField String
-    | InRemapped Landmark
+    | InRemapped Position
 
 
 {-| -}
@@ -288,48 +330,6 @@ stub name result =
             |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
             |. Parser.chompWhile (\c -> c == ' ')
         )
-
-
-{-| -}
-type Document result
-    = Document (Parser Context Problem result)
-
-
-{-| Create a markup `Document`. You're first goal is to describe a document in terms of the blocks you're expecting.
-
-Here's a brief example of a document that will parse many `MyBlock` blocks, and capture the string that's indented inside the block.
-
-    document : Mark.Document (List String)
-    document =
-        Mark.document
-            identity
-            (Mark.manyOf
-                [ Mark.block "MyBlock"
-                    identity
-                    Mark.string
-                , Mark.string
-                ]
-            )
-
-    parse : String -> Result (DeadEnd Context Problem) (List String)
-    parse source =
-        Mark.parse document source
-
-Which will parse a document with many of either raw strings or`MyBlock` blocks. The `identity` function usage above means that this will result in a `List String`, but you could change that function to make this parser result in anything you want!
-
-    | MyBlock
-        Here's text captured in a MyBlock
-
-    This text is captured at the top level.
-
-    | MyBlock
-        Here's some more text in a MyBlock.
-
--}
-document : (child -> result) -> Block child -> Document result
-document renderer child =
-    Document
-        (Parser.map renderer (Parser.withIndent 0 (getParser child)))
 
 
 {-| Parse two blocks in sequence.
@@ -1502,7 +1502,7 @@ masterRecordParser recordName names recordParser =
         )
 
 
-remap : List ReorderedField -> Parser.DeadEnd Context Problem -> Landmark
+remap : List ReorderedField -> Parser.DeadEnd Context Problem -> Position
 remap fields prob =
     let
         findMapping refield found =
@@ -1552,14 +1552,14 @@ withContextStack stack parser =
 
 
 type alias CapturedField =
-    { originalPosition : Range Landmark
+    { originalPosition : Range Position
     , name : String
     , value : String
     }
 
 
 type alias ReorderedField =
-    { originalPosition : Range Landmark
+    { originalPosition : Range Position
     , name : String
     , value : String
     , newLineStart : Int
@@ -1681,7 +1681,7 @@ skipBlankLinesWith x =
             ]
 
 
-type alias Landmark =
+type alias Position =
     { offset : Int
     , line : Int
     , column : Int
@@ -1689,8 +1689,8 @@ type alias Landmark =
 
 
 type alias Mapped =
-    { original : Range Landmark
-    , new : Range Landmark
+    { original : Range Position
+    , new : Range Position
     }
 
 
@@ -1700,7 +1700,7 @@ type alias Range x =
     }
 
 
-getLandmark =
+getPosition =
     Parser.succeed
         (\offset ( row, col ) ->
             { offset = offset
@@ -1734,12 +1734,12 @@ indentedFieldNames recordName indent fields found =
                             :: found
                         )
                 )
-                |= getLandmark
+                |= getPosition
                 |. Parser.token (Parser.Token (name ++ " ") (Expecting name))
                 |. Parser.chompIf (\c -> c == '=') (Expecting "=")
                 |. Parser.chompWhile (\c -> c == ' ')
                 |= Parser.loop "" (indentedString (indent + 4))
-                |= getLandmark
+                |= getPosition
 
         unexpectedField =
             Parser.getChompedString
@@ -2558,22 +2558,18 @@ rev nest found =
 
 
 {- ERROR FORMATTING -}
+-- {-| -}
+-- errorToMessage : Error -> List ErrorMessage
+-- errorToMessage (Error source errors) =
+--     errors
+--         |> List.foldl mergeErrors []
+--         |> List.map (renderErrors (String.lines source))
 
 
 {-| -}
-errorToMessage : Error -> List ErrorMessage
-errorToMessage (Error source errors) =
-    errors
-        |> List.foldl mergeErrors []
-        |> List.map (renderErrors (String.lines source))
-
-
-{-| -}
-errorToString : Error -> List String
-errorToString (Error source errors) =
-    errors
-        |> List.foldl mergeErrors []
-        |> List.map (formatErrorString << renderErrors (String.lines source))
+errorToString : ErrorMessage -> String
+errorToString msg =
+    formatErrorString msg
 
 
 formatErrorString error =
@@ -2588,11 +2584,9 @@ type Theme
 
 
 {-| -}
-errorToHtml : Theme -> Error -> List (Html.Html msg)
-errorToHtml theme (Error source errors) =
-    errors
-        |> List.foldl mergeErrors []
-        |> List.map (formatErrorHtml theme << renderErrors (String.lines source))
+errorToHtml : Theme -> ErrorMessage -> Html.Html msg
+errorToHtml theme error =
+    formatErrorHtml theme error
 
 
 formatErrorHtml theme error =
@@ -2678,10 +2672,11 @@ type alias ErrorMessage =
     }
 
 
-type alias Position =
-    { line : Int
-    , column : Int
-    }
+
+-- type alias Position =
+--     { line : Int
+--     , column : Int
+--     }
 
 
 {-| -}
@@ -3220,10 +3215,12 @@ focusWord cursor line =
     { start =
         { column = cursor.col
         , line = cursor.row
+        , offset = 0
         }
     , end =
         { column = cursor.col + highlightLength
         , line = cursor.row
+        , offset = 0
         }
     }
 
@@ -3244,10 +3241,12 @@ focusSpace cursor line =
     { start =
         { column = cursor.col
         , line = cursor.row
+        , offset = 0
         }
     , end =
         { column = cursor.col + highlightLength
         , line = cursor.row
+        , offset = 0
         }
     }
 
@@ -3315,10 +3314,12 @@ focusPrevWord cursor line =
     { start =
         { column = start
         , line = cursor.row
+        , offset = 0
         }
     , end =
         { column = start + highlightLength
         , line = cursor.row
+        , offset = 0
         }
     }
 
