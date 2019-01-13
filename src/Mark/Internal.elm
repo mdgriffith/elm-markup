@@ -1,158 +1,34 @@
 module Mark.Internal exposing
-    ( AstError(..)
-    , Block(..)
-    , Context(..)
-    , Description(..)
-    , Document(..)
-    , ErrorMessage
-    , Field(..)
-    , Inline(..)
-    , InlineDescription(..)
-    , Level(..)
-    , Mapped
-    , Message
-    , Nested(..)
-    , NestedIndex
-    , Position
-    , PotentialInline(..)
-    , PotentialInlineVal(..)
-    , Problem(..)
-    , ProblemMessage(..)
-    , Range
-    , Replacement(..)
-    , Similarity
-    , Style(..)
-    , Text(..)
-    , TextAccumulator(..)
-    , TextCursor(..)
-    , TextDescription(..)
-    , Theme(..)
-    , TreeBuilder(..)
-    , addBalance
-    , addIndent
-    , addItem
-    , addText
-    , addTextToText
-    , almostReplacement
-    , balanceId
-    , balanced
-    , block
-    , blocksOrNewlines
-    , bool
-    , buildTree
-    , changeStyle
-    , changeStyleOnText
-    , collapseLevel
-    , compile
-    , currentStyles
-    , date
-    , descending
+    ( parse, compile
+    , Block, Found(..)
     , document
-    , empty
-    , emptyText
-    , emptyTreeBuilder
-    , errorToHtml
-    , errorToString
-    , exactly
-    , expectIndentation
-    , field
-    , fieldName
-    , fieldParser
-    , fieldToString
-    , firstChar
-    , flipStyle
-    , float
-    , floatBetween
-    , floating
-    , focusPrevWord
-    , focusSpace
-    , focusWord
-    , foregroundClr
-    , formatErrorHtml
-    , formatErrorString
-    , getDescriptionPosition
-    , getErrorPosition
-    , getField
-    , getLine
-    , getParser
-    , getPosition
-    , getPotentialInline
-    , getPrevWord
-    , getRemap
-    , getWord
-    , highlightPreviousWord
-    , highlightSpace
-    , highlightUntil
-    , highlightWord
-    , hint
-    , indentedBlocksOrNewlines
-    , indentedString
-    , inline
-    , inlineString
-    , inlineText
-    , int
-    , intBetween
-    , integer
-    , manyOf
-    , map
-    , matchField
-    , measure
-    , mergeErrors
-    , multiline
-    , nested
-    , newline
-    , oneOf
-    , parse
-    , parseFields
-    , parseInline
-    , parseInlineComponents
-    , parseInlineText
-    , parseRecord
-    , peek
-    , record10
-    , record2
-    , record3
-    , record4
-    , record5
-    , record6
-    , record7
-    , record8
-    , record9
-    , redClr
-    , reduceRender
-    , removeBalance
-    , render
-    , renderErrors
-    , renderInline
-    , renderLevels
-    , renderMessageHtml
-    , renderText
-    , renderTextComponent
-    , renderTreeNodeSmall
-    , replace
-    , replacement
-    , replacementStartingChars
-    , rev
-    , reverseTree
-    , similarity
-    , singleLine
-    , skipBlankLinesWith
-    , startWith
-    , string
-    , stub
-    , styleChars
-    , styleNames
-    , styledTextParser
-    , styledTextParserLoop
-    , stylingChars
-    , text
-    , toString
-    , withFieldName
-    , withRange
-    , yellowClr
+    , block
+    , string, int, float, floatBetween, intBetween
+    , oneOf, manyOf, startWith
+    , getDesc, toString
+    , record2, field
+    , getContainingDescriptions, prettyDescription, prettyFound, prettyParsed
     )
 
-{-| -}
+{-|
+
+@docs parse, compile
+
+@docs Block, Found
+
+@docs document
+
+@docs block
+
+@docs string, int, float, floatBetween, intBetween, bool
+
+@docs oneOf, manyOf, startWith
+
+@docs getDesc, toString
+
+@docs record2, field
+
+-}
 
 import Html
 import Html.Attributes
@@ -162,9 +38,45 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 import Time
 
 
+
+{- INTERFACE -}
+-- parse : Document data -> String -> Parsed
+-- update : Edit -> Parsed -> Parsed
+-- convert : Document data -> Parsed -> Result (Partial data) data
+-- compile :  Document data -> String -> Result (Partial data) data
+
+
+{-| -}
+parse :
+    Document data
+    -> String
+    -> Result (List (Parser.DeadEnd Context Problem)) Parsed
+parse (Document blocks) source =
+    Parser.run blocks.parser source
+
+
+{-| -}
+compile : Document data -> String -> Result AstError data
+compile (Document blocks) source =
+    case Parser.run blocks.parser source of
+        Ok ast ->
+            blocks.converter ast
+
+        Err err ->
+            Err InvalidAst
+
+
 {-| -}
 type Document data
-    = Document (Description -> Result AstError data) (Parser Context Problem Description)
+    = Document
+        { converter : Parsed -> Result AstError data
+        , expect : Expectation
+        , parser : Parser Context Problem Parsed
+        }
+
+
+type Parsed
+    = Parsed (Found Description)
 
 
 {-| A `Block data` is just a parser that results in `data`.
@@ -177,126 +89,548 @@ A value is just a raw parser.
 
 -}
 type Block data
-    = Block String (Description -> Result AstError data) (Parser Context Problem Description)
-    | Value (Description -> Result AstError data) (Parser Context Problem Description)
+    = Block
+        String
+        { converter : Description -> Result AstError (Found data)
+        , expect : Expectation
+        , parser : Parser Context Problem Description
+        }
+    | Value
+        { converter : Description -> Result AstError (Found data)
+        , expect : Expectation
+        , parser : Parser Context Problem Description
+        }
 
 
-{-| -}
-type Inline data
-    = Inline String (List InlineDescription -> Result AstError (List data)) (List Style -> PotentialInline)
+
+{- These are `soft` parse errors.
+
+   Only a few can happen.
+
+       1. Block names don't match (If they do match and the content is wrong, that's an Unexpected)
 
 
-{-| -}
-inline : String -> result -> Inline result
-inline name result =
-    Inline name
-        (\descriptors ->
-            let
-                _ =
-                    Debug.log "inline" descriptors
-            in
-            Ok [ result ]
-        )
-        (\styles ->
-            PotentialInline name []
-        )
+-}
 
 
-{-| -}
-inlineString : String -> Inline (String -> result) -> Inline result
-inlineString name (Inline inlineName inlineRenderer inlinePotential) =
-    Inline inlineName
-        (\descriptors ->
-            let
-                _ =
-                    Debug.log "inline String" descriptors
-            in
-            case descriptors of
-                [] ->
-                    Err InvalidAst
-
-                (DescribeInlineString key range str) :: remaining ->
-                    case inlineRenderer remaining of
-                        Err err ->
-                            Err err
-
-                        Ok renderers ->
-                            Ok (List.map (\x -> x str) renderers)
-
-                _ ->
-                    Err InvalidAst
-        )
-        (\styles ->
-            case inlinePotential styles of
-                PotentialInline parentName vals ->
-                    PotentialInline parentName (vals ++ [ PotentialInlineString name ])
-        )
-
-
-{-| -}
-inlineText : Inline (List Text -> result) -> Inline result
-inlineText (Inline inlineName inlineRenderer inlinePotential) =
-    Inline inlineName
-        (\descriptors ->
-            let
-                _ =
-                    Debug.log "inlineText" descriptors
-            in
-            case descriptors of
-                [] ->
-                    Err InvalidAst
-
-                (DescribeInlineText range str) :: remaining ->
-                    case inlineRenderer remaining of
-                        Err err ->
-                            Err err
-
-                        Ok renderers ->
-                            Ok (List.map (\x -> x str) renderers)
-
-                _ ->
-                    Err InvalidAst
-        )
-        (\styles ->
-            case inlinePotential styles of
-                PotentialInline parentName vals ->
-                    PotentialInline parentName (vals ++ [ PotentialInlineText ])
-        )
+type ParseError
+    = Unknown
 
 
 getParser : Block data -> Parser Context Problem Description
 getParser fromBlock =
     case fromBlock of
-        Block name _ p ->
+        Block name { parser } ->
             Parser.succeed identity
                 |. Parser.token (Parser.Token "|" (ExpectingBlockName name))
                 |. Parser.chompIf (\c -> c == ' ') Space
-                |= p
+                |= parser
 
-        Value _ p ->
-            p
+        Value { parser } ->
+            parser
 
 
-render : Block data -> Description -> Result AstError data
-render fromBlock =
+renderBlock : Block data -> Description -> Result AstError (Found data)
+renderBlock fromBlock =
     case fromBlock of
-        Block name r _ ->
-            r
+        Block name { converter } ->
+            converter
 
-        Value r _ ->
-            r
+        Value { converter } ->
+            converter
+
+
+getBlockExpectation fromBlock =
+    case fromBlock of
+        Block name { expect } ->
+            expect
+
+        Value { expect } ->
+            expect
+
+
+type AstError
+    = InvalidAst
+    | NoMatch
+
+
+type Found item
+    = Found (Range Position) item
+    | Unexpected
+        { range : Range Position
+
+        -- , source : String
+        , problem : ProblemMessage
+        }
+
+
+type alias UnexpectedDetails =
+    { range : Range Position
+
+    -- , source : String
+    , problem : ProblemMessage
+    }
+
+
+prettyParsed (Parsed foundDescription) =
+    prettyFound 0 prettyDescription foundDescription
+
+
+prettyDescription indent desc =
+    case desc of
+        DescribeBlock name details ->
+            name
+
+        Record name details ->
+            name
+
+        OneOf expected foundDesciption ->
+            "oneOf"
+
+        ManyOf expected foundRange foundDesciptions ->
+            "manyOf"
+
+        StartsWith _ start end ->
+            ""
+
+        DescribeTree details ->
+            ""
+
+        -- Primitives
+        DescribeStub name foundStub ->
+            ""
+
+        DescribeBoolean foundBool ->
+            ""
+
+        DescribeInteger foundInt ->
+            ""
+
+        DescribeFloat foundFloat ->
+            ""
+
+        DescribeFloatBetween bottom top foundFloat ->
+            ""
+
+        DescribeIntBetween bottom top foundInt ->
+            ""
+
+        DescribeText range textDescriptions ->
+            ""
+
+        DescribeString range str ->
+            str
+
+        DescribeMultiline range str ->
+            str
+
+        DescribeStringExactly range str ->
+            str
+
+        DescribeDate foundPosix ->
+            prettyFound indent (always Iso8601.fromTime) foundPosix
+
+
+prettyFound indent contentToString found =
+    case found of
+        Found range actual ->
+            String.repeat (indent * 4) " "
+                ++ "Found\n"
+                ++ contentToString (indent + 1) actual
+
+        Unexpected unexpected ->
+            String.repeat (indent * 4) " " ++ "Unexpected"
+
+
+type Description
+    = DescribeBlock
+        String
+        { found : Found Description
+        , expected : Expectation
+        }
+    | Record
+        String
+        { found : Found (List ( String, Found Description ))
+        , expected : Expectation
+        }
+    | OneOf (List Expectation) (Found Description)
+    | ManyOf (List Expectation) (Range Position) (List (Found Description))
+    | StartsWith
+        (Range Position)
+        { found : Description
+        , expected : Expectation
+        }
+        { found : Description
+        , expected : Expectation
+        }
+    | DescribeTree
+        { found : ( Range Position, List (Nested ( Description, List Description )) )
+        , expected : Expectation
+        }
+      -- Primitives
+    | DescribeStub String (Found String)
+    | DescribeBoolean (Found Bool)
+    | DescribeInteger (Found Int)
+    | DescribeFloat (Found Float)
+    | DescribeFloatBetween Float Float (Found Float)
+    | DescribeIntBetween Int Int (Found Int)
+    | DescribeText (Range Position) (List TextDescription)
+    | DescribeString (Range Position) String
+    | DescribeMultiline (Range Position) String
+    | DescribeStringExactly (Range Position) String
+    | DescribeDate (Found Time.Posix)
+
+
+type TextDescription
+    = Styled (Range Position) Text
+    | DescribeInline String (Range Position) (List InlineDescription)
+
+
+type InlineDescription
+    = DescribeInlineString String (Range Position) String
+    | DescribeInlineText (Range Position) (List Text)
+
+
+{-| A text fragment with some styling.
+-}
+type Text
+    = Text (List Style) String
+
+
+type Expectation
+    = ExpectBlock String Expectation
+    | ExpectStub String
+    | ExpectRecord String (List ( String, Expectation ))
+    | ExpectOneOf (List Expectation)
+    | ExpectManyOf (List Expectation)
+    | ExpectStartsWith Expectation Expectation
+    | ExpectBoolean
+    | ExpectInteger
+    | ExpectFloat
+    | ExpectFloatBetween Float Float
+    | ExpectIntBetween Int Int
+    | ExpectText (List InlineExpectation)
+    | ExpectString
+    | ExpectMultiline
+    | ExpectStringExactly String
+    | ExpectDate
+    | ExpectTree Expectation Expectation
+
+
+type InlineExpectation
+    = InlineExpectation String (List InlineValueExpectation)
+
+
+type InlineValueExpectation
+    = ExpectInlineString String
+    | ExpectInlineText
+
+
+getDesc : { start : Int, end : Int } -> Parsed -> List Description
+getDesc offset (Parsed foundDesc) =
+    getWithinFound offset foundDesc
+
+
+withinOffsetRange range offset =
+    range.start.offset <= offset.start && range.end.offset >= offset.end
+
+
+getWithinFound : { start : Int, end : Int } -> Found Description -> List Description
+getWithinFound offset found =
+    case found of
+        Found range item ->
+            if withinOffsetRange range offset then
+                if isPrimitive item then
+                    [ item ]
+
+                else
+                    [ item ]
+                        ++ getContainingDescriptions item offset
+
+            else
+                []
+
+        Unexpected unexpected ->
+            []
+
+
+withinFoundLeaf found offset =
+    case found of
+        Found range item ->
+            withinOffsetRange range offset
+
+        Unexpected unexpected ->
+            withinOffsetRange unexpected.range offset
+
+
+isPrimitive : Description -> Bool
+isPrimitive description =
+    case description of
+        DescribeBlock name details ->
+            False
+
+        Record name details ->
+            False
+
+        OneOf expected found ->
+            False
+
+        ManyOf expected rng foundList ->
+            False
+
+        StartsWith _ fst snd ->
+            False
+
+        DescribeTree details ->
+            False
+
+        -- Primitives
+        DescribeStub name found ->
+            True
+
+        DescribeBoolean found ->
+            True
+
+        DescribeInteger found ->
+            True
+
+        DescribeFloat found ->
+            True
+
+        DescribeFloatBetween _ _ found ->
+            True
+
+        DescribeIntBetween _ _ found ->
+            True
+
+        DescribeText rng textNodes ->
+            True
+
+        DescribeString rng str ->
+            True
+
+        DescribeMultiline rng str ->
+            True
+
+        DescribeStringExactly rng str ->
+            True
+
+        DescribeDate found ->
+            True
+
+
+getContainingDescriptions : Description -> { start : Int, end : Int } -> List Description
+getContainingDescriptions description offset =
+    case description of
+        DescribeBlock name details ->
+            getWithinFound offset details.found
+
+        Record name details ->
+            []
+
+        OneOf expected found ->
+            []
+
+        ManyOf expected rng foundList ->
+            List.concatMap (getWithinFound offset) foundList
+
+        StartsWith _ fst snd ->
+            []
+
+        DescribeTree details ->
+            []
+
+        -- Primitives
+        DescribeStub name found ->
+            []
+
+        DescribeBoolean found ->
+            []
+
+        DescribeInteger found ->
+            []
+
+        DescribeFloat found ->
+            []
+
+        DescribeFloatBetween _ _ found ->
+            []
+
+        DescribeIntBetween _ _ found ->
+            if withinFoundLeaf found offset then
+                [ description ]
+
+            else
+                []
+
+        DescribeText rng textNodes ->
+            if withinOffsetRange rng offset then
+                [ description ]
+
+            else
+                []
+
+        DescribeString rng str ->
+            if withinOffsetRange rng offset then
+                [ description ]
+
+            else
+                []
+
+        DescribeMultiline rng str ->
+            if withinOffsetRange rng offset then
+                [ description ]
+
+            else
+                []
+
+        DescribeStringExactly rng str ->
+            if withinOffsetRange rng offset then
+                [ description ]
+
+            else
+                []
+
+        DescribeDate found ->
+            []
+
+
+{-| -}
+toString : Int -> Description -> String
+toString indent description =
+    case description of
+        DescribeBlock name details ->
+            String.repeat (indent * 4) " "
+                ++ "| "
+                ++ name
+                ++ "\n"
+                ++ foundToString (toString (indent + 1)) details.found
+
+        DescribeStub name range ->
+            String.repeat (indent * 4) " "
+                ++ "| "
+                ++ name
+                ++ "\n"
+
+        Record name details ->
+            String.repeat (indent * 4) " "
+                ++ "| "
+                ++ name
+                ++ "\n"
+
+        -- ++ String.join "\n" (List.map (fieldToString (indent + 1)) fields)
+        OneOf expected found ->
+            ""
+
+        -- toString indent found
+        ManyOf expected range found ->
+            found
+                |> List.map (foundToString (toString indent))
+                |> String.join "\n\n"
+
+        StartsWith range start end ->
+            ""
+
+        -- toString indent start ++ toString indent end
+        DescribeBoolean foundBoolean ->
+            foundToString boolToString foundBoolean
+
+        DescribeInteger found ->
+            foundToString String.fromInt found
+
+        DescribeFloat found ->
+            foundToString String.fromFloat found
+
+        DescribeFloatBetween low high found ->
+            foundToString String.fromFloat found
+
+        DescribeIntBetween low high found ->
+            foundToString String.fromInt found
+
+        DescribeText range textNodes ->
+            ""
+
+        DescribeString range str ->
+            str
+
+        DescribeMultiline range str ->
+            str
+
+        DescribeStringExactly range str ->
+            str
+
+        DescribeDate foundPosix ->
+            ""
+
+        DescribeTree tree ->
+            ""
+
+
+boolToString b =
+    if b then
+        "True"
+
+    else
+        "False"
+
+
+foundToString innerToString found =
+    case found of
+        Found _ inner ->
+            innerToString inner
+
+        Unexpected unexpected ->
+            ":/"
+
+
+fieldToString indent ( name, val ) =
+    String.repeat (indent * 4) " " ++ name ++ " = " ++ toString indent val
+
+
+type alias ErrorMessage =
+    { message : List Format.Text
+    , region : { start : Position, end : Position }
+    , title : String
+    }
+
+
+{-| -}
+type ProblemMessage
+    = MsgUnknownBlock (List String)
+    | MsgUnknownInline (List String)
+    | MsgMissingFields (List String)
+    | MsgNonMatchingFields
+        { expecting : List String
+        , found : List String
+        }
+    | MsgUnexpectedField
+        { found : String
+        , options : List String
+        , recordName : String
+        }
+    | MsgExpectingIndent Int
+    | MsgCantStartTextWithSpace
+    | MsgUnclosedStyle (List Style)
+    | MsgBadDate String
+    | MsgBadFloat String
+    | MsgBadInt String
+    | MsgBadBool String
+    | MsgIntOutOfRange
+        { found : Int
+        , min : Int
+        , max : Int
+        }
+    | MsgFloatOutOfRange
+        { found : Float
+        , min : Float
+        , max : Float
+        }
 
 
 type alias Position =
     { offset : Int
     , line : Int
     , column : Int
-    }
-
-
-type alias Mapped =
-    { original : Range Position
-    , new : Range Position
     }
 
 
@@ -307,19 +641,790 @@ type alias Range x =
 
 
 {-| -}
+type Style
+    = Bold
+    | Italic
+    | Strike
+
+
+{-| -}
+type Nested item
+    = Nested
+        { content : item
+        , children :
+            List (Nested item)
+        }
+
+
+
+{- BLOCKS -}
+
+
+{-| -}
+document :
+    ({ found : Found child
+     , expected : Expectation
+     }
+     -> result
+    )
+    -> Block child
+    -> Document result
+document renderer child =
+    let
+        expectation =
+            getBlockExpectation child
+    in
+    Document
+        { expect = expectation
+        , converter =
+            \(Parsed found) ->
+                case found of
+                    Found range childDesc ->
+                        case renderBlock child childDesc of
+                            Err err ->
+                                Err err
+
+                            Ok renderedChild ->
+                                Ok
+                                    (renderer
+                                        { found = renderedChild
+                                        , expected = expectation
+                                        }
+                                    )
+
+                    Unexpected unexpected ->
+                        Ok
+                            (renderer
+                                { expected = expectation
+                                , found = Unexpected unexpected
+                                }
+                            )
+        , parser =
+            Parser.map
+                (\( range, val ) ->
+                    Parsed (Found range val)
+                )
+                (withRange
+                    (Parser.withIndent 0 (getParser child))
+                )
+        }
+
+
+{-| -}
+block :
+    String
+    ->
+        ({ found : Found child
+         , expected : Expectation
+         }
+         -> result
+        )
+    -> Block child
+    -> Block result
+block name renderer child =
+    Block name
+        { expect = ExpectBlock name (getBlockExpectation child)
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeBlock actualBlockName blockDetails ->
+                        if actualBlockName == name then
+                            case blockDetails.found of
+                                Found range found ->
+                                    case renderBlock child found of
+                                        Err err ->
+                                            -- TODO: This generally means that the child had a NoMatch
+                                            -- However it's not obvious when this would occur compared to
+                                            -- just being Unexpected.
+                                            -- I guess if a block, had a containing block and the names didn't match.
+                                            -- In Which case, what would the error state be?
+                                            Err err
+
+                                        Ok renderedChild ->
+                                            Ok
+                                                (Found range
+                                                    (renderer
+                                                        { found =
+                                                            -- Found renderedChild
+                                                            renderedChild
+                                                        , expected = blockDetails.expected
+                                                        }
+                                                    )
+                                                )
+
+                                Unexpected unexpected ->
+                                    Ok
+                                        (Found unexpected.range
+                                            (renderer
+                                                { found =
+                                                    Unexpected unexpected
+                                                , expected = blockDetails.expected
+                                                }
+                                            )
+                                        )
+
+                        else
+                            -- The NoMatch error, allows the parent to decide what to do.
+                            -- oneOf would go to the next option
+                            -- document could default to an error state
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            Parser.map
+                (\( range, valueResult ) ->
+                    case valueResult of
+                        Ok value ->
+                            DescribeBlock name
+                                { found = Found range value
+                                , expected = ExpectBlock name (getBlockExpectation child)
+                                }
+
+                        Err errorMessage ->
+                            DescribeBlock name
+                                { found =
+                                    Unexpected
+                                        { range = range
+                                        , problem = errorMessage
+                                        }
+                                , expected = ExpectBlock name (getBlockExpectation child)
+                                }
+                )
+            <|
+                withRange
+                    (Parser.getIndent
+                        |> Parser.andThen
+                            (\indent ->
+                                Parser.succeed identity
+                                    |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
+                                    |. Parser.chompWhile (\c -> c == ' ')
+                                    |. skipBlankLineWith ()
+                                    |= Parser.oneOf
+                                        [ Parser.succeed Ok
+                                            |. Parser.token (Parser.Token (String.repeat (indent + 4) " ") (ExpectingIndent (indent + 4)))
+                                            |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) (getParser child))
+
+                                        -- If we're here, it's because the indentation failed.
+                                        -- If the child parser failed in some way, it would
+                                        -- take care of that itself by returning Unexpected
+                                        , Parser.succeed (Err <| MsgExpectingIndent (indent + 4))
+                                            |. Parser.loop "" (raggedIndentedStringAbove indent)
+                                        ]
+                            )
+                    )
+        }
+
+
+blockNameParser name =
+    Parser.succeed identity
+        |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
+        |. Parser.chompWhile (\c -> c == ' ')
+        |. Parser.chompIf (\c -> c == '\n') Newline
+
+
+{-| -}
+startWith : (Found ( start, rest ) -> result) -> Block start -> Block rest -> Block result
+startWith fn startBlock endBlock =
+    Value
+        { expect = ExpectStartsWith (getBlockExpectation startBlock) (getBlockExpectation endBlock)
+        , converter =
+            \desc ->
+                case desc of
+                    StartsWith range start end ->
+                        case ( renderBlock startBlock start.found, renderBlock endBlock end.found ) of
+                            ( Ok (Found startRange renderedStart), Ok (Found endRange renderedEnd) ) ->
+                                Ok <|
+                                    Found
+                                        range
+                                        (fn (Found range ( renderedStart, renderedEnd )))
+
+                            ( Ok (Unexpected unexpected), _ ) ->
+                                Ok (Found range (fn (Unexpected unexpected)))
+
+                            ( _, Ok (Unexpected unexpected) ) ->
+                                Ok (Found range (fn (Unexpected unexpected)))
+
+                            _ ->
+                                Err InvalidAst
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.succeed
+                (\( range, ( begin, end ) ) ->
+                    StartsWith range
+                        { found = begin
+                        , expected = getBlockExpectation startBlock
+                        }
+                        { found = end
+                        , expected = getBlockExpectation endBlock
+                        }
+                )
+                |= withRange
+                    (Parser.succeed Tuple.pair
+                        |= getParser startBlock
+                        |. Parser.loop 0 manyBlankLines
+                        |= getParser endBlock
+                    )
+        }
+
+
+{-| Skip all blank lines.
+-}
+manyBlankLines lineCount =
+    Parser.oneOf
+        [ skipBlankLineWith (Parser.Loop (lineCount + 1))
+        , Parser.succeed (Parser.Done ())
+        ]
+
+
+{-| -}
+oneOf : (UnexpectedDetails -> a) -> List (Block a) -> Block a
+oneOf renderUnexpected blocks =
+    let
+        gatherParsers myBlock ( names, blks, vals ) =
+            case myBlock of
+                Block name { parser } ->
+                    ( name :: names, Parser.map Ok parser :: blks, vals )
+
+                Value { parser } ->
+                    ( names, blks, Parser.map Ok parser :: vals )
+
+        ( blockNames, childBlocks, childValues ) =
+            List.foldl gatherParsers ( [], [], [] ) blocks
+
+        blockParser =
+            Parser.succeed identity
+                |. Parser.token (Parser.Token "|" BlockStart)
+                |. Parser.oneOf
+                    [ Parser.chompIf (\c -> c == ' ') Space
+                    , Parser.succeed ()
+                    ]
+                |= Parser.oneOf
+                    (List.reverse childBlocks
+                        ++ [ Parser.succeed (Err (MsgUnknownBlock blockNames))
+
+                           -- |. (Parser.getIndent
+                           --         |> Parser.andThen
+                           --             (\indent ->
+                           --                 Parser.loop "" (indentedString (indent + 4))
+                           --             )
+                           --    )
+                           ]
+                    )
+
+        applyDesc description blck found =
+            case found of
+                Nothing ->
+                    case renderBlock blck description of
+                        Err err ->
+                            found
+
+                        Ok rendered ->
+                            Just rendered
+
+                _ ->
+                    found
+
+        expectations =
+            List.map getBlockExpectation blocks
+    in
+    Value
+        { expect = ExpectOneOf expectations
+        , converter =
+            \desc ->
+                case desc of
+                    OneOf expected foundResult ->
+                        case foundResult of
+                            Found rng found ->
+                                case List.foldl (applyDesc found) Nothing blocks of
+                                    Nothing ->
+                                        Err InvalidAst
+
+                                    Just result ->
+                                        Ok result
+
+                            Unexpected unexpected ->
+                                Ok (Found unexpected.range (renderUnexpected unexpected))
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.succeed
+                (\( range, result ) ->
+                    case result of
+                        Ok found ->
+                            OneOf expectations (Found range found)
+
+                        Err unexpected ->
+                            OneOf expectations
+                                (Unexpected
+                                    { range = range
+                                    , problem = unexpected
+                                    }
+                                )
+                )
+                |= withRange
+                    (Parser.oneOf
+                        (blockParser :: List.reverse childValues ++ [ Parser.succeed (Err (MsgBadFloat "")) ])
+                    )
+        }
+
+
+{-| Many blocks that are all at the same indentation level.
+-}
+manyOf : (UnexpectedDetails -> a) -> List (Block a) -> Block (List a)
+manyOf renderUnexpected blocks =
+    let
+        gatherParsers myBlock ( names, blks, vals ) =
+            case myBlock of
+                Block name { parser } ->
+                    ( name :: names, Parser.map Ok parser :: blks, vals )
+
+                Value { parser } ->
+                    ( names, blks, Parser.map Ok (withRange parser) :: vals )
+
+        ( blockNames, childBlocks, childValues ) =
+            List.foldl gatherParsers ( [], [], [] ) blocks
+
+        blockParser =
+            Parser.map
+                (\( pos, result ) ->
+                    result
+                        |> Result.mapError (\er -> ( pos, er ))
+                        |> Result.map (\desc -> ( pos, desc ))
+                )
+                (withRange
+                    (Parser.succeed identity
+                        |. Parser.token (Parser.Token "|" BlockStart)
+                        |. Parser.oneOf
+                            [ Parser.chompIf (\c -> c == ' ') Space
+                            , Parser.succeed ()
+                            ]
+                        |= Parser.oneOf
+                            (List.reverse childBlocks
+                                ++ [ Parser.getIndent
+                                        |> Parser.andThen
+                                            (\indent ->
+                                                Parser.succeed (Err (MsgUnknownBlock blockNames))
+                                                    |. word
+                                                    |. newline
+                                                    |. Parser.loop "" (raggedIndentedStringAbove indent)
+                                            )
+                                   ]
+                            )
+                    )
+                )
+
+        expectations =
+            List.map getBlockExpectation blocks
+    in
+    Value
+        { expect = ExpectManyOf expectations
+        , converter =
+            \desc ->
+                let
+                    applyDesc description blck found =
+                        case found of
+                            Nothing ->
+                                case renderBlock blck description of
+                                    Err err ->
+                                        found
+
+                                    Ok rendered ->
+                                        Just rendered
+
+                            _ ->
+                                found
+
+                    getRendered : Found Description -> Result AstError (List a) -> Result AstError (List a)
+                    getRendered found existingResult =
+                        case existingResult of
+                            Err err ->
+                                Err err
+
+                            Ok existing ->
+                                case found of
+                                    Unexpected unexpected ->
+                                        Ok (renderUnexpected unexpected :: existing)
+
+                                    Found range child ->
+                                        case List.foldl (applyDesc child) Nothing blocks of
+                                            Nothing ->
+                                                Err InvalidAst
+
+                                            Just (Found _ result) ->
+                                                Ok (result :: existing)
+
+                                            Just (Unexpected unexpected) ->
+                                                Ok (renderUnexpected unexpected :: existing)
+                in
+                case desc of
+                    ManyOf _ range found ->
+                        List.foldl getRendered (Ok []) found
+                            |> Result.map (\items -> Found range (List.reverse items))
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            Parser.succeed
+                (\( range, results ) ->
+                    ManyOf expectations range (List.map resultToFound results)
+                )
+                |= withRange
+                    (Parser.getIndent
+                        |> Parser.andThen
+                            (\indent ->
+                                Parser.loop ( False, [] )
+                                    (blocksOrNewlines (Parser.oneOf (blockParser :: List.reverse childValues)) indent)
+                            )
+                    )
+        }
+
+
+{-| It can be useful to parse a tree structure. For example, here's a nested list.
+| List
+
+  - item one
+  - item two
+  - nested item two
+    additional text for nested item two
+  - item three
+  - nested item three
+    In order to parse the above, you could define a block as
+    Mark.block "List"
+    ((Nested nested) ->
+    -- Do something with nested.content and nested.children
+    )
+    (Mark.nested
+    { item = text
+    , start = Mark.exactly "-" ()
+    }
+    )
+    **Note** the indentation is always a multiple of 4.
+    **Another Note** `text` in the above code is defined elsewhere.
+
+-}
+nested :
+    { item : Block item
+    , start : Block icon
+    }
+    -> Block (List (Nested ( icon, List item )))
+nested config =
+    let
+        expectation =
+            ExpectTree (getBlockExpectation config.start) (getBlockExpectation config.item)
+    in
+    Value
+        { expect = expectation
+        , converter =
+            \description ->
+                case description of
+                    DescribeTree details ->
+                        case details.found of
+                            ( pos, nestedDescriptors ) ->
+                                case reduceRender (renderTreeNodeSmall config) nestedDescriptors of
+                                    Err invalidAst ->
+                                        Err invalidAst
+
+                                    Ok (Err unexpectedDetails) ->
+                                        Ok (Unexpected unexpectedDetails)
+
+                                    Ok (Ok list) ->
+                                        Ok (Found pos list)
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.getIndent
+                |> Parser.andThen
+                    (\baseIndent ->
+                        Parser.map
+                            (\( pos, result ) ->
+                                DescribeTree
+                                    { found = ( pos, buildTree baseIndent result )
+                                    , expected = expectation
+                                    }
+                            )
+                            (withRange
+                                (Parser.loop
+                                    ( { base = baseIndent
+                                      , prev = baseIndent
+                                      }
+                                    , []
+                                    )
+                                    (indentedBlocksOrNewlines config.start config.item)
+                                )
+                            )
+                    )
+        }
+
+
+{-| -}
+record2 :
+    String
+    -> (Range Position -> one -> two -> data)
+    -> (UnexpectedDetails -> data)
+    -> Field one
+    -> Field two
+    -> Block data
+record2 recordName renderer renderUnexpected field1 field2 =
+    let
+        expectations =
+            ExpectRecord recordName [ fieldExpectation field1, fieldExpectation field2 ]
+    in
+    Block recordName
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record name fields ->
+                        if name == recordName then
+                            case fields.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (renderer pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> renderRecordResult renderUnexpected pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (renderUnexpected unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord recordName expectations [ fieldParser field1, fieldParser field2 ]
+        }
+
+
+
+{- PRIMITIVE BLOCKS -}
+
+
+{-| -}
+multiline : Block String
+multiline =
+    Value
+        { expect = ExpectMultiline
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeMultiline range str ->
+                        Ok (Found range str)
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.map
+                (\( pos, str ) ->
+                    DescribeMultiline pos str
+                )
+                (withRange
+                    (Parser.getIndent
+                        |> Parser.andThen
+                            (\indent ->
+                                Parser.loop "" (indentedString indent)
+                            )
+                    )
+                )
+        }
+
+
+{-| -}
+string : Block String
+string =
+    Value
+        { expect = ExpectString
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeString range str ->
+                        Ok (Found range str)
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.succeed
+                (\start val end ->
+                    DescribeString { start = start, end = end } val
+                )
+                |= getPosition
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+                |= getPosition
+        }
+
+
+exactly : String -> value -> Block value
+exactly key value =
+    Value
+        { expect = ExpectStringExactly key
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeStringExactly range existingKey ->
+                        if key == existingKey then
+                            Ok (Found range value)
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            Parser.succeed
+                (\start _ end ->
+                    DescribeStringExactly { start = start, end = end } key
+                )
+                |= getPosition
+                |= Parser.token (Parser.Token key (Expecting key))
+                |= getPosition
+        }
+
+
+int : Block Int
+int =
+    Value
+        { converter =
+            \desc ->
+                case desc of
+                    DescribeInteger found ->
+                        Ok found
+
+                    _ ->
+                        Err NoMatch
+        , expect = ExpectInteger
+        , parser = Parser.map DescribeInteger integer
+        }
+
+
+float : Block Float
+float =
+    Value
+        { converter =
+            \desc ->
+                case desc of
+                    DescribeFloat found ->
+                        Ok found
+
+                    _ ->
+                        Err NoMatch
+        , expect = ExpectFloat
+        , parser = Parser.map DescribeFloat floating
+        }
+
+
+{-| -}
+intBetween : Int -> Int -> Block Int
+intBetween one two =
+    let
+        top =
+            max one two
+
+        bottom =
+            min one two
+    in
+    Value
+        { expect = ExpectIntBetween bottom top
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeIntBetween low high found ->
+                        Ok found
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.map
+                (\found ->
+                    DescribeIntBetween bottom top <|
+                        case found of
+                            Found rng i ->
+                                if i >= bottom && i <= top then
+                                    found
+
+                                else
+                                    Unexpected
+                                        { range = rng
+                                        , problem =
+                                            MsgIntOutOfRange
+                                                { found = i
+                                                , min = bottom
+                                                , max = top
+                                                }
+                                        }
+
+                            _ ->
+                                found
+                )
+                integer
+        }
+
+
+{-| -}
+floatBetween : Float -> Float -> Block Float
+floatBetween one two =
+    let
+        top =
+            max one two
+
+        bottom =
+            min one two
+    in
+    Value
+        { expect = ExpectFloatBetween bottom top
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeFloatBetween low high found ->
+                        Ok found
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.map
+                (\found ->
+                    DescribeFloatBetween bottom top <|
+                        case found of
+                            Found rng i ->
+                                if i >= bottom && i <= top then
+                                    found
+
+                                else
+                                    Unexpected
+                                        { range = rng
+                                        , problem =
+                                            MsgFloatOutOfRange
+                                                { found = i
+                                                , min = bottom
+                                                , max = top
+                                                }
+                                        }
+
+                            _ ->
+                                found
+                )
+                floating
+        }
+
+
+
+{- Parser Heleprs -}
+
+
+{-| -}
 type Context
     = InBlock String
     | InInline String
     | InRecord String
     | InRecordField String
     | InRemapped Position
-
-
-{-| -}
-type Style
-    = Bold
-    | Italic
-    | Strike
 
 
 {-| -}
@@ -367,993 +1472,108 @@ type Problem
         }
 
 
-type Description
-    = DescribeDocument (Range Position) Description
-    | DescribeBlock String (Range Position) Description
-    | DescribeUnexpected (Range Position) String
-    | DescribeStub String (Range Position)
-    | Record String (Range Position) (List ( String, Description ))
-    | OneOf (Range Position) (List Description) Description
-    | ManyOf (Range Position) (List Description) (List Description)
-    | StartsWith (Range Position) Description Description
-    | DescribeBoolean (Range Position) Bool
-    | DescribeInteger (Range Position) Int
-    | DescribeFloat (Range Position) Float
-    | DescribeFloatBetween Float Float (Range Position) Float
-    | DescribeIntBetween Int Int (Range Position) Int
-    | DescribeText (Range Position) (List TextDescription)
-    | DescribeString (Range Position) String
-    | DescribeMultiline (Range Position) String
-    | DescribeStringExactly (Range Position) String
-    | DescribeDate (Range Position) Time.Posix
-    | DescribeBadDate (Range Position) String
-    | DescribeTree (Range Position) (List (Nested ( Description, List Description )))
-
-
-type TextDescription
-    = Styled (Range Position) Text
-    | DescribeInline String (Range Position) (List InlineDescription)
-
-
-
--- {-| -}
--- type Inline data
---     = Inline String (TextDescription -> Result AstError data) (List Style -> PotentialInline)
-
-
-type PotentialInline
-    = PotentialInline String (List PotentialInlineVal)
-
-
-type PotentialInlineVal
-    = PotentialInlineString String
-    | PotentialInlineText
-
-
-type InlineDescription
-    = DescribeInlineString String (Range Position) String
-    | DescribeInlineText (Range Position) (List Text)
-
-
-{-| A text fragment with some styling.
--}
-type Text
-    = Text (List Style) String
-
-
-getDescriptionPosition desc =
-    case desc of
-        DescribeDocument range child ->
-            range
-
-        DescribeBlock name range child ->
-            range
-
-        DescribeUnexpected range _ ->
-            range
-
-        DescribeStub name range ->
-            range
-
-        Record name range fields ->
-            range
-
-        OneOf range options found ->
-            range
-
-        ManyOf range options foundEls ->
-            range
-
-        StartsWith range fst snd ->
-            range
-
-        DescribeInteger range _ ->
-            range
-
-        DescribeFloat range _ ->
-            range
-
-        DescribeFloatBetween bound1 bound2 range _ ->
-            range
-
-        DescribeIntBetween bound1 bound2 range _ ->
-            range
-
-        DescribeText range _ ->
-            range
-
-        DescribeString range _ ->
-            range
-
-        DescribeMultiline range _ ->
-            range
-
-        DescribeStringExactly range value ->
-            range
-
-        DescribeDate range _ ->
-            range
-
-        DescribeBadDate range _ ->
-            range
-
-        DescribeBoolean range _ ->
-            range
-
-        DescribeTree range _ ->
-            range
-
-
 {-| -}
-type TextAccumulator rendered
-    = TextAccumulator
-        -- Accumulator string
-        { text : Text
-
-        -- Accumulator of element constructors
-        , rendered : List rendered
-        , balancedReplacements : List String
-        }
-
-
-{-| -}
-type Replacement
-    = Replacement String String
-    | Balanced
-        { start : ( String, String )
-        , end : ( String, String )
-        }
-
-
-{-| -}
-toString : Int -> Description -> String
-toString indent description =
-    case description of
-        DescribeDocument range child ->
-            toString indent child
-
-        DescribeBlock name range child ->
-            String.repeat (indent * 4) " "
-                ++ "| "
-                ++ name
-                ++ "\n"
-                ++ toString (indent + 1) child
-
-        DescribeUnexpected range str ->
-            str
-
-        DescribeStub name range ->
-            String.repeat (indent * 4) " "
-                ++ "| "
-                ++ name
-                ++ "\n"
-
-        Record name range fields ->
-            String.repeat (indent * 4) " "
-                ++ "| "
-                ++ name
-                ++ "\n"
-                ++ String.join "\n" (List.map (fieldToString (indent + 1)) fields)
-
-        OneOf range options found ->
-            toString indent found
-
-        ManyOf range options found ->
-            found
-                |> List.map (toString indent)
-                |> String.join "\n\n"
-
-        StartsWith range start end ->
-            toString indent start ++ toString indent end
-
-        DescribeBoolean range b ->
-            if b then
-                "True"
-
-            else
-                "False"
-
-        DescribeInteger range i ->
-            String.fromInt i
-
-        DescribeFloat range f ->
-            String.fromFloat f
-
-        DescribeFloatBetween low high range f ->
-            String.fromFloat f
-
-        DescribeIntBetween low high range i ->
-            String.fromInt i
-
-        DescribeText range textNodes ->
-            ""
-
-        DescribeString range str ->
-            str
-
-        DescribeMultiline range str ->
-            str
-
-        DescribeStringExactly range str ->
-            str
-
-        DescribeDate range posix ->
-            ""
-
-        DescribeBadDate range str ->
-            str
-
-        DescribeTree _ tree ->
-            ""
-
-
-fieldToString indent ( name, val ) =
-    String.repeat (indent * 4) " " ++ name ++ " = " ++ toString indent val
-
-
-{-| -}
-parse :
-    Document data
-    -> String
-    -> Result (List (Parser.DeadEnd Context Problem)) Description
-parse (Document renderer blocks) source =
-    Parser.run blocks source
-
-
-{-| -}
-compile : Document data -> String -> Result AstError data
-compile (Document renderAst blocks) source =
-    case Parser.run blocks source of
-        Ok ast ->
-            renderAst ast
-
-        Err err ->
-            Err InvalidAst
-
-
-{-| -}
-document : (Range Position -> child -> result) -> Block child -> Document result
-document renderer child =
-    Document
-        (\desc ->
-            case desc of
-                DescribeDocument range childDesc ->
-                    case render child childDesc of
-                        Err err ->
-                            Err err
-
-                        Ok renderedChild ->
-                            Ok
-                                (renderer range renderedChild)
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.map
-            (\( range, val ) ->
-                DescribeDocument range val
-            )
-            (withRange (Parser.withIndent 0 (getParser child)))
-        )
-
-
-{-| Change the result of a block by applying a function to it.
--}
-map : (a -> b) -> Block a -> Block b
-map fn child =
-    case child of
-        Block name renderer parser ->
-            Block name
-                (Result.map fn << renderer)
-                parser
-
-        Value renderer parser ->
-            Value (Result.map fn << renderer) parser
-
-
-{-| -}
-block : String -> (Range Position -> child -> result) -> Block child -> Block result
-block name renderer child =
-    Block name
-        (\desc ->
-            case desc of
-                DescribeBlock actualBlockName range childDesc ->
-                    if actualBlockName == name then
-                        case render child childDesc of
-                            Err err ->
-                                Err err
-
-                            Ok renderedChild ->
-                                Ok
-                                    (renderer range renderedChild)
+raggedIndentedStringAbove : Int -> String -> Parser Context Problem (Parser.Step String String)
+raggedIndentedStringAbove indent found =
+    Parser.oneOf
+        [ Parser.succeed
+            (\extra ->
+                Parser.Loop <|
+                    if extra then
+                        found ++ "\n\n"
 
                     else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.map
-            (\( range, val ) ->
-                DescribeBlock name range val
+                        found ++ "\n"
             )
-         <|
-            withRange
-                (Parser.getIndent
-                    |> Parser.andThen
-                        (\indent ->
-                            Parser.succeed
-                                identity
-                                |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
-                                |. Parser.chompWhile (\c -> c == ' ')
-                                |. Parser.chompIf (\c -> c == '\n') Newline
-                                |. Parser.oneOf
-                                    [ Parser.succeed ()
-                                        |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                                        |. Parser.backtrackable (Parser.chompIf (\c -> c == '\n') Newline)
-                                    , Parser.succeed ()
-                                    ]
-                                |= Parser.oneOf
-                                    [ Parser.succeed identity
-                                        |. Parser.token (Parser.Token (String.repeat (indent + 4) " ") (ExpectingIndent (indent + 4)))
-                                        |= Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) (getParser child))
-
-                                    -- If we're here, it's because the indentation failed.
-                                    , Parser.succeed (\( pos, str ) -> DescribeUnexpected pos str)
-                                        |= withRange (Parser.loop "" (indentedString (indent + 4)))
-                                    ]
-                        )
+            |. Parser.token (Parser.Token "\n" Newline)
+            |= Parser.oneOf
+                [ Parser.succeed True
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                , Parser.succeed False
+                ]
+        , Parser.succeed
+            (\indentCount str ->
+                Parser.Loop (found ++ String.repeat indentCount " " ++ str)
+            )
+            |= Parser.oneOf
+                (indentationBetween (indent + 1) (indent + 4))
+            |= Parser.getChompedString
+                (Parser.chompWhile
+                    (\c -> c /= '\n')
                 )
-        )
+        , Parser.succeed (Parser.Done found)
+        ]
 
 
-{-| -}
-stub : String -> (Range Position -> result) -> Block result
-stub name renderer =
-    Block name
-        (\desc ->
-            case desc of
-                DescribeStub actualBlockName range ->
-                    if actualBlockName == name then
-                        Ok (renderer range)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.map
-            (\( range, _ ) ->
-                DescribeStub name range
-            )
-         <|
-            withRange
-                (Parser.succeed ()
-                    |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
-                    |. Parser.chompWhile (\c -> c == ' ')
-                )
-        )
-
-
-{-| -}
-record2 :
-    String
-    -> (Range Position -> one -> two -> data)
-    -> Field one
-    -> Field two
-    -> Block data
-record2 recordName renderer field1 field2 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName [ fieldParser field1, fieldParser field2 ])
-
-
-{-| -}
-record3 :
-    String
-    -> (Range Position -> one -> two -> three -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Block data
-record3 recordName renderer field1 field2 field3 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-                            |> Result.map2 (|>) (getField field3 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName [ fieldParser field1, fieldParser field2, fieldParser field3 ])
-
-
-{-| -}
-record4 :
-    String
-    -> (Range Position -> one -> two -> three -> four -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Block data
-record4 recordName renderer field1 field2 field3 field4 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-                            |> Result.map2 (|>) (getField field3 fields)
-                            |> Result.map2 (|>) (getField field4 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName
-            [ fieldParser field1
-            , fieldParser field2
-            , fieldParser field3
-            , fieldParser field4
-            ]
-        )
-
-
-{-| -}
-record5 :
-    String
-    -> (Range Position -> one -> two -> three -> four -> five -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Block data
-record5 recordName renderer field1 field2 field3 field4 field5 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-                            |> Result.map2 (|>) (getField field3 fields)
-                            |> Result.map2 (|>) (getField field4 fields)
-                            |> Result.map2 (|>) (getField field5 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName
-            [ fieldParser field1
-            , fieldParser field2
-            , fieldParser field3
-            , fieldParser field4
-            , fieldParser field5
-            ]
-        )
-
-
-{-| -}
-record6 :
-    String
-    -> (Range Position -> one -> two -> three -> four -> five -> six -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Block data
-record6 recordName renderer field1 field2 field3 field4 field5 field6 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-                            |> Result.map2 (|>) (getField field3 fields)
-                            |> Result.map2 (|>) (getField field4 fields)
-                            |> Result.map2 (|>) (getField field5 fields)
-                            |> Result.map2 (|>) (getField field6 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName
-            [ fieldParser field1
-            , fieldParser field2
-            , fieldParser field3
-            , fieldParser field4
-            , fieldParser field5
-            , fieldParser field6
-            ]
-        )
-
-
-{-| -}
-record7 :
-    String
-    -> (Range Position -> one -> two -> three -> four -> five -> six -> seven -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Field seven
-    -> Block data
-record7 recordName renderer field1 field2 field3 field4 field5 field6 field7 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-                            |> Result.map2 (|>) (getField field3 fields)
-                            |> Result.map2 (|>) (getField field4 fields)
-                            |> Result.map2 (|>) (getField field5 fields)
-                            |> Result.map2 (|>) (getField field6 fields)
-                            |> Result.map2 (|>) (getField field7 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName
-            [ fieldParser field1
-            , fieldParser field2
-            , fieldParser field3
-            , fieldParser field4
-            , fieldParser field5
-            , fieldParser field6
-            , fieldParser field7
-            ]
-        )
-
-
-{-| -}
-record8 :
-    String
-    -> (Range Position -> one -> two -> three -> four -> five -> six -> seven -> eight -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Field seven
-    -> Field eight
-    -> Block data
-record8 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-                            |> Result.map2 (|>) (getField field3 fields)
-                            |> Result.map2 (|>) (getField field4 fields)
-                            |> Result.map2 (|>) (getField field5 fields)
-                            |> Result.map2 (|>) (getField field6 fields)
-                            |> Result.map2 (|>) (getField field7 fields)
-                            |> Result.map2 (|>) (getField field8 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName
-            [ fieldParser field1
-            , fieldParser field2
-            , fieldParser field3
-            , fieldParser field4
-            , fieldParser field5
-            , fieldParser field6
-            , fieldParser field7
-            , fieldParser field8
-            ]
-        )
-
-
-{-| -}
-record9 :
-    String
-    -> (Range Position -> one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Field seven
-    -> Field eight
-    -> Field nine
-    -> Block data
-record9 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 field9 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-                            |> Result.map2 (|>) (getField field3 fields)
-                            |> Result.map2 (|>) (getField field4 fields)
-                            |> Result.map2 (|>) (getField field5 fields)
-                            |> Result.map2 (|>) (getField field6 fields)
-                            |> Result.map2 (|>) (getField field7 fields)
-                            |> Result.map2 (|>) (getField field8 fields)
-                            |> Result.map2 (|>) (getField field9 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName
-            [ fieldParser field1
-            , fieldParser field2
-            , fieldParser field3
-            , fieldParser field4
-            , fieldParser field5
-            , fieldParser field6
-            , fieldParser field7
-            , fieldParser field8
-            , fieldParser field9
-            ]
-        )
-
-
-{-| -}
-record10 :
-    String
-    -> (Range Position -> one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> ten -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Field seven
-    -> Field eight
-    -> Field nine
-    -> Field ten
-    -> Block data
-record10 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 field9 field10 =
-    Block recordName
-        (\desc ->
-            case desc of
-                Record name pos fields ->
-                    if name == recordName then
-                        Ok (renderer pos)
-                            |> Result.map2 (|>) (getField field1 fields)
-                            |> Result.map2 (|>) (getField field2 fields)
-                            |> Result.map2 (|>) (getField field3 fields)
-                            |> Result.map2 (|>) (getField field4 fields)
-                            |> Result.map2 (|>) (getField field5 fields)
-                            |> Result.map2 (|>) (getField field6 fields)
-                            |> Result.map2 (|>) (getField field7 fields)
-                            |> Result.map2 (|>) (getField field8 fields)
-                            |> Result.map2 (|>) (getField field9 fields)
-                            |> Result.map2 (|>) (getField field10 fields)
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (parseRecord recordName
-            [ fieldParser field1
-            , fieldParser field2
-            , fieldParser field3
-            , fieldParser field4
-            , fieldParser field5
-            , fieldParser field6
-            , fieldParser field7
-            , fieldParser field8
-            , fieldParser field9
-            , fieldParser field10
-            ]
-        )
-
-
-parseRecord :
-    String
-    -> List ( String, Parser Context Problem ( String, Description ) )
-    -> Parser Context Problem Description
-parseRecord recordName fields =
-    Parser.succeed
-        (\( pos, foundFields ) ->
-            Record recordName pos foundFields
-        )
-        |= withRange
-            (Parser.getIndent
-                |> Parser.andThen
-                    (\indent ->
-                        Parser.succeed identity
-                            |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
-                            |. Parser.chompWhile (\c -> c == ' ')
-                            |. Parser.chompIf (\c -> c == '\n') Newline
-                            |= Parser.withIndent (indent + 4)
-                                (Parser.loop
-                                    ( fields
-                                    , []
-                                    )
-                                    parseFields
-                                )
-                    )
-            )
-
-
-getField : Field value -> List ( String, Description ) -> Result AstError value
-getField (Field name fieldBlock) fields =
-    List.foldl (matchField name fieldBlock) (Err InvalidAst) fields
-
-
-matchField targetName targetBlock ( name, description ) existing =
-    case existing of
-        Ok _ ->
-            existing
-
-        Err err ->
-            if name == targetName then
-                render targetBlock description
-
-            else
-                existing
-
-
-{-| -}
-parseFields :
-    ( List ( String, Parser Context Problem ( String, Description ) ), List ( String, Description ) )
-    -> Parser Context Problem (Parser.Step ( List ( String, Parser Context Problem ( String, Description ) ), List ( String, Description ) ) (List ( String, Description )))
-parseFields ( fields, found ) =
-    case fields of
-        [] ->
-            Parser.succeed (Parser.Done found)
-
-        _ ->
-            Parser.getIndent
-                |> Parser.andThen
-                    (\indent ->
-                        Parser.oneOf
-                            [ skipBlankLinesWith (Parser.Loop ( fields, found ))
-                            , Parser.succeed identity
-                                |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
-                                |= Parser.map
-                                    (\( foundFieldname, fieldValue ) ->
-                                        Parser.Loop
-                                            ( List.filter
-                                                (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
-                                                fields
-                                            , ( foundFieldname, fieldValue ) :: found
-                                            )
-                                    )
-                                    (Parser.oneOf (List.map Tuple.second fields))
-                            ]
-                    )
-
-
-withFieldName name parser =
-    Parser.getIndent
-        |> Parser.andThen
-            (\indent ->
-                Parser.succeed Tuple.pair
-                    |= Parser.map (always name) (Parser.keyword (Parser.Token name (ExpectingFieldName name)))
-                    |. Parser.chompIf (\c -> c == ' ') Space
-                    |. Parser.chompIf (\c -> c == '=') (Expecting "=")
-                    |. Parser.chompIf (\c -> c == ' ') Space
-                    |= Parser.withIndent (indent + 4) (Parser.inContext (InRecordField name) parser)
-                    |. Parser.token (Parser.Token "\n" Newline)
-            )
-
-
-skipBlankLinesWith x =
-    Parser.succeed x
-        |. Parser.token (Parser.Token "\n" Newline)
-        |. Parser.oneOf
-            [ Parser.succeed ()
-                |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
-            , Parser.succeed ()
-            ]
-
-
-{-| -}
-field : String -> Block value -> Field value
-field name child =
-    case child of
-        Block blockName renderer childParser ->
-            Field name (Block blockName renderer childParser)
-
-        Value renderer childParser ->
-            Field name (Value renderer childParser)
-
-
-fieldParser : Field value -> ( String, Parser Context Problem ( String, Description ) )
-fieldParser (Field name myBlock) =
-    ( name
-    , withFieldName
-        name
-        (getParser myBlock)
-    )
-
-
-fieldName : Field v -> String
-fieldName (Field name _) =
-    name
-
-
-{-| -}
-type Field value
-    = Field String (Block value)
-
-
-{-| -}
-startWith : (Range Position -> start -> rest -> result) -> Block start -> Block rest -> Block result
-startWith fn startBlock endBlock =
-    Value
-        (\desc ->
-            case desc of
-                StartsWith range startDescription endDescription ->
-                    case render startBlock startDescription of
-                        Err err ->
-                            Err err
-
-                        Ok startChild ->
-                            case render endBlock endDescription of
-                                Err err ->
-                                    Err err
-
-                                Ok endChild ->
-                                    Ok
-                                        (fn range startChild endChild)
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.succeed
-            (\( range, ( begin, end ) ) ->
-                StartsWith range begin end
-            )
-            |= withRange
-                (Parser.succeed Tuple.pair
-                    |= getParser startBlock
-                    |= getParser endBlock
-                )
-        )
-
-
-{-| Many blocks that are all at the same indentation level.
+{-| Parse any indentation between two bounds, inclusive.
 -}
-manyOf : List (Block a) -> Block (List a)
-manyOf blocks =
+indentationBetween : Int -> Int -> List (Parser Context Problem Int)
+indentationBetween lower higher =
     let
-        gatherParsers myBlock ( blks, vals ) =
-            case myBlock of
-                Block name _ blkParser ->
-                    ( blkParser :: blks, vals )
+        bottom =
+            min lower higher
 
-                Value _ valueParser ->
-                    ( blks, valueParser :: vals )
-
-        ( childBlocks, childValues ) =
-            List.foldl gatherParsers ( [], [] ) blocks
-
-        blockParser =
-            Parser.succeed identity
-                |. Parser.token (Parser.Token "|" BlockStart)
-                |. Parser.oneOf
-                    [ Parser.chompIf (\c -> c == ' ') Space
-                    , Parser.succeed ()
-                    ]
-                |= Parser.oneOf (List.reverse childBlocks)
+        top =
+            max lower higher
     in
-    Value
-        (\desc ->
-            let
-                applyDesc description blck found =
-                    case found of
-                        Nothing ->
-                            case render blck description of
-                                Err err ->
-                                    found
-
-                                Ok rendered ->
-                                    Just rendered
-
-                        _ ->
-                            found
-
-                getRendered found existingResult =
-                    case existingResult of
-                        Err err ->
-                            Err err
-
-                        Ok existing ->
-                            case List.foldl (applyDesc found) Nothing blocks of
-                                Nothing ->
-                                    Err InvalidAst
-
-                                Just result ->
-                                    Ok (result :: existing)
-            in
-            case desc of
-                ManyOf range options found ->
-                    List.foldl getRendered (Ok []) found
-                        |> Result.map List.reverse
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.succeed
-            (\( range, found ) ->
-                -- TODO: the "posibilities" are probably a different type
-                -- because we don't have actual data
-                -- , only a description of what we'd expect.
-                ManyOf range [] found
-            )
-            |= withRange
-                (Parser.getIndent
-                    |> Parser.andThen
-                        (\indent ->
-                            Parser.loop ( False, [] )
-                                (blocksOrNewlines (Parser.oneOf (blockParser :: List.reverse childValues)) indent)
+    List.reverse
+        (List.map
+            (\numSpaces ->
+                Parser.succeed numSpaces
+                    |. Parser.token
+                        (Parser.Token (String.repeat numSpaces " ")
+                            (ExpectingIndent numSpaces)
                         )
-                )
+            )
+            (List.range bottom top)
         )
 
 
 {-| -}
-blocksOrNewlines : Parser Context Problem Description -> Int -> ( Bool, List Description ) -> Parser Context Problem (Parser.Step ( Bool, List Description ) (List Description))
+indentedString : Int -> String -> Parser Context Problem (Parser.Step String String)
+indentedString indent found =
+    Parser.oneOf
+        -- First line, indentation is already handled by the block constructor.
+        [ Parser.succeed
+            (\extra ->
+                Parser.Loop <|
+                    if extra then
+                        found ++ "\n\n"
+
+                    else
+                        found ++ "\n"
+            )
+            |. Parser.token (Parser.Token "\n" Newline)
+            |= Parser.oneOf
+                [ Parser.succeed True
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                , Parser.succeed False
+                ]
+        , if found == "" then
+            Parser.succeed (\str -> Parser.Loop (found ++ str))
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+
+          else
+            Parser.succeed
+                (\str ->
+                    Parser.Loop (found ++ str)
+                )
+                |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+        , Parser.succeed (Parser.Done found)
+        ]
+
+
+{-| -}
+blocksOrNewlines : Parser Context Problem thing -> Int -> ( Bool, List thing ) -> Parser Context Problem (Parser.Step ( Bool, List thing ) (List thing))
 blocksOrNewlines myParser indent ( parsedSomething, existing ) =
     Parser.oneOf
         [ Parser.end End
@@ -1361,9 +1581,6 @@ blocksOrNewlines myParser indent ( parsedSomething, existing ) =
                 (\_ ->
                     Parser.Done (List.reverse existing)
                 )
-
-        -- Whitespace Line
-        , skipBlankLinesWith (Parser.Loop ( True, existing ))
         , if not parsedSomething then
             -- First thing already has indentation accounted for.
             myParser
@@ -1380,466 +1597,577 @@ blocksOrNewlines myParser indent ( parsedSomething, existing ) =
                     )
                     |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
                     |= myParser
+                , Parser.succeed (Parser.Loop ( True, existing ))
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable newline
 
                 -- We reach here because the indentation parsing was not successful,
                 -- meaning the indentation has been lowered and the block is done
                 , Parser.succeed (Parser.Done (List.reverse existing))
                 ]
+
+        -- Whitespace Line
+        , Parser.succeed (Parser.Loop ( True, existing ))
+            |. Parser.chompWhile (\c -> c == ' ')
+            |. newline
         ]
 
 
-{-| -}
-oneOf : List (Block a) -> Block a
-oneOf blocks =
-    let
-        gatherParsers myBlock ( blks, vals ) =
-            case myBlock of
-                Block name _ blkParser ->
-                    ( blkParser :: blks, vals )
-
-                Value _ valueParser ->
-                    ( blks, valueParser :: vals )
-
-        ( childBlocks, childValues ) =
-            List.foldl gatherParsers ( [], [] ) blocks
-
-        blockParser =
-            Parser.succeed identity
-                |. Parser.token (Parser.Token "|" BlockStart)
-                |. Parser.oneOf
-                    [ Parser.chompIf (\c -> c == ' ') Space
-                    , Parser.succeed ()
-                    ]
-                |= Parser.oneOf (List.reverse childBlocks)
-
-        applyDesc description blck found =
-            case found of
-                Nothing ->
-                    case render blck description of
-                        Err err ->
-                            found
-
-                        Ok rendered ->
-                            Just rendered
-
-                _ ->
-                    found
-    in
-    Value
-        (\desc ->
-            case desc of
-                OneOf range options found ->
-                    case List.foldl (applyDesc found) Nothing blocks of
-                        Nothing ->
-                            Err InvalidAst
-
-                        Just result ->
-                            Ok result
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.succeed
-            (\( range, found ) ->
-                -- TODO: the "posibilities" are probably a different type because we don't have actual data
-                -- , only a description of what we'd expect.
-                OneOf range [] found
-            )
-            |= withRange
-                (Parser.oneOf
-                    (blockParser :: List.reverse childValues)
-                )
-        )
+skipBlankLineWith : thing -> Parser Context Problem thing
+skipBlankLineWith x =
+    Parser.succeed x
+        |. Parser.token (Parser.Token "\n" Newline)
+        |. Parser.oneOf
+            [ Parser.succeed ()
+                |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+            , Parser.succeed ()
+            ]
 
 
-integer : Parser Context Problem Int
+integer : Parser Context Problem (Found Int)
 integer =
-    Parser.oneOf
-        [ Parser.succeed (\num -> negate num)
-            |. Parser.token (Parser.Token "-" (Expecting "-"))
-            |= Parser.int Integer InvalidNumber
-        , Parser.int Integer InvalidNumber
-        ]
+    Parser.map
+        (\( pos, intResult ) ->
+            case intResult of
+                Ok i ->
+                    Found pos i
 
-
-floating : Parser Context Problem Float
-floating =
-    Parser.oneOf
-        [ Parser.succeed negate
-            |. Parser.token (Parser.Token "-" (Expecting "-"))
-            |= Parser.float FloatingPoint InvalidNumber
-        , Parser.float FloatingPoint InvalidNumber
-        ]
-
-
-{-| -}
-intBetween : Int -> Int -> Block Int
-intBetween one two =
-    let
-        top =
-            max one two
-
-        bottom =
-            min one two
-    in
-    Value
-        (\desc ->
-            case desc of
-                DescribeIntBetween low high range i ->
-                    Ok i
-
-                _ ->
-                    Err InvalidAst
+                Err str ->
+                    Unexpected
+                        { range = pos
+                        , problem = MsgBadInt str
+                        }
         )
-        (Parser.map
-            (\( range, i ) ->
-                if i >= bottom && i <= top then
-                    DescribeIntBetween bottom top range i
+        (withRange
+            (Parser.oneOf
+                [ Parser.succeed
+                    (\i str ->
+                        if str == "" then
+                            Ok (negate i)
 
-                else
-                    -- TODO: out of range, what do we do?
-                    DescribeIntBetween bottom top range i
-            )
-            (withRange integer)
-        )
-
-
-{-| -}
-floatBetween : Float -> Float -> Block Float
-floatBetween one two =
-    let
-        top =
-            max one two
-
-        bottom =
-            min one two
-    in
-    Value
-        (\desc ->
-            case desc of
-                DescribeFloatBetween low high range i ->
-                    Ok i
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.map
-            (\( range, i ) ->
-                if i >= bottom && i <= top then
-                    DescribeFloatBetween bottom top range i
-
-                else
-                    -- TODO: out of range, what do we do?
-                    DescribeFloatBetween bottom top range i
-            )
-            (withRange floating)
-        )
-
-
-{-| Parse either `True` or `False`.
--}
-bool : Block Bool
-bool =
-    Value
-        (\desc ->
-            case desc of
-                DescribeBoolean range i ->
-                    Ok i
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.map
-            (\( range, i ) ->
-                DescribeBoolean range i
-            )
-            (withRange
-                (Parser.oneOf
-                    [ Parser.token (Parser.Token "True" (Expecting "True"))
-                        |> Parser.map (always True)
-                    , Parser.token (Parser.Token "False" (Expecting "False"))
-                        |> Parser.map (always False)
-                    ]
-                )
-            )
-        )
-
-
-int : Block Int
-int =
-    Value
-        (\desc ->
-            case desc of
-                DescribeInteger range i ->
-                    Ok i
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.succeed
-            (\start val end ->
-                DescribeInteger { start = start, end = end } val
-            )
-            |= getPosition
-            |= integer
-            |= getPosition
-        )
-
-
-float : Block Float
-float =
-    Value
-        (\desc ->
-            case desc of
-                DescribeFloat range i ->
-                    Ok i
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.succeed
-            (\start val end ->
-                DescribeFloat { start = start, end = end } val
-            )
-            |= getPosition
-            |= floating
-            |= getPosition
-        )
-
-
-{-| Parse multiple lines at the current indentation level.
-
-For example:
-
-    Mark.block "Poem"
-        (\str -> str)
-        Mark.multiline
-
-Will parse the following:
-
-    | Poem
-        Whose woods these are I think I know.
-        His house is in the village though;
-        He will not see me stopping here
-        To watch his woods fill up with snow.
-
-Where `str` in the above function will be
-
-    """Whose woods these are I think I know.
-    His house is in the village though;
-    He will not see me stopping here
-    To watch his woods fill up with snow."""
-
--}
-multiline : Block String
-multiline =
-    Value
-        (\desc ->
-            case desc of
-                DescribeMultiline range i ->
-                    Ok i
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.map
-            (\( pos, str ) ->
-                DescribeMultiline pos str
-            )
-            (withRange
-                (Parser.getIndent
-                    |> Parser.andThen
-                        (\indent ->
-                            Parser.loop "" (indentedString indent)
-                        )
-                )
-            )
-        )
-
-
-indentedString : Int -> String -> Parser Context Problem (Parser.Step String String)
-indentedString indent found =
-    Parser.oneOf
-        -- First line, indentation is already handled by the block constructor.
-        [ if found == "" then
-            Parser.succeed (\str -> Parser.Loop (found ++ str))
-                |= Parser.getChompedString
-                    (Parser.chompWhile
-                        (\c -> c /= '\n')
+                        else
+                            Err (String.fromInt i ++ str)
                     )
+                    |. Parser.token (Parser.Token "-" (Expecting "-"))
+                    |= Parser.int Integer InvalidNumber
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+                , Parser.succeed
+                    (\i str ->
+                        if str == "" then
+                            Ok i
 
-          else
-            Parser.succeed (\str -> Parser.Loop (found ++ str))
-                |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
-                |= Parser.getChompedString
-                    (Parser.chompWhile
-                        (\c -> c /= '\n')
+                        else
+                            Err (String.fromInt i ++ str)
                     )
-        , Parser.succeed
-            (\extra ->
-                Parser.Loop <|
-                    if extra then
-                        found ++ "\n\n"
-
-                    else
-                        found ++ "\n"
-            )
-            |. Parser.token (Parser.Token "\n" Newline)
-            |= Parser.oneOf
-                [ Parser.succeed True
-                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
-                , Parser.succeed False
+                    |= Parser.int Integer InvalidNumber
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+                , Parser.succeed Err
+                    |= word
                 ]
-        , Parser.succeed (Parser.Done found)
-        ]
-
-
-string : Block String
-string =
-    Value
-        (\desc ->
-            case desc of
-                DescribeString range i ->
-                    Ok i
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.succeed
-            (\start val end ->
-                DescribeString { start = start, end = end } val
             )
-            |= getPosition
-            |= Parser.getChompedString
-                (Parser.chompWhile
-                    (\c -> c /= '\n')
-                )
-            |= getPosition
         )
 
 
-exactly : String -> value -> Block value
-exactly key value =
-    Value
-        (\desc ->
-            case desc of
-                DescribeStringExactly range existingKey ->
-                    if key == existingKey then
-                        Ok value
-
-                    else
-                        Err InvalidAst
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.succeed
-            (\start _ end ->
-                DescribeStringExactly { start = start, end = end } key
-            )
-            |= getPosition
-            |= Parser.token (Parser.Token key (Expecting key))
-            |= getPosition
-        )
-
-
-{-| Parse an ISO-8601 date string.
-
-Format: `YYYY-MM-DDTHH:mm:ss.SSSZ`
-
-Though you don't need to specify all segments, so `YYYY-MM-DD` works as well.
-
-Results in a `Posix` integer, which works well with [elm/time](https://package.elm-lang.org/packages/elm/time/latest/).
-
+{-| Parses a float and must end with whitespace, not additional characters.
 -}
-date : Block Time.Posix
-date =
-    Value
-        (\desc ->
-            case desc of
-                DescribeDate range i ->
-                    Ok i
+floating : Parser Context Problem (Found Float)
+floating =
+    Parser.map
+        (\( pos, floatResult ) ->
+            case floatResult of
+                Ok f ->
+                    Found pos f
 
-                _ ->
-                    Err InvalidAst
+                Err str ->
+                    Unexpected
+                        { range = pos
+                        , problem = MsgBadFloat str
+                        }
         )
-        (Parser.map
-            (\( pos, parsedPosix ) ->
-                case parsedPosix of
-                    Err str ->
-                        DescribeBadDate pos str
+        (withRange
+            (Parser.oneOf
+                [ Parser.succeed
+                    (\fl str ->
+                        if str == "" then
+                            Ok (negate fl)
 
-                    Ok posix ->
-                        DescribeDate pos posix
-            )
-            (withRange
-                (Parser.getChompedString
-                    (Parser.chompWhile
-                        (\c -> c /= '\n')
+                        else
+                            Err (String.fromFloat fl ++ str)
                     )
-                    |> Parser.andThen
-                        (\str ->
-                            case Iso8601.toTime str of
-                                Err err ->
-                                    Parser.succeed
-                                        (Err str)
+                    |. Parser.token (Parser.Token "-" (Expecting "-"))
+                    |= Parser.float FloatingPoint InvalidNumber
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+                , Parser.succeed
+                    (\fl str ->
+                        if str == "" then
+                            Ok fl
 
-                                Ok parsedPosix ->
-                                    Parser.succeed (Ok parsedPosix)
-                        )
-                )
+                        else
+                            Err (String.fromFloat fl ++ str)
+                    )
+                    |= Parser.float FloatingPoint InvalidNumber
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+                , Parser.succeed Err
+                    |= word
+                ]
             )
         )
 
 
-type AstError
-    = InvalidAst
+
+{- PARSER HELPERS -}
 
 
-{-| Replace a string with another string. This can be useful to have shortcuts to unicode characters.
-
-For example, in `Mark.Default`, this is used to replace `...` with the unicode ellipses character: `…`.
-
--}
-replacement : String -> String -> Replacement
-replacement =
-    Replacement
-
-
-{-| A balanced replacement. This is used in `Mark.Default` to do auto-curly quotes.
-
-    Mark.balanced
-        { start = ( "\"", "“" )
-        , end = ( "\"", "”" )
-        }
-
--}
-balanced :
-    { start : ( String, String )
-    , end : ( String, String )
-    }
-    -> Replacement
-balanced =
-    Balanced
+withRange : Parser Context Problem thing -> Parser Context Problem ( Range Position, thing )
+withRange parser =
+    Parser.succeed
+        (\start val end ->
+            ( { start = start, end = end }, val )
+        )
+        |= getPosition
+        |= parser
+        |= getPosition
 
 
-empty : Text
-empty =
-    Text [] ""
+word : Parser Context Problem String
+word =
+    Parser.chompWhile Char.isAlphaNum
+        |> Parser.getChompedString
+
+
+peek : String -> Parser c p thing -> Parser c p thing
+peek name parser =
+    Parser.succeed
+        (\start val end src ->
+            let
+                highlight =
+                    String.repeat (start.column - 1) " " ++ String.repeat (max 0 (end.column - start.column)) "^"
+
+                fullLine =
+                    String.slice (max 0 (start.offset - start.column)) end.offset src
+
+                _ =
+                    Debug.log name
+                        fullLine
+
+                _ =
+                    Debug.log name
+                        highlight
+            in
+            val
+        )
+        |= getPosition
+        |= parser
+        |= getPosition
+        |= Parser.getSource
+
+
+getPosition : Parser c p Position
+getPosition =
+    Parser.succeed
+        (\offset ( row, col ) ->
+            { offset = offset
+            , line = row
+            , column = col
+            }
+        )
+        |= Parser.getOffset
+        |= Parser.getPosition
+
+
+
+{- RECORD HELPERS -}
 
 
 {-| -}
-emptyText : TextAccumulator rendered
-emptyText =
-    TextAccumulator
-        { text = empty
-        , rendered = []
-        , balancedReplacements = []
-        }
+type Field value
+    = Field String (Block value)
+
+
+{-| -}
+field : String -> Block value -> Field value
+field name child =
+    Field name child
+
+
+fieldParser : Field value -> ( String, Parser Context Problem ( String, Found Description ) )
+fieldParser (Field name myBlock) =
+    ( name
+    , withFieldName
+        name
+        (getParser myBlock)
+    )
+
+
+fieldName : Field v -> String
+fieldName (Field name _) =
+    name
+
+
+fieldExpectation (Field name fieldBlock) =
+    ( name, getBlockExpectation fieldBlock )
 
 
 
+{- RECORD PARSER HELPERS -}
+
+
+parseRecord :
+    String
+    -> Expectation
+    -> List ( String, Parser Context Problem ( String, Found Description ) )
+    -> Parser Context Problem Description
+parseRecord recordName expectations fields =
+    Parser.succeed
+        (\( pos, foundFields ) ->
+            case foundFields of
+                Ok ok ->
+                    Record recordName
+                        { expected = expectations
+                        , found =
+                            Found pos ok
+                        }
+
+                Err ( maybePosition, problem ) ->
+                    Record recordName
+                        { expected = expectations
+                        , found =
+                            Unexpected
+                                --unexpected
+                                { range = Maybe.withDefault pos maybePosition
+                                , problem = problem
+                                }
+                        }
+        )
+        |= withRange
+            (Parser.getIndent
+                |> Parser.andThen
+                    (\indent ->
+                        Parser.succeed identity
+                            |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |. Parser.chompIf (\c -> c == '\n') Newline
+                            |= Parser.withIndent (indent + 4)
+                                (Parser.loop
+                                    { remaining = fields
+                                    , found = Ok []
+                                    }
+                                    (parseFields recordName (List.map Tuple.first fields))
+                                )
+                    )
+            )
+
+
+withFieldName : String -> Parser Context Problem Description -> Parser Context Problem ( String, Found Description )
+withFieldName name parser =
+    Parser.getIndent
+        |> Parser.andThen
+            (\indent ->
+                Parser.map
+                    (\( pos, description ) ->
+                        ( name, Found pos description )
+                    )
+                <|
+                    withRange
+                        (Parser.succeed identity
+                            |. Parser.keyword (Parser.Token name (ExpectingFieldName name))
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |= Parser.withIndent (indent + 4) (Parser.inContext (InRecordField name) parser)
+                        )
+            )
+
+
+unexpectedField recordName options =
+    Parser.getIndent
+        |> Parser.andThen
+            (\indent ->
+                let
+                    _ =
+                        Debug.log "unexpected indent" indent
+                in
+                Parser.map
+                    (\( range, ( name, content ) ) ->
+                        ( name
+                        , Unexpected
+                            { range = range
+                            , problem =
+                                MsgUnexpectedField
+                                    { found = name
+                                    , options = options
+                                    , recordName = recordName
+                                    }
+                            }
+                        )
+                    )
+                    (withRange
+                        (Parser.succeed Tuple.pair
+                            |= Parser.getChompedString (Parser.chompWhile Char.isAlphaNum)
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            -- TODO: parse multiline string
+                            |= Parser.withIndent (indent + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
+                         -- |. newline
+                         -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
+                        )
+                    )
+            )
+
+
+resultToFound result =
+    case result of
+        Ok ( range, desc ) ->
+            Found range desc
+
+        Err ( range, problem ) ->
+            Unexpected
+                { range = range
+                , problem = problem
+                }
+
+
+renderRecordResult renderUnexpected pos result =
+    case result of
+        Ok parsedCorrectly ->
+            case parsedCorrectly of
+                Ok rendered ->
+                    Ok (Found pos rendered)
+
+                Err unexpected ->
+                    Ok
+                        (Found
+                            pos
+                            (renderUnexpected unexpected)
+                        )
+
+        Err problem ->
+            Ok
+                (Found pos
+                    (renderUnexpected
+                        { problem = problem
+                        , range = pos
+                        }
+                    )
+                )
+
+
+type alias RecordFields =
+    { remaining : List ( String, Parser Context Problem ( String, Found Description ) )
+    , found : Result ( Maybe (Range Position), ProblemMessage ) (List ( String, Found Description ))
+    }
+
+
+type Indented thing
+    = Indented thing
+    | WeirdIndent Int
+    | EmptyLine
+
+
+{-| Either:
+
+    1. Parses indent ++ parser ++ newline
+        -> Success!
+    2. Parses many spaces ++ newline
+        -> Ignore completely
+    3. Parses some number of spaces ++ some not newlines ++ newline
+        -> Is improperly indented
+
+-}
+indentOrSkip indent successParser =
+    Parser.oneOf
+        [ Parser.succeed identity
+            |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
+            |= Parser.oneOf
+                [ Parser.map (always EmptyLine) newline
+                , Parser.succeed
+                    (\foundIndent content ->
+                        if content /= "" then
+                            WeirdIndent (String.length foundIndent)
+
+                        else
+                            EmptyLine
+                    )
+                    |. Parser.chompIf (\c -> c == ' ') Space
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
+                    |. newline
+                , Parser.succeed Indented
+                    |= successParser
+                    |. newline
+                ]
+        , Parser.succeed
+            (\foundIndent hasContent ->
+                if hasContent then
+                    WeirdIndent (String.length foundIndent)
+
+                else
+                    EmptyLine
+            )
+            |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
+            |= Parser.oneOf
+                [ Parser.map (always False) newline
+                , Parser.succeed True
+                    |. Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
+                    |. newline
+                ]
+        ]
+
+
+newline =
+    Parser.token (Parser.Token "\n" Newline)
+
+
+{-| -}
+parseFields :
+    String
+    -> List String
+    -> RecordFields
+    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe (Range Position), ProblemMessage ) (List ( String, Found Description ))))
+parseFields recordName fieldNames fields =
+    case fields.remaining of
+        [] ->
+            Parser.succeed (Parser.Done fields.found)
+
+        _ ->
+            case fields.found of
+                Ok found ->
+                    Parser.getIndent
+                        |> Parser.andThen
+                            (\indent ->
+                                Parser.oneOf
+                                    [ indentOrSkip indent (captureField found recordName fields fieldNames)
+                                        |> Parser.map
+                                            (\indentedField ->
+                                                case indentedField of
+                                                    Indented thing ->
+                                                        thing
+
+                                                    EmptyLine ->
+                                                        Parser.Loop fields
+
+                                                    WeirdIndent i ->
+                                                        Parser.Loop
+                                                            { found =
+                                                                Err ( Nothing, MsgExpectingIndent indent )
+                                                            , remaining =
+                                                                fields.remaining
+                                                            }
+                                            )
+
+                                    -- We've reached here because:
+                                    -- 1. We still have expected fields, but we didn't parse them.
+                                    -- 2. No other errors occurred.
+                                    -- 3. We did not find the correct indentation
+                                    -- 4. And This is not a blank line
+                                    -- So, the only thing left is that we have some fields that we didn't parse
+                                    , Parser.succeed
+                                        (Parser.Done
+                                            (Err
+                                                ( Nothing, MsgMissingFields (List.map Tuple.first fields.remaining) )
+                                            )
+                                        )
+                                    ]
+                            )
+
+                Err unexpected ->
+                    -- We've encountered an error, but we still need to parse
+                    -- the entire indented block.  so that the parser can continue.
+                    Parser.getIndent
+                        |> Parser.andThen
+                            (\indent ->
+                                Parser.succeed (Parser.Done fields.found)
+                                    |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
+                            )
+
+
+captureField found recordName fields fieldNames =
+    Parser.map
+        (\maybeField ->
+            case maybeField of
+                Nothing ->
+                    Parser.Loop fields
+
+                Just ( foundFieldname, fieldValue ) ->
+                    case fieldValue of
+                        Found _ _ ->
+                            Parser.Loop
+                                { found = Ok (( foundFieldname, fieldValue ) :: found)
+                                , remaining =
+                                    List.filter
+                                        (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
+                                        fields.remaining
+                                }
+
+                        Unexpected unexpected ->
+                            Parser.Loop
+                                { found = Err ( Just unexpected.range, unexpected.problem )
+                                , remaining =
+                                    List.filter
+                                        (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
+                                        fields.remaining
+                                }
+        )
+        (Parser.oneOf
+            (List.map (Parser.map Just << Tuple.second) fields.remaining
+                ++ [ Parser.map Just (unexpectedField recordName fieldNames)
+                   ]
+            )
+        )
+
+
+
+{- RECORD RENDERER HELPERS -}
+
+
+applyField : Found a -> Result UnexpectedDetails (a -> b) -> Result UnexpectedDetails b
+applyField foundField possiblyFn =
+    case possiblyFn of
+        Err err ->
+            Err err
+
+        Ok fn ->
+            case foundField of
+                Found pos desc ->
+                    Ok (fn desc)
+
+                Unexpected unexpected ->
+                    Err unexpected
+
+
+getField : Field value -> List ( String, Found Description ) -> Result ProblemMessage (Found value)
+getField (Field name fieldBlock) fields =
+    List.foldl (matchField name fieldBlock) (Err (MsgMissingFields [ name ])) fields
+
+
+matchField : String -> Block value -> ( String, Found Description ) -> Result ProblemMessage (Found value) -> Result ProblemMessage (Found value)
+matchField targetName targetBlock ( name, foundDescription ) existing =
+    case existing of
+        Ok _ ->
+            existing
+
+        Err err ->
+            if name == targetName then
+                case foundDescription of
+                    Found rng description ->
+                        case renderBlock targetBlock description of
+                            Ok rendered ->
+                                Ok rendered
+
+                            Err invalidAst ->
+                                Err err
+
+                    Unexpected unexpected ->
+                        Ok (Unexpected unexpected)
+
+            else
+                existing
+
+
+
+{- NESTED LIST HELPERS -}
 {- Nested Lists -}
 
 
@@ -1909,15 +2237,6 @@ type Level item
     = Level (List (Nested item))
 
 
-{-| -}
-type Nested item
-    = Nested
-        { content : item
-        , children :
-            List (Nested item)
-        }
-
-
 emptyTreeBuilder : TreeBuilder item
 emptyTreeBuilder =
     TreeBuilder
@@ -1926,69 +2245,7 @@ emptyTreeBuilder =
         }
 
 
-{-| It can be useful to parse a tree structure. For example, here's a nested list.
-
-    | List
-        - item one
-        - item two
-            - nested item two
-            additional text for nested item two
-        - item three
-            - nested item three
-
-In order to parse the above, you could define a block as
-
-    Mark.block "List"
-        (\(Nested nested) ->
-            -- Do something with nested.content and nested.children
-        )
-        (Mark.nested
-            { item = text
-            , start = Mark.exactly "-" ()
-            }
-        )
-
-**Note** the indentation is always a multiple of 4.
-**Another Note** `text` in the above code is defined elsewhere.
-
--}
-nested :
-    { item : Block item
-    , start : Block icon
-    }
-    -> Block (List (Nested ( icon, List item )))
-nested config =
-    Value
-        (\description ->
-            case Debug.log "mapping" description of
-                DescribeTree range nestedDescriptors ->
-                    reduceRender (renderTreeNodeSmall config) nestedDescriptors
-
-                _ ->
-                    Err InvalidAst
-        )
-        (Parser.getIndent
-            |> Parser.andThen
-                (\baseIndent ->
-                    Parser.map
-                        (\( pos, result ) ->
-                            DescribeTree pos <| buildTree baseIndent result
-                        )
-                        (withRange
-                            (Parser.loop
-                                ( { base = baseIndent
-                                  , prev = baseIndent
-                                  }
-                                , []
-                                )
-                                (indentedBlocksOrNewlines config.start config.item)
-                            )
-                        )
-                )
-        )
-
-
-reduceRender : (thing -> Result AstError other) -> List thing -> Result AstError (List other)
+reduceRender : (thing -> Result AstError (Found other)) -> List thing -> Result AstError (Result UnexpectedDetails (List other))
 reduceRender fn list =
     List.foldl
         (\x gathered ->
@@ -1996,17 +2253,25 @@ reduceRender fn list =
                 Err _ ->
                     gathered
 
-                Ok remain ->
+                Ok (Err unexpected) ->
+                    gathered
+
+                Ok (Ok remain) ->
                     case fn x of
                         Err err ->
                             Err err
 
-                        Ok success ->
-                            Ok (success :: remain)
+                        Ok foundSuccess ->
+                            case foundSuccess of
+                                Found _ success ->
+                                    Ok (Ok (success :: remain))
+
+                                Unexpected unexpected ->
+                                    Ok (Err unexpected)
         )
-        (Ok [])
+        (Ok (Ok []))
         list
-        |> Result.map List.reverse
+        |> Result.map (Result.map List.reverse)
 
 
 renderTreeNodeSmall :
@@ -2014,7 +2279,7 @@ renderTreeNodeSmall :
     , start : Block icon
     }
     -> Nested ( Description, List Description )
-    -> Result AstError (Nested ( icon, List item ))
+    -> Result AstError (Found (Nested ( icon, List item )))
 renderTreeNodeSmall config (Nested cursor) =
     let
         renderedChildren =
@@ -2023,23 +2288,33 @@ renderTreeNodeSmall config (Nested cursor) =
         renderedContent =
             case cursor.content of
                 ( icon, content ) ->
-                    ( render config.start icon
-                    , reduceRender (render config.item) content
+                    ( renderBlock config.start icon
+                    , reduceRender (renderBlock config.item) content
                     )
     in
     case renderedContent of
-        ( Ok icon, Ok content ) ->
+        ( Ok (Found pos icon), Ok (Ok content) ) ->
             case renderedChildren of
                 Err err ->
                     Err err
 
-                Ok successfullyRenderedChildren ->
+                Ok (Ok successfullyRenderedChildren) ->
                     Ok
-                        (Nested
-                            { content = ( icon, content )
-                            , children = successfullyRenderedChildren
-                            }
+                        (Found pos <|
+                            Nested
+                                { content = ( icon, content )
+                                , children = successfullyRenderedChildren
+                                }
                         )
+
+                Ok (Err unexpected) ->
+                    Ok (Unexpected unexpected)
+
+        ( Ok (Unexpected unexpected), _ ) ->
+            Ok (Unexpected unexpected)
+
+        ( _, Ok (Err unexpected) ) ->
+            Ok (Unexpected unexpected)
 
         ( Err err, _ ) ->
             Err err
@@ -2152,7 +2427,7 @@ indentedBlocksOrNewlines icon item ( indent, existing ) =
                 )
 
         -- Whitespace Line
-        , skipBlankLinesWith (Parser.Loop ( indent, existing ))
+        , skipBlankLineWith (Parser.Loop ( indent, existing ))
         , case existing of
             [] ->
                 -- Indent is already parsed by the block constructor for first element, skip it
@@ -2484,1535 +2759,3 @@ reverseTree (Nested nest) =
 
 rev nest found =
     reverseTree nest :: found
-
-
-
-{- Text Parsing -}
-
-
-{-| Handling formatted text is a little more involved than may be initially apparent.
-
-Text styling can be overlapped such as
-
-    /My italicized sentence can have *bold*/
-
-In order to render this, the above sentence is chopped up into `Text` fragments that can have multiple styles active.
-
-  - `view` is the function to render an individual fragment.
-  - `inlines` are custom inline blocks. These are how links are implemented in `Mark.Default`!
-  - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
-
-**Note** check out `Mark.Default.text` to see an example.
-
--}
-text :
-    { view : Range Position -> Text -> rendered
-    , inlines : List (Inline rendered)
-    , replacements : List Replacement
-    }
-    -> Block (List rendered)
-text options =
-    Value
-        (renderText options)
-        (getPosition
-            |> Parser.andThen
-                (\pos ->
-                    styledTextParser
-                        { inlines = List.map getPotentialInline options.inlines
-                        , replacements = options.replacements
-                        }
-                        pos
-                        []
-                        []
-                )
-        )
-
-
-getPotentialInline (Inline name renderer potential) =
-    -- TODO: allow styles to be passed through the custom inline barrier
-    potential []
-
-
-renderText :
-    { view : Range Position -> Text -> rendered
-    , inlines : List (Inline rendered)
-    , replacements : List Replacement
-    }
-    -> Description
-    -> Result AstError (List rendered)
-renderText options description =
-    case description of
-        DescribeText range textNodes ->
-            -- TODO: Capture individual Failures
-            List.foldl (renderTextComponent options) (Ok []) textNodes
-                |> Result.map List.reverse
-
-        _ ->
-            Err InvalidAst
-
-
-renderTextComponent options comp existing =
-    case existing of
-        Err _ ->
-            existing
-
-        Ok found ->
-            case comp of
-                Styled range textEl ->
-                    Ok (options.view range textEl :: found)
-
-                DescribeInline name range foundInline ->
-                    case List.foldl (renderInline name range (List.reverse foundInline)) (Err InvalidAst) options.inlines of
-                        Err err ->
-                            Err err
-
-                        Ok list ->
-                            Ok (list ++ found)
-
-
-renderInline name range pieces (Inline inlineName inlineRenderer inlinePotential) found =
-    case found of
-        Ok _ ->
-            found
-
-        Err error ->
-            if name == inlineName then
-                -- inlineRenderer
-                inlineRenderer pieces
-
-            else
-                found
-
-
-{-| -}
-type TextCursor
-    = TextCursor
-        { current : Text
-        , start : Position
-        , found : List TextDescription
-        , balancedReplacements : List String
-        }
-
-
-styledTextParser :
-    { inlines : List PotentialInline
-    , replacements : List Replacement
-    }
-    -> Position
-    -> List Style
-    -> List Char
-    -> Parser Context Problem Description
-styledTextParser options startingPos inheritedStyles until =
-    let
-        vacantText =
-            TextCursor
-                { current = Text inheritedStyles ""
-                , found = []
-                , start = startingPos
-                , balancedReplacements = []
-                }
-
-        untilStrings =
-            List.map String.fromChar until
-
-        meaningful =
-            '\\' :: '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
-    in
-    Parser.oneOf
-        [ -- Parser.chompIf (\c -> c == ' ') CantStartTextWithSpace
-          -- -- TODO: return error description
-          -- |> Parser.andThen
-          --     (\_ ->
-          --         Parser.problem CantStartTextWithSpace
-          --     )
-          Parser.map
-            (\( pos, textNodes ) ->
-                DescribeText pos textNodes
-            )
-          <|
-            withRange
-                (Parser.loop vacantText
-                    (styledTextParserLoop options meaningful untilStrings)
-                )
-        ]
-
-
-{-| -}
-styledTextParserLoop :
-    { inlines : List PotentialInline
-    , replacements : List Replacement
-    }
-    -> List Char
-    -> List String
-    -> TextCursor
-    -> Parser Context Problem (Parser.Step TextCursor (List TextDescription))
-styledTextParserLoop options meaningful untilStrings found =
-    Parser.oneOf
-        [ Parser.oneOf (replace options.replacements found)
-            |> Parser.map Parser.Loop
-
-        -- If a char matches the first character of a replacement,
-        -- but didn't match the full replacement captured above,
-        -- then stash that char.
-        , Parser.oneOf (almostReplacement options.replacements found)
-            |> Parser.map Parser.Loop
-
-        -- Capture style command characters
-        , Parser.succeed
-            (Parser.Loop << changeStyle options found)
-            |= Parser.oneOf
-                [ Parser.map (always (Just Italic)) (Parser.token (Parser.Token "/" (Expecting "/")))
-                , Parser.map (always (Just Strike)) (Parser.token (Parser.Token "~" (Expecting "~")))
-                , Parser.map (always (Just Bold)) (Parser.token (Parser.Token "*" (Expecting "*")))
-                ]
-
-        -- Custom inline block
-        , Parser.succeed
-            (\start rendered end ->
-                let
-                    current =
-                        case changeStyle options found Nothing of
-                            TextCursor accum ->
-                                accum
-                in
-                Parser.Loop
-                    (TextCursor
-                        { found = rendered :: current.found
-                        , start = end
-
-                        -- TODO: This should inherit formatting from the inline parser
-                        , current = empty
-                        , balancedReplacements = current.balancedReplacements
-                        }
-                    )
-            )
-            |= getPosition
-            |. Parser.token
-                (Parser.Token "{" InlineStart)
-            |= Parser.oneOf
-                (List.map
-                    (\(PotentialInline inlineName inlineComponents) ->
-                        Parser.inContext
-                            (InInline inlineName)
-                            (parseInline inlineName inlineComponents)
-                    )
-                    options.inlines
-                )
-            |. Parser.token (Parser.Token "}" InlineEnd)
-            |= getPosition
-        , -- chomp until a meaningful character
-          Parser.chompWhile
-            (\c ->
-                not (List.member c meaningful)
-            )
-            |> Parser.getChompedString
-            |> Parser.andThen
-                (\new ->
-                    if new == "" || new == "\n" then
-                        case changeStyle options found Nothing of
-                            TextCursor txt ->
-                                let
-                                    styling =
-                                        case txt.current of
-                                            Text s _ ->
-                                                s
-                                in
-                                -- TODO: What to do on unclosed styling?
-                                -- if List.isEmpty styling then
-                                Parser.succeed (Parser.Done (List.reverse txt.found))
-                        -- else
-                        -- Parser.problem (UnclosedStyles styling)
-
-                    else
-                        Parser.succeed (Parser.Loop (addText new found))
-                )
-        ]
-
-
-parseInline : String -> List PotentialInlineVal -> Parser Context Problem TextDescription
-parseInline name components =
-    case components of
-        [] ->
-            Parser.succeed (\( range, _ ) -> DescribeInline name range [])
-                |= withRange (Parser.keyword (Parser.Token name (ExpectingInlineName name)))
-
-        _ ->
-            Parser.succeed (\( range, foundComponents ) -> DescribeInline name range foundComponents)
-                |= withRange
-                    (Parser.succeed identity
-                        |. Parser.keyword (Parser.Token name (ExpectingInlineName name))
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= Parser.loop ( components, [] ) parseInlineComponents
-                    )
-
-
-parseInlineComponents ( components, found ) =
-    case components of
-        [] ->
-            Parser.succeed (Parser.Done (List.reverse found))
-
-        current :: remaining ->
-            case current of
-                PotentialInlineString inlineName ->
-                    Parser.succeed
-                        (\start str end ->
-                            Parser.Loop
-                                ( remaining
-                                , DescribeInlineString
-                                    inlineName
-                                    { start = start
-                                    , end = end
-                                    }
-                                    str
-                                    :: found
-                                )
-                        )
-                        |. Parser.chompIf (\c -> c == '|') (Expecting "|")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= getPosition
-                        |. Parser.keyword
-                            (Parser.Token
-                                inlineName
-                                (ExpectingFieldName inlineName)
-                            )
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= Parser.getChompedString
-                            (Parser.chompWhile (\c -> c /= '|' && c /= '}'))
-                        |= getPosition
-
-                PotentialInlineText ->
-                    Parser.succeed
-                        (\start str end ->
-                            Parser.Loop
-                                ( remaining
-                                , DescribeInlineText
-                                    { start = start
-                                    , end = end
-                                    }
-                                    str
-                                    :: found
-                                )
-                        )
-                        |. Parser.chompIf (\c -> c == '|') (Expecting "|")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= getPosition
-                        |= Parser.loop [] (parseInlineText { replacements = [] })
-                        |= getPosition
-
-
-{-| -}
-parseInlineText :
-    { replacements : List Replacement
-    }
-    -> List Text
-    -> Parser Context Problem (Parser.Step (List Text) (List Text))
-parseInlineText options found =
-    Parser.oneOf
-        [ --     Parser.oneOf (replace options.replacements found)
-          --     |> Parser.map Parser.Loop
-          -- -- If a char matches the first character of a replacement,
-          -- -- but didn't match the full replacement captured above,
-          -- -- then stash that char.
-          -- , Parser.oneOf (almostReplacement options.replacements found)
-          --     |> Parser.map Parser.Loop
-          -- Capture style command characters
-          Parser.succeed
-            (Parser.Loop << changeStyleOnText found)
-            |= Parser.oneOf
-                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
-
-                -- , Parser.map (always rline)) (Parser.token (Parser.Token "_" (Expecting "_")))
-                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
-                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
-
-                -- , Parser.map (always (Just Code)) (Parser.token (Parser.Token "`" (Expecting "`")))
-                ]
-        , -- chomp until a meaningful character
-          Parser.chompWhile
-            (\c ->
-                not (List.member c [ '}', '/', '|', '*', '~' ])
-            )
-            |> Parser.getChompedString
-            |> Parser.andThen
-                (\new ->
-                    if new == "" || new == "\n" then
-                        -- TODO: Warning about unclosed styles
-                        Parser.succeed (Parser.Done (List.reverse found))
-
-                    else
-                        Parser.succeed (Parser.Loop (addTextToText new found))
-                )
-        ]
-
-
-currentStyles (TextAccumulator formatted) =
-    case formatted.text of
-        Text s _ ->
-            s
-
-
-{-| -}
-almostReplacement : List Replacement -> TextCursor -> List (Parser Context Problem TextCursor)
-almostReplacement replacements existing =
-    let
-        captureChar char =
-            Parser.succeed
-                (\c ->
-                    addText c existing
-                )
-                |= Parser.getChompedString
-                    (Parser.chompIf (\c -> c == char && char /= '{' && char /= '*' && char /= '/') EscapedChar)
-
-        first repl =
-            case repl of
-                Replacement x y ->
-                    firstChar x
-
-                Balanced range ->
-                    firstChar (Tuple.first range.start)
-
-        allFirstChars =
-            List.filterMap first replacements
-    in
-    List.map captureChar allFirstChars
-
-
-{-| **Reclaimed typography**
-
-This function will replace certain characters with improved typographical ones.
-Escaping a character will skip the replacement.
-
-    -> "<>" -> a non-breaking space.
-        - This can be used to glue words together so that they don't break
-        - It also avoids being used for spacing like `&nbsp;` because multiple instances will collapse down to one.
-    -> "--" -> "en-dash"
-    -> "---" -> "em-dash".
-    -> Quotation marks will be replaced with curly quotes.
-    -> "..." -> ellipses
-
--}
-replace : List Replacement -> TextCursor -> List (Parser Context Problem TextCursor)
-replace replacements existing =
-    let
-        -- Escaped characters are captured as-is
-        escaped =
-            Parser.succeed
-                (\esc ->
-                    existing
-                        |> addText esc
-                )
-                |. Parser.token
-                    (Parser.Token "\\" Escape)
-                |= Parser.getChompedString
-                    (Parser.chompIf (always True) EscapedChar)
-
-        replaceWith repl =
-            case repl of
-                Replacement x y ->
-                    Parser.succeed
-                        (\_ ->
-                            addText y existing
-                        )
-                        |. Parser.token (Parser.Token x (Expecting x))
-                        |= Parser.succeed ()
-
-                Balanced range ->
-                    let
-                        balanceCache =
-                            case existing of
-                                TextCursor cursor ->
-                                    cursor.balancedReplacements
-
-                        id =
-                            balanceId range
-                    in
-                    -- TODO: implement range replacement
-                    if List.member id balanceCache then
-                        case range.end of
-                            ( x, y ) ->
-                                Parser.succeed
-                                    (addText y existing
-                                        |> removeBalance id
-                                    )
-                                    |. Parser.token (Parser.Token x (Expecting x))
-
-                    else
-                        case range.start of
-                            ( x, y ) ->
-                                Parser.succeed
-                                    (addText y existing
-                                        |> addBalance id
-                                    )
-                                    |. Parser.token (Parser.Token x (Expecting x))
-    in
-    escaped :: List.map replaceWith replacements
-
-
-balanceId balance =
-    let
-        join ( x, y ) =
-            x ++ y
-    in
-    join balance.start ++ join balance.end
-
-
-stylingChars =
-    [ '~'
-
-    -- , '_'
-    , '/'
-    , '*'
-    , '\n'
-    , '{'
-
-    -- , '`'
-    ]
-
-
-firstChar str =
-    case String.uncons str of
-        Nothing ->
-            Nothing
-
-        Just ( fst, _ ) ->
-            Just fst
-
-
-replacementStartingChars replacements =
-    let
-        first repl =
-            case repl of
-                Replacement x y ->
-                    firstChar x
-
-                Balanced range ->
-                    firstChar (Tuple.first range.start)
-    in
-    List.filterMap first replacements
-
-
-addBalance id (TextCursor cursor) =
-    TextCursor <|
-        { cursor | balancedReplacements = id :: cursor.balancedReplacements }
-
-
-removeBalance id (TextCursor cursor) =
-    TextCursor <|
-        { cursor | balancedReplacements = List.filter ((/=) id) cursor.balancedReplacements }
-
-
-addTextToText newString textNodes =
-    case textNodes of
-        [] ->
-            [ Text [] newString ]
-
-        (Text styles txt) :: remaining ->
-            Text styles (txt ++ newString) :: remaining
-
-
-addText newTxt (TextCursor cursor) =
-    case cursor.current of
-        Text styles txt ->
-            TextCursor { cursor | current = Text styles (txt ++ newTxt) }
-
-
-changeStyle options (TextCursor cursor) maybeStyleToken =
-    let
-        cursorText =
-            case cursor.current of
-                Text _ txt ->
-                    txt
-
-        newText =
-            case maybeStyleToken of
-                Nothing ->
-                    cursor.current
-
-                Just sty ->
-                    case sty of
-                        Bold ->
-                            flipStyle Bold cursor.current
-
-                        Italic ->
-                            flipStyle Italic cursor.current
-
-                        Strike ->
-                            flipStyle Strike cursor.current
-    in
-    if cursorText == "" then
-        TextCursor
-            { found = cursor.found
-            , current = newText
-            , start = cursor.start
-            , balancedReplacements = cursor.balancedReplacements
-            }
-
-    else
-        let
-            end =
-                measure cursor.start cursorText
-        in
-        TextCursor
-            { found =
-                Styled
-                    { start = cursor.start
-                    , end = end
-                    }
-                    cursor.current
-                    :: cursor.found
-            , start = end
-            , current = newText
-            , balancedReplacements = cursor.balancedReplacements
-            }
-
-
-changeStyleOnText textNodes styleToken =
-    case textNodes of
-        [] ->
-            case styleToken of
-                Bold ->
-                    [ Text [ Bold ] "" ]
-
-                Italic ->
-                    [ Text [ Italic ] "" ]
-
-                Strike ->
-                    [ Text [ Strike ] "" ]
-
-        current :: remaining ->
-            let
-                newText =
-                    case styleToken of
-                        Bold ->
-                            flipStyle Bold current
-
-                        Italic ->
-                            flipStyle Italic current
-
-                        Strike ->
-                            flipStyle Strike current
-            in
-            newText :: current :: remaining
-
-
-measure start textStr =
-    let
-        len =
-            String.length textStr
-    in
-    { start
-        | offset = start.offset + len
-        , column = start.column + len
-    }
-
-
-flipStyle newStyle textStyle =
-    case textStyle of
-        Text styles str ->
-            if List.member newStyle styles then
-                Text (List.filter ((/=) newStyle) styles) ""
-
-            else
-                Text (newStyle :: styles) ""
-
-
-
-{- PARSER HELPERS -}
-
-
-withRange : Parser Context Problem thing -> Parser Context Problem ( Range Position, thing )
-withRange parser =
-    Parser.succeed
-        (\start val end ->
-            ( { start = start, end = end }, val )
-        )
-        |= getPosition
-        |= parser
-        |= getPosition
-
-
-peek : String -> Parser c p thing -> Parser c p thing
-peek name parser =
-    Parser.succeed
-        (\start val end src ->
-            let
-                highlight =
-                    String.repeat (start.column - 1) " " ++ String.repeat (max 0 (end.column - start.column)) "^"
-
-                fullLine =
-                    String.slice (max 0 (start.offset - start.column)) end.offset src
-
-                _ =
-                    Debug.log name
-                        fullLine
-
-                _ =
-                    Debug.log name
-                        highlight
-            in
-            val
-        )
-        |= getPosition
-        |= parser
-        |= getPosition
-        |= Parser.getSource
-
-
-getPosition : Parser c p Position
-getPosition =
-    Parser.succeed
-        (\offset ( row, col ) ->
-            { offset = offset
-            , line = row
-            , column = col
-            }
-        )
-        |= Parser.getOffset
-        |= Parser.getPosition
-
-
-
-{- ERROR MESSAGES -}
-
-
-{-| -}
-errorToString : ErrorMessage -> String
-errorToString msg =
-    formatErrorString msg
-
-
-formatErrorString error =
-    String.toUpper error.title
-        ++ "\n\n"
-        ++ String.join "" (List.map .text error.message)
-
-
-type Theme
-    = Dark
-    | Light
-
-
-{-| -}
-errorToHtml : Theme -> ErrorMessage -> Html.Html msg
-errorToHtml theme error =
-    formatErrorHtml theme error
-
-
-formatErrorHtml theme error =
-    Html.div []
-        (Html.span [ Html.Attributes.style "color" (foregroundClr theme) ]
-            [ Html.text
-                (String.toUpper error.title
-                    ++ "\n\n"
-                )
-            ]
-            :: List.map (renderMessageHtml theme) error.message
-        )
-
-
-redClr theme =
-    case theme of
-        Dark ->
-            "#ef2929"
-
-        Light ->
-            "#cc0000"
-
-
-yellowClr theme =
-    case theme of
-        Dark ->
-            "#edd400"
-
-        Light ->
-            "#c4a000"
-
-
-foregroundClr theme =
-    case theme of
-        Dark ->
-            "#eeeeec"
-
-        Light ->
-            "rgba(16,16,16, 0.9)"
-
-
-renderMessageHtml theme message =
-    Html.span
-        (List.filterMap identity
-            [ if message.bold then
-                Just (Html.Attributes.style "font-weight" "bold")
-
-              else
-                Nothing
-            , if message.underline then
-                Just (Html.Attributes.style "text-decoration" "underline")
-
-              else
-                Nothing
-            , case message.color of
-                Nothing ->
-                    Just <| Html.Attributes.style "color" (foregroundClr theme)
-
-                Just "red" ->
-                    Just <| Html.Attributes.style "color" (redClr theme)
-
-                Just "yellow" ->
-                    Just <| Html.Attributes.style "color" (yellowClr theme)
-
-                _ ->
-                    Nothing
-            ]
-        )
-        [ Html.text message.text ]
-
-
-type alias Message =
-    { row : Int
-    , col : Int
-    , problem : ProblemMessage
-    }
-
-
-type alias ErrorMessage =
-    { message : List Format.Text
-    , region : { start : Position, end : Position }
-    , title : String
-    }
-
-
-{-| -}
-type ProblemMessage
-    = MsgUnknownBlock (List String)
-    | MsgUnknownInline (List String)
-    | MsgNonMatchingFields
-        { expecting : List String
-        , found : List String
-        }
-    | MsgUnexpectedField
-        { found : String
-        , options : List String
-        , recordName : String
-        }
-    | MsgExpectingIndent Int
-    | MsgCantStartTextWithSpace
-    | MsgUnclosedStyle (List Style)
-    | MsgBadDate String
-    | MsgIntOutOfRange
-        { found : Int
-        , min : Int
-        , max : Int
-        }
-    | MsgFloatOutOfRange
-        { found : Float
-        , min : Float
-        , max : Float
-        }
-
-
-type alias Similarity =
-    Int
-
-
-similarity : String -> String -> Similarity
-similarity source target =
-    let
-        length =
-            if String.length source == String.length target then
-                1
-
-            else
-                0
-
-        first str =
-            Maybe.map (String.fromChar << Tuple.first) (String.uncons str)
-                |> Maybe.withDefault ""
-
-        last str =
-            Maybe.map (String.fromChar << Tuple.first) (String.uncons (String.reverse str))
-                |> Maybe.withDefault
-
-        fstChar =
-            if first source == first target then
-                1
-
-            else
-                0
-
-        lastChar =
-            if first source == first target then
-                1
-
-            else
-                0
-
-        addCompared ( x, y ) total =
-            if x == y then
-                total + 1
-
-            else
-                total
-    in
-    -- List.foldl (+) 0 [ length, firstChar, lastChar ]
-    List.foldl addCompared 0 (List.map2 Tuple.pair (String.toList source) (String.toList target))
-
-
-getRemap context found =
-    case found of
-        Nothing ->
-            case context.context of
-                InRemapped remapped ->
-                    Just remapped
-
-                _ ->
-                    found
-
-        _ ->
-            found
-
-
-getErrorPosition current =
-    case List.foldl getRemap Nothing current.contextStack of
-        Nothing ->
-            ( current.row, current.col )
-
-        Just re ->
-            ( re.line, re.column )
-
-
-mergeErrors : Parser.DeadEnd Context Problem -> List Message -> List Message
-mergeErrors current merged =
-    let
-        ( row, col ) =
-            getErrorPosition current
-    in
-    case merged of
-        [] ->
-            case current.problem of
-                ExpectingBlockName name ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgUnknownBlock [ name ]
-                      }
-                    ]
-
-                ExpectingInlineName name ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgUnknownInline [ name ]
-                      }
-                    ]
-
-                NonMatchingFields fields ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgNonMatchingFields fields
-                      }
-                    ]
-
-                UnexpectedField fields ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgUnexpectedField fields
-                      }
-                    ]
-
-                ExpectingIndent indentation ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgExpectingIndent indentation
-                      }
-                    ]
-
-                CantStartTextWithSpace ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgCantStartTextWithSpace
-                      }
-                    ]
-
-                UnclosedStyles styles ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgUnclosedStyle styles
-                      }
-                    ]
-
-                BadDate str ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgBadDate str
-                      }
-                    ]
-
-                IntOutOfRange found ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgIntOutOfRange found
-                      }
-                    ]
-
-                FloatOutOfRange found ->
-                    [ { row = row
-                      , col = col
-                      , problem =
-                            MsgFloatOutOfRange found
-                      }
-                    ]
-
-                _ ->
-                    []
-
-        last :: remaining ->
-            if last.col == col && last.row == row then
-                case current.problem of
-                    ExpectingBlockName blk ->
-                        case last.problem of
-                            MsgUnknownBlock blocks ->
-                                { row = row
-                                , col = col
-                                , problem =
-                                    MsgUnknownBlock (blk :: blocks)
-                                }
-                                    :: remaining
-
-                            _ ->
-                                remaining
-
-                    ExpectingInlineName blk ->
-                        case last.problem of
-                            MsgUnknownInline blocks ->
-                                { row = row
-                                , col = col
-                                , problem =
-                                    MsgUnknownInline (blk :: blocks)
-                                }
-                                    :: remaining
-
-                            _ ->
-                                remaining
-
-                    ExpectingIndent indentation ->
-                        [ { row = row
-                          , col = col
-                          , problem =
-                                MsgExpectingIndent indentation
-                          }
-                        ]
-
-                    _ ->
-                        merged
-
-            else
-                case current.problem of
-                    ExpectingBlockName blk ->
-                        { row = row
-                        , col = col
-                        , problem =
-                            MsgUnknownBlock [ blk ]
-                        }
-                            :: merged
-
-                    _ ->
-                        merged
-
-
-renderErrors : List String -> Message -> ErrorMessage
-renderErrors lines current =
-    case current.problem of
-        MsgUnknownBlock expecting ->
-            let
-                line =
-                    getLine current.row lines
-
-                word =
-                    getWord current line
-            in
-            { title = "UNKNOWN BLOCK"
-            , region =
-                focusWord current line
-            , message =
-                [ Format.text "I don't recognize this block name.\n\n"
-                , singleLine current.row (line ++ "\n")
-                , highlightWord current line
-                , Format.text "Do you mean one of these instead?\n\n"
-                , expecting
-                    |> List.sortBy (\exp -> 0 - similarity word exp)
-                    |> List.map (addIndent 4)
-                    |> String.join "\n"
-                    |> Format.text
-                    |> Format.yellow
-                ]
-            }
-
-        MsgUnknownInline expecting ->
-            let
-                line =
-                    getLine current.row lines
-            in
-            { title = "UNKNOWN INLINE"
-            , region =
-                focusWord current line
-            , message =
-                [ Format.text "I ran into an unexpected inline name.\n\n"
-                , singleLine current.row (line ++ "\n")
-                , highlightUntil '|' { current | col = current.col + 1 } line
-                , Format.text "But I was expecting one of these instead:\n\n"
-                , expecting
-                    |> List.sortBy (\exp -> 0 - similarity line exp)
-                    |> List.map (addIndent 4)
-                    |> String.join "\n"
-                    |> Format.text
-                    |> Format.yellow
-                ]
-            }
-
-        MsgExpectingIndent indentation ->
-            let
-                line =
-                    getLine current.row lines
-            in
-            { title = "MISMATCHED INDENTATION"
-            , region = focusSpace current line
-            , message =
-                [ Format.text ("I was expecting " ++ String.fromInt indentation ++ " spaces of indentation.\n\n")
-                , singleLine current.row (line ++ "\n")
-                , highlightSpace current.col line
-                ]
-                    ++ hint "All indentation in `elm-markup` is a multiple of 4."
-            }
-
-        MsgCantStartTextWithSpace ->
-            let
-                line =
-                    getLine current.row lines
-            in
-            { title = "TOO MUCH SPACE"
-            , region = focusSpace current line
-            , message =
-                [ Format.text "This line of text starts with extra space.\n\n"
-                , singleLine current.row (line ++ "\n")
-                , highlightSpace (current.col - 1) line
-                , Format.text "Beyond the required indentation, text should start with non-whitespace characters."
-                ]
-            }
-
-        MsgUnclosedStyle styles ->
-            let
-                line =
-                    getLine current.row lines
-            in
-            { title = "UNCLOSED STYLE"
-            , region = focusSpace current line
-            , message =
-                [ Format.text (styleNames styles ++ " still open.  Add " ++ String.join " and " (List.map styleChars styles) ++ " to close it.\n\n")
-                , singleLine current.row (line ++ "\n")
-                , Format.text (String.join "" (List.map styleChars styles) ++ "\n")
-                    |> Format.red
-                , highlightSpace current.col line
-                ]
-                    ++ hint "`*` is used for bold and `/` is used for italic."
-            }
-
-        MsgUnexpectedField unexpectedField ->
-            let
-                line =
-                    getLine current.row lines
-
-                word =
-                    getPrevWord current line
-            in
-            { title = "UNKNOWN FIELD"
-            , region =
-                focusPrevWord current line
-            , message =
-                [ Format.text "I ran into an unexpected field name for a "
-                , Format.text unexpectedField.recordName
-                    |> Format.yellow
-                , Format.text " record\n\n"
-                , singleLine current.row (line ++ "\n")
-                , highlightPreviousWord current line
-                , Format.text "Do you mean one of these instead?\n\n"
-                , unexpectedField.options
-                    |> List.sortBy (\exp -> 0 - similarity word exp)
-                    |> List.map (addIndent 4)
-                    |> String.join "\n"
-                    |> Format.text
-                    |> Format.yellow
-                ]
-            }
-
-        MsgBadDate found ->
-            let
-                line =
-                    getLine current.row lines
-            in
-            { title = "BAD DATE"
-            , region =
-                focusWord current line
-            , message =
-                [ Format.text "I was trying to parse a date, but this format looks off.\n\n"
-                , singleLine current.row (line ++ "\n")
-                , highlightWord current line
-                , Format.text "Dates should be in ISO 8601 format:\n\n"
-                , Format.text (addIndent 4 "YYYY-MM-DDTHH:mm:ss.SSSZ")
-                    |> Format.yellow
-                ]
-            }
-
-        MsgIntOutOfRange found ->
-            let
-                line =
-                    getLine current.row lines
-            in
-            { title = "INTEGER OUT OF RANGE"
-            , region =
-                focusWord current line
-            , message =
-                [ Format.text "I was expecting an "
-                , Format.yellow (Format.text "Int")
-                , Format.text " between "
-                , Format.text (String.fromInt found.min)
-                    |> Format.yellow
-                , Format.text " and "
-                , Format.text (String.fromInt found.max)
-                    |> Format.yellow
-                , Format.text ", but found:\n\n"
-                , singleLine current.row (line ++ "\n")
-                , highlightWord current line
-                ]
-            }
-
-        MsgFloatOutOfRange found ->
-            let
-                line =
-                    getLine current.row lines
-            in
-            { title = "FLOAT OUT OF RANGE"
-            , region =
-                focusWord current line
-            , message =
-                [ Format.text "I was expecting a "
-                , Format.yellow (Format.text "Float")
-                , Format.text " between "
-                , Format.text (String.fromFloat found.min)
-                    |> Format.yellow
-                , Format.text " and "
-                , Format.text (String.fromFloat found.max)
-                    |> Format.yellow
-                , Format.text ", but found:\n\n"
-                , singleLine current.row (line ++ "\n")
-                , highlightWord current line
-                ]
-            }
-
-        MsgNonMatchingFields fields ->
-            let
-                line =
-                    getLine current.row lines
-
-                remaining =
-                    List.filter
-                        (\f -> not <| List.member f fields.found)
-                        fields.expecting
-            in
-            { title = "MISSING FIELD"
-            , region = focusSpace current line
-            , message =
-                -- TODO: Highlight entire record section
-                -- TODO: mention record name
-                case remaining of
-                    [] ->
-                        -- TODO: This should never happen actually.
-                        --  Maybe error should be a nonempty list?
-                        [ Format.text "It looks like a field is missing." ]
-
-                    [ single ] ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You need to add the "
-                        , Format.yellow (Format.text single)
-                        , Format.text " field."
-                        ]
-
-                    multiple ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You still need to add:\n"
-                        , remaining
-                            |> List.sortBy (\exp -> 0 - similarity line exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                        ]
-            }
-
-
-styleChars style =
-    case style of
-        Bold ->
-            "*"
-
-        Italic ->
-            "/"
-
-        Strike ->
-            "~"
-
-
-styleNames styles =
-    let
-        italic =
-            List.any ((==) Italic) styles
-
-        isBold =
-            List.any ((==) Bold) styles
-
-        strike =
-            List.any ((==) Strike) styles
-    in
-    case ( italic, isBold, strike ) of
-        ( False, False, False ) ->
-            "Some formatting is"
-
-        ( True, True, False ) ->
-            "Italic and bold formatting are"
-
-        ( True, True, True ) ->
-            "Italic, strike, and bold formatting are"
-
-        ( True, False, True ) ->
-            "Italic and strike formatting are"
-
-        ( False, True, True ) ->
-            "Strike, and bold formatting are"
-
-        ( True, False, False ) ->
-            "Italic formatting is"
-
-        ( False, True, False ) ->
-            "Bold formatting is"
-
-        ( False, False, True ) ->
-            "Strike formatting is"
-
-
-focusWord cursor line =
-    let
-        highlightLength =
-            line
-                |> String.dropLeft cursor.col
-                |> String.words
-                |> List.head
-                |> Maybe.map String.length
-                |> Maybe.withDefault 1
-    in
-    { start =
-        { column = cursor.col
-        , line = cursor.row
-        , offset = 0
-        }
-    , end =
-        { column = cursor.col + highlightLength
-        , line = cursor.row
-        , offset = 0
-        }
-    }
-
-
-focusSpace cursor line =
-    let
-        start =
-            String.dropLeft (cursor.col - 1) line
-
-        trimmed =
-            String.trimLeft start
-
-        highlightLength =
-            String.length start
-                - String.length trimmed
-                |> max 1
-    in
-    { start =
-        { column = cursor.col
-        , line = cursor.row
-        , offset = 0
-        }
-    , end =
-        { column = cursor.col + highlightLength
-        , line = cursor.row
-        , offset = 0
-        }
-    }
-
-
-highlightSpace col line =
-    let
-        start =
-            String.dropLeft (col - 1) line
-
-        trimmed =
-            String.trimLeft start
-
-        highlightLength =
-            String.length start
-                - String.length trimmed
-                |> max 1
-    in
-    Format.red <| Format.text (" " ++ String.repeat col " " ++ String.repeat highlightLength "^" ++ "\n")
-
-
-highlightWord cursor line =
-    let
-        rowNumLength =
-            String.length (String.fromInt cursor.row)
-
-        highlightLength =
-            line
-                |> String.dropLeft (cursor.col - rowNumLength)
-                |> String.words
-                |> List.head
-                |> Maybe.map String.length
-                |> Maybe.withDefault 1
-    in
-    Format.red <| Format.text (String.repeat (rowNumLength + cursor.col - 1) " " ++ String.repeat highlightLength "^" ++ "\n")
-
-
-highlightPreviousWord cursor line =
-    let
-        rowNumLength =
-            String.length (String.fromInt cursor.row)
-
-        start =
-            String.length line - String.length (String.trimLeft line)
-
-        highlightLength =
-            line
-                |> String.dropRight (String.length line - (cursor.col - 2))
-                |> String.trimLeft
-                |> String.length
-    in
-    Format.red <| Format.text (String.repeat (rowNumLength + start + 1) " " ++ String.repeat highlightLength "^" ++ "\n")
-
-
-focusPrevWord cursor line =
-    let
-        start =
-            String.length line - String.length (String.trimLeft line)
-
-        highlightLength =
-            line
-                |> String.dropRight (String.length line - (cursor.col - 2))
-                |> String.trimLeft
-                |> String.length
-    in
-    { start =
-        { column = start
-        , line = cursor.row
-        , offset = 0
-        }
-    , end =
-        { column = start + highlightLength
-        , line = cursor.row
-        , offset = 0
-        }
-    }
-
-
-highlightUntil end cursor line =
-    let
-        rowNumLength =
-            String.length (String.fromInt cursor.row)
-
-        highlightLength =
-            line
-                |> String.dropLeft (cursor.col - rowNumLength)
-                |> String.split (String.fromChar end)
-                |> List.head
-                |> Maybe.map (\str -> String.length str + 1)
-                |> Maybe.withDefault 1
-    in
-    Format.red <| Format.text (String.repeat (rowNumLength + cursor.col - 1) " " ++ String.repeat highlightLength "^" ++ "\n")
-
-
-newline =
-    { text = "\n"
-    , color = Nothing
-    , underline = False
-    , bold = False
-    }
-
-
-addIndent x str =
-    String.repeat x " " ++ str
-
-
-singleLine row line =
-    Format.text <|
-        String.fromInt row
-            ++ (if String.startsWith "|" line then
-                    ""
-
-                else
-                    "|"
-               )
-            ++ line
-
-
-hint str =
-    [ Format.text "Hint"
-        |> Format.underline
-    , Format.text (": " ++ str)
-    ]
-
-
-getLine row lines =
-    case List.head (List.drop (row - 1) lines) of
-        Nothing ->
-            "Empty"
-
-        Just l ->
-            l
-
-
-getWord cursor line =
-    let
-        rowNumLength =
-            String.length (String.fromInt cursor.row)
-
-        highlightLength =
-            line
-                |> String.dropLeft (cursor.col - rowNumLength)
-                |> String.words
-                |> List.head
-                |> Maybe.map String.length
-                |> Maybe.withDefault 1
-
-        end =
-            cursor.col + highlightLength
-    in
-    String.slice (cursor.col - 1) end line
-
-
-getPrevWord cursor line =
-    let
-        start =
-            String.length line - String.length (String.trimLeft line)
-
-        highlightLength =
-            line
-                |> String.dropRight (String.length line - (cursor.col - 2))
-                |> String.trimLeft
-                |> String.length
-    in
-    String.slice start (start + highlightLength) line
