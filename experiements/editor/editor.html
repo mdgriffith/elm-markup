@@ -1,0 +1,32 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Editor</title>
+    <script src="elm.js"></script>
+</head>
+<style>
+</style>
+
+<body id="root"></body>
+
+<script type="text/javascript">
+
+    var node = document.getElementById('root');
+    var app = Elm.Main.init({ node: node });
+
+    document.getElementById("editor").addEventListener("click", function(){
+        var myElement = document.getElementById('editor');
+        var startPosition = myElement.selectionStart;
+        var endPosition = myElement.selectionEnd;
+        
+        console.log(startPosition);
+        console.log(endPosition);
+
+        app.ports.cursor.send({start: startPosition, end: endPosition});
+    },false);
+
+</script>
+
+</html>
