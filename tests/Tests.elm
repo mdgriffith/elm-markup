@@ -302,6 +302,64 @@ sectionWithRecordDoc =
         )
 
 
+nestedStartWithStubs : Mark.Document (List ( String, String ))
+nestedStartWithStubs =
+    let
+        parent : Mark.Block (List ( String, String ))
+        parent =
+            Mark.block "Parent"
+                List.singleton
+                (Mark.startWith
+                    Tuple.pair
+                    first
+                    second
+                )
+
+        first : Mark.Block String
+        first =
+            Mark.stub "First" "I'm first"
+
+        second : Mark.Block String
+        second =
+            Mark.stub "Second" "I'm second"
+    in
+    Mark.document
+        identity
+        parent
+
+
+nestedStartWithRecords : Mark.Document (List ( ( String, String ), List ( String, String ) ))
+nestedStartWithRecords =
+    let
+        parent : Mark.Block (List ( ( String, String ), List ( String, String ) ))
+        parent =
+            Mark.block "Parent"
+                List.singleton
+                (Mark.startWith
+                    Tuple.pair
+                    first
+                    (Mark.manyOf [ second ])
+                )
+
+        first : Mark.Block ( String, String )
+        first =
+            Mark.record2 "First"
+                Tuple.pair
+                (Mark.field "a" Mark.string)
+                (Mark.field "b" Mark.string)
+
+        second : Mark.Block ( String, String )
+        second =
+            Mark.record2 "Second"
+                Tuple.pair
+                (Mark.field "a" Mark.string)
+                (Mark.field "b" Mark.string)
+    in
+    Mark.document
+        identity
+        parent
+
+
 suite : Test
 suite =
     describe "Mark"
@@ -416,7 +474,7 @@ suite =
     Here is my second.
 
     Here is my third.
-  
+
     Here is my fourth.
 
         And my indented line.
@@ -432,7 +490,7 @@ suite =
     Here is my second.
 
     Here is my third.
-  
+
     Here is my fourth.
 
         And my indented line.
@@ -511,6 +569,38 @@ Then some text.
                                 ]
                             , Indexed 1 [ Indexed 0 [] ]
                             , Indexed 2 []
+                            ]
+                        )
+            , test "Nested startWith with stubs" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse nestedStartWithStubs """| Parent
+
+    | First
+
+    | Second
+""")
+                        )
+                        (Ok [ ( "I'm first", "I'm second" ) ])
+            , test "Nested startWith with records" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse nestedStartWithRecords """| Parent
+    | First
+        a = First a
+        b = First b
+
+    | Second
+        a = Second a
+        b = Second b
+""")
+                        )
+                        (Ok
+                            [ ( ( "First a", "First b" )
+                              , [ ( "Second a", "Second b" ) ]
+                              )
                             ]
                         )
             ]
@@ -667,7 +757,7 @@ Finally, a sentence
     one = hello
 
     two = world
-    
+
     three = !
 """
                     in
