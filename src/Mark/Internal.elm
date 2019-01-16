@@ -7,6 +7,10 @@ module Mark.Internal exposing
     , oneOf, manyOf, startWith
     , getDesc, toString
     , record2, field
+    , Text(..), Style(..), text, replacement, balanced
+    , map
+    , Range, Position
+    , inline, inlineString, inlineText
     , getContainingDescriptions, prettyDescription, prettyFound, prettyParsed
     )
 
@@ -27,6 +31,14 @@ module Mark.Internal exposing
 @docs getDesc, toString
 
 @docs record2, field
+
+@docs Text, Style, text, replacement, balanced
+
+@docs map
+
+@docs Range, Position
+
+@docs inline, inlineString, inlineText
 
 -}
 
@@ -64,6 +76,12 @@ compile (Document blocks) source =
 
         Err err ->
             Err InvalidAst
+
+
+type alias Partial data =
+    { errors : List ErrorMessage
+    , result : data
+    }
 
 
 {-| -}
@@ -284,6 +302,7 @@ type Description
 type TextDescription
     = Styled (Range Position) Text
     | DescribeInline String (Range Position) (List InlineDescription)
+    | UnexpectedInline UnexpectedDetails
 
 
 type InlineDescription
@@ -597,7 +616,7 @@ type alias ErrorMessage =
 {-| -}
 type ProblemMessage
     = MsgUnknownBlock (List String)
-    | MsgUnknownInline (List String)
+    | MsgUnknownInline (List InlineExpectation)
     | MsgMissingFields (List String)
     | MsgNonMatchingFields
         { expecting : List String
@@ -710,6 +729,36 @@ document renderer child =
         }
 
 
+{-| Change the result of a block by applying a function to it.
+-}
+map : (a -> b) -> Block a -> Block b
+map fn child =
+    case child of
+        Block name details ->
+            Block name
+                { converter = Result.map (mapFound fn) << details.converter
+                , parser = details.parser
+                , expect = details.expect
+                }
+
+        Value details ->
+            Value
+                { converter = Result.map (mapFound fn) << details.converter
+                , parser = details.parser
+                , expect = details.expect
+                }
+
+
+mapFound : (a -> b) -> Found a -> Found b
+mapFound fn found =
+    case found of
+        Found range item ->
+            Found range (fn item)
+
+        Unexpected unexp ->
+            Unexpected unexp
+
+
 {-| -}
 block :
     String
@@ -733,7 +782,6 @@ block name renderer child =
                                 Found range found ->
                                     case renderBlock child found of
                                         Err err ->
-                                            -- TODO: This generally means that the child had a NoMatch
                                             -- However it's not obvious when this would occur compared to
                                             -- just being Unexpected.
                                             -- I guess if a block, had a containing block and the names didn't match.
@@ -1198,6 +1246,206 @@ record2 recordName renderer renderUnexpected field1 field2 =
                         Err NoMatch
         , parser =
             parseRecord recordName expectations [ fieldParser field1, fieldParser field2 ]
+        }
+
+
+
+{- TEXT BLOCKS -}
+
+
+{-| Handling formatted text is a little more involved than may be initially apparent.
+
+Text styling can be overlapped such as
+
+    /My italicized sentence can have *bold*/
+
+In order to render this, the above sentence is chopped up into `Text` fragments that can have multiple styles active.
+
+  - `view` is the function to render an individual fragment.
+  - `inlines` are custom inline blocks. These are how links are implemented in `Mark.Default`!
+  - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
+
+**Note** check out `Mark.Default.text` to see an example.
+
+-}
+text :
+    { view : Range Position -> Text -> rendered
+    , error : UnexpectedDetails -> rendered
+    , inlines : List (Inline rendered)
+    , replacements : List Replacement
+    }
+    -> Block (List rendered)
+text options =
+    Value
+        { expect = ExpectText (List.map getInlineExpectation options.inlines)
+        , converter = renderText options
+        , parser =
+            getPosition
+                |> Parser.andThen
+                    (\pos ->
+                        styledTextParser
+                            { inlines = List.map getInlineExpectation options.inlines
+                            , replacements = options.replacements
+                            }
+                            pos
+                            []
+                            []
+                    )
+        }
+
+
+renderText :
+    { view : Range Position -> Text -> rendered
+    , error : UnexpectedDetails -> rendered
+    , inlines : List (Inline rendered)
+    , replacements : List Replacement
+    }
+    -> Description
+    -> Result AstError (Found (List rendered))
+renderText options description =
+    case description of
+        DescribeText range textNodes ->
+            List.foldl (renderTextComponent options) [] textNodes
+                |> (Found range << List.reverse)
+                |> Ok
+
+        _ ->
+            Err InvalidAst
+
+
+renderTextComponent options comp found =
+    case comp of
+        Styled range textEl ->
+            options.view range textEl :: found
+
+        DescribeInline name range foundInline ->
+            case List.foldl (renderInline name range (List.reverse foundInline)) (Err InvalidAst) options.inlines of
+                Err err ->
+                    options.error
+                        { range = range
+                        , problem = MsgUnknownInline (List.map getInlineExpectation options.inlines)
+                        }
+                        :: found
+
+                Ok list ->
+                    list ++ found
+
+        UnexpectedInline details ->
+            options.error details :: found
+
+
+renderInline name range pieces (Inline inlineName details) found =
+    case found of
+        Ok _ ->
+            found
+
+        Err error ->
+            if name == inlineName then
+                -- inlineRenderer
+                details.converter pieces
+
+            else
+                found
+
+
+{-| -}
+type Replacement
+    = Replacement String String
+    | Balanced
+        { start : ( String, String )
+        , end : ( String, String )
+        }
+
+
+{-| -}
+type Inline data
+    = Inline
+        String
+        { converter : List InlineDescription -> Result AstError (List data)
+        , expect : InlineExpectation
+        }
+
+
+getInlineExpectation (Inline name details) =
+    details.expect
+
+
+
+{- Errors for inlines.
+
+   UnknownInline
+   InlineUnexpectedFormat
+       -> Needs Text Value
+       -> Needs String Value
+
+
+-}
+
+
+{-| -}
+inline : String -> result -> Inline result
+inline name result =
+    Inline name
+        { converter =
+            \descriptor ->
+                Ok [ result ]
+        , expect =
+            InlineExpectation name []
+        }
+
+
+{-| -}
+inlineString : String -> Inline (String -> result) -> Inline result
+inlineString name (Inline inlineName details) =
+    Inline inlineName
+        { converter =
+            \descriptors ->
+                case descriptors of
+                    [] ->
+                        Err InvalidAst
+
+                    (DescribeInlineString key range str) :: remaining ->
+                        case details.converter remaining of
+                            Err err ->
+                                Err err
+
+                            Ok renderers ->
+                                Ok (List.map (\x -> x str) renderers)
+
+                    _ ->
+                        Err InvalidAst
+        , expect =
+            case details.expect of
+                InlineExpectation parentName vals ->
+                    InlineExpectation parentName
+                        (vals ++ [ ExpectInlineString name ])
+        }
+
+
+{-| -}
+inlineText : Inline (List Text -> result) -> Inline result
+inlineText (Inline inlineName details) =
+    Inline inlineName
+        { converter =
+            \descriptors ->
+                case descriptors of
+                    [] ->
+                        Err InvalidAst
+
+                    (DescribeInlineText range str) :: remaining ->
+                        case details.converter remaining of
+                            Err err ->
+                                Err err
+
+                            Ok renderers ->
+                                Ok (List.map (\x -> x str) renderers)
+
+                    _ ->
+                        Err InvalidAst
+        , expect =
+            case details.expect of
+                InlineExpectation parentName vals ->
+                    InlineExpectation parentName (vals ++ [ ExpectInlineText ])
         }
 
 
@@ -1884,10 +2132,6 @@ unexpectedField recordName options =
     Parser.getIndent
         |> Parser.andThen
             (\indent ->
-                let
-                    _ =
-                        Debug.log "unexpected indent" indent
-                in
                 Parser.map
                     (\( range, ( name, content ) ) ->
                         ( name
@@ -2759,3 +3003,608 @@ reverseTree (Nested nest) =
 
 rev nest found =
     reverseTree nest :: found
+
+
+{-| Replace a string with another string. This can be useful to have shortcuts to unicode characters.
+
+For example, in `Mark.Default`, this is used to replace `...` with the unicode ellipses character: `…`.
+
+-}
+replacement : String -> String -> Replacement
+replacement =
+    Replacement
+
+
+{-| A balanced replacement. This is used in `Mark.Default` to do auto-curly quotes.
+
+    Mark.balanced
+        { start = ( "\"", "“" )
+        , end = ( "\"", "”" )
+        }
+
+-}
+balanced :
+    { start : ( String, String )
+    , end : ( String, String )
+    }
+    -> Replacement
+balanced =
+    Balanced
+
+
+
+{- TEXT HELPERS -}
+
+
+{-| -}
+type TextCursor
+    = TextCursor
+        { current : Text
+        , start : Position
+        , found : List TextDescription
+        , balancedReplacements : List String
+        }
+
+
+styledTextParser :
+    { inlines : List InlineExpectation
+    , replacements : List Replacement
+    }
+    -> Position
+    -> List Style
+    -> List Char
+    -> Parser Context Problem Description
+styledTextParser options startingPos inheritedStyles until =
+    let
+        vacantText =
+            TextCursor
+                { current = Text inheritedStyles ""
+                , found = []
+                , start = startingPos
+                , balancedReplacements = []
+                }
+
+        untilStrings =
+            List.map String.fromChar until
+
+        meaningful =
+            '\\' :: '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
+    in
+    Parser.oneOf
+        [ -- Parser.chompIf (\c -> c == ' ') CantStartTextWithSpace
+          -- -- TODO: return error description
+          -- |> Parser.andThen
+          --     (\_ ->
+          --         Parser.problem CantStartTextWithSpace
+          --     )
+          Parser.map
+            (\( pos, textNodes ) ->
+                DescribeText pos textNodes
+            )
+            (withRange
+                (Parser.loop vacantText
+                    (styledTextParserLoop options meaningful untilStrings)
+                )
+            )
+        ]
+
+
+empty : Text
+empty =
+    Text [] ""
+
+
+{-| -}
+styledTextParserLoop :
+    { inlines : List InlineExpectation
+    , replacements : List Replacement
+    }
+    -> List Char
+    -> List String
+    -> TextCursor
+    -> Parser Context Problem (Parser.Step TextCursor (List TextDescription))
+styledTextParserLoop options meaningful untilStrings found =
+    Parser.oneOf
+        [ Parser.oneOf (replace options.replacements found)
+            |> Parser.map Parser.Loop
+
+        -- If a char matches the first character of a replacement,
+        -- but didn't match the full replacement captured above,
+        -- then stash that char.
+        , Parser.oneOf (almostReplacement options.replacements found)
+            |> Parser.map Parser.Loop
+
+        -- Capture style command characters
+        , Parser.succeed
+            (Parser.Loop << changeStyle options found)
+            |= Parser.oneOf
+                [ Parser.map (always (Just Italic)) (Parser.token (Parser.Token "/" (Expecting "/")))
+                , Parser.map (always (Just Strike)) (Parser.token (Parser.Token "~" (Expecting "~")))
+                , Parser.map (always (Just Bold)) (Parser.token (Parser.Token "*" (Expecting "*")))
+                ]
+
+        -- Custom inline block
+        , Parser.succeed
+            (\start maybeRendered end ->
+                let
+                    current =
+                        case changeStyle options found Nothing of
+                            TextCursor accum ->
+                                accum
+                in
+                Parser.Loop
+                    (TextCursor
+                        { found =
+                            case maybeRendered of
+                                Nothing ->
+                                    UnexpectedInline
+                                        { range =
+                                            { start = start
+                                            , end = end
+                                            }
+                                        , problem =
+                                            MsgUnknownInline options.inlines
+                                        }
+                                        :: current.found
+
+                                Just rendered ->
+                                    rendered :: current.found
+                        , start = end
+
+                        -- TODO: This should inherit formatting from the inline parser
+                        , current = empty
+                        , balancedReplacements = current.balancedReplacements
+                        }
+                    )
+            )
+            |= getPosition
+            |. Parser.token
+                (Parser.Token "{" InlineStart)
+            |= Parser.oneOf
+                [ Parser.succeed
+                    (\maybeInlineResult hasEnd ->
+                        if hasEnd then
+                            maybeInlineResult
+
+                        else
+                            Nothing
+                    )
+                    |= Parser.oneOf
+                        (List.map
+                            (\(InlineExpectation inlineName inlineComponents) ->
+                                Parser.inContext
+                                    (InInline inlineName)
+                                    (parseInline inlineName inlineComponents)
+                            )
+                            options.inlines
+                        )
+                    |= Parser.oneOf
+                        [ Parser.map (always True) (Parser.token (Parser.Token "}" InlineEnd))
+                        , Parser.succeed False
+                        ]
+                , Parser.succeed Nothing
+                ]
+            |= getPosition
+        , -- chomp until a meaningful character
+          Parser.chompWhile
+            (\c ->
+                not (List.member c meaningful)
+            )
+            |> Parser.getChompedString
+            |> Parser.andThen
+                (\new ->
+                    if new == "" || new == "\n" then
+                        case changeStyle options found Nothing of
+                            TextCursor txt ->
+                                let
+                                    styling =
+                                        case txt.current of
+                                            Text s _ ->
+                                                s
+                                in
+                                -- TODO: What to do on unclosed styling?
+                                -- if List.isEmpty styling then
+                                Parser.succeed (Parser.Done (List.reverse txt.found))
+                        -- else
+                        -- Parser.problem (UnclosedStyles styling)
+
+                    else
+                        Parser.succeed (Parser.Loop (addText new found))
+                )
+        ]
+
+
+parseInline : String -> List InlineValueExpectation -> Parser Context Problem (Maybe TextDescription)
+parseInline name components =
+    case components of
+        [] ->
+            Parser.succeed (\( range, _ ) -> Just (DescribeInline name range []))
+                |= withRange (Parser.keyword (Parser.Token name (ExpectingInlineName name)))
+
+        _ ->
+            Parser.succeed
+                (\( range, maybeFoundComponents ) ->
+                    case maybeFoundComponents of
+                        Nothing ->
+                            Nothing
+
+                        Just foundComponents ->
+                            Just (DescribeInline name range foundComponents)
+                )
+                |= withRange
+                    (Parser.succeed identity
+                        |. Parser.keyword (Parser.Token name (ExpectingInlineName name))
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |= Parser.loop ( components, [] ) parseInlineComponents
+                    )
+
+
+parseInlineComponents :
+    ( List InlineValueExpectation, List InlineDescription )
+    -> Parser Context Problem (Parser.Step ( List InlineValueExpectation, List InlineDescription ) (Maybe (List InlineDescription)))
+parseInlineComponents ( components, found ) =
+    case components of
+        [] ->
+            Parser.succeed (Parser.Done (Just (List.reverse found)))
+
+        current :: remaining ->
+            -- CURRENT TODO:
+            -- Make these return Nothing if they run into an issue.
+            case current of
+                ExpectInlineString inlineName ->
+                    Parser.succeed
+                        (\start str end ->
+                            Parser.Loop
+                                ( remaining
+                                , DescribeInlineString
+                                    inlineName
+                                    { start = start
+                                    , end = end
+                                    }
+                                    str
+                                    :: found
+                                )
+                        )
+                        |. Parser.chompIf (\c -> c == '|') (Expecting "|")
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |= getPosition
+                        |. Parser.keyword
+                            (Parser.Token
+                                inlineName
+                                (ExpectingFieldName inlineName)
+                            )
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |= Parser.getChompedString
+                            (Parser.chompWhile (\c -> c /= '|' && c /= '}'))
+                        |= getPosition
+
+                ExpectInlineText ->
+                    Parser.succeed
+                        (\start str end ->
+                            Parser.Loop
+                                ( remaining
+                                , DescribeInlineText
+                                    { start = start
+                                    , end = end
+                                    }
+                                    str
+                                    :: found
+                                )
+                        )
+                        |. Parser.chompIf (\c -> c == '|') (Expecting "|")
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |= getPosition
+                        |= Parser.loop [] (parseInlineText { replacements = [] })
+                        |= getPosition
+
+
+{-| -}
+parseInlineText :
+    { replacements : List Replacement
+    }
+    -> List Text
+    -> Parser Context Problem (Parser.Step (List Text) (List Text))
+parseInlineText options found =
+    Parser.oneOf
+        [ --     Parser.oneOf (replace options.replacements found)
+          --     |> Parser.map Parser.Loop
+          -- -- If a char matches the first character of a replacement,
+          -- -- but didn't match the full replacement captured above,
+          -- -- then stash that char.
+          -- , Parser.oneOf (almostReplacement options.replacements found)
+          --     |> Parser.map Parser.Loop
+          -- Capture style command characters
+          Parser.succeed
+            (Parser.Loop << changeStyleOnText found)
+            |= Parser.oneOf
+                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
+
+                -- , Parser.map (always rline)) (Parser.token (Parser.Token "_" (Expecting "_")))
+                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
+                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
+
+                -- , Parser.map (always (Just Code)) (Parser.token (Parser.Token "`" (Expecting "`")))
+                ]
+        , -- chomp until a meaningful character
+          Parser.chompWhile
+            (\c ->
+                not (List.member c [ '}', '/', '|', '*', '~' ])
+            )
+            |> Parser.getChompedString
+            |> Parser.andThen
+                (\new ->
+                    if new == "" || new == "\n" then
+                        -- TODO: Warning about unclosed styles
+                        Parser.succeed (Parser.Done (List.reverse found))
+
+                    else
+                        Parser.succeed (Parser.Loop (addTextToText new found))
+                )
+        ]
+
+
+{-| -}
+almostReplacement : List Replacement -> TextCursor -> List (Parser Context Problem TextCursor)
+almostReplacement replacements existing =
+    let
+        captureChar char =
+            Parser.succeed
+                (\c ->
+                    addText c existing
+                )
+                |= Parser.getChompedString
+                    (Parser.chompIf (\c -> c == char && char /= '{' && char /= '*' && char /= '/') EscapedChar)
+
+        first repl =
+            case repl of
+                Replacement x y ->
+                    firstChar x
+
+                Balanced range ->
+                    firstChar (Tuple.first range.start)
+
+        allFirstChars =
+            List.filterMap first replacements
+    in
+    List.map captureChar allFirstChars
+
+
+{-| **Reclaimed typography**
+
+This function will replace certain characters with improved typographical ones.
+Escaping a character will skip the replacement.
+
+    -> "<>" -> a non-breaking space.
+        - This can be used to glue words together so that they don't break
+        - It also avoids being used for spacing like `&nbsp;` because multiple instances will collapse down to one.
+    -> "--" -> "en-dash"
+    -> "---" -> "em-dash".
+    -> Quotation marks will be replaced with curly quotes.
+    -> "..." -> ellipses
+
+-}
+replace : List Replacement -> TextCursor -> List (Parser Context Problem TextCursor)
+replace replacements existing =
+    let
+        -- Escaped characters are captured as-is
+        escaped =
+            Parser.succeed
+                (\esc ->
+                    existing
+                        |> addText esc
+                )
+                |. Parser.token
+                    (Parser.Token "\\" Escape)
+                |= Parser.getChompedString
+                    (Parser.chompIf (always True) EscapedChar)
+
+        replaceWith repl =
+            case repl of
+                Replacement x y ->
+                    Parser.succeed
+                        (\_ ->
+                            addText y existing
+                        )
+                        |. Parser.token (Parser.Token x (Expecting x))
+                        |= Parser.succeed ()
+
+                Balanced range ->
+                    let
+                        balanceCache =
+                            case existing of
+                                TextCursor cursor ->
+                                    cursor.balancedReplacements
+
+                        id =
+                            balanceId range
+                    in
+                    -- TODO: implement range replacement
+                    if List.member id balanceCache then
+                        case range.end of
+                            ( x, y ) ->
+                                Parser.succeed
+                                    (addText y existing
+                                        |> removeBalance id
+                                    )
+                                    |. Parser.token (Parser.Token x (Expecting x))
+
+                    else
+                        case range.start of
+                            ( x, y ) ->
+                                Parser.succeed
+                                    (addText y existing
+                                        |> addBalance id
+                                    )
+                                    |. Parser.token (Parser.Token x (Expecting x))
+    in
+    escaped :: List.map replaceWith replacements
+
+
+balanceId balance =
+    let
+        join ( x, y ) =
+            x ++ y
+    in
+    join balance.start ++ join balance.end
+
+
+stylingChars =
+    [ '~'
+
+    -- , '_'
+    , '/'
+    , '*'
+    , '\n'
+    , '{'
+
+    -- , '`'
+    ]
+
+
+firstChar str =
+    case String.uncons str of
+        Nothing ->
+            Nothing
+
+        Just ( fst, _ ) ->
+            Just fst
+
+
+replacementStartingChars replacements =
+    let
+        first repl =
+            case repl of
+                Replacement x y ->
+                    firstChar x
+
+                Balanced range ->
+                    firstChar (Tuple.first range.start)
+    in
+    List.filterMap first replacements
+
+
+addBalance id (TextCursor cursor) =
+    TextCursor <|
+        { cursor | balancedReplacements = id :: cursor.balancedReplacements }
+
+
+removeBalance id (TextCursor cursor) =
+    TextCursor <|
+        { cursor | balancedReplacements = List.filter ((/=) id) cursor.balancedReplacements }
+
+
+addTextToText newString textNodes =
+    case textNodes of
+        [] ->
+            [ Text [] newString ]
+
+        (Text styles txt) :: remaining ->
+            Text styles (txt ++ newString) :: remaining
+
+
+addText newTxt (TextCursor cursor) =
+    case cursor.current of
+        Text styles txt ->
+            TextCursor { cursor | current = Text styles (txt ++ newTxt) }
+
+
+changeStyle options (TextCursor cursor) maybeStyleToken =
+    let
+        cursorText =
+            case cursor.current of
+                Text _ txt ->
+                    txt
+
+        newText =
+            case maybeStyleToken of
+                Nothing ->
+                    cursor.current
+
+                Just sty ->
+                    case sty of
+                        Bold ->
+                            flipStyle Bold cursor.current
+
+                        Italic ->
+                            flipStyle Italic cursor.current
+
+                        Strike ->
+                            flipStyle Strike cursor.current
+    in
+    if cursorText == "" then
+        TextCursor
+            { found = cursor.found
+            , current = newText
+            , start = cursor.start
+            , balancedReplacements = cursor.balancedReplacements
+            }
+
+    else
+        let
+            end =
+                measure cursor.start cursorText
+        in
+        TextCursor
+            { found =
+                Styled
+                    { start = cursor.start
+                    , end = end
+                    }
+                    cursor.current
+                    :: cursor.found
+            , start = end
+            , current = newText
+            , balancedReplacements = cursor.balancedReplacements
+            }
+
+
+changeStyleOnText textNodes styleToken =
+    case textNodes of
+        [] ->
+            case styleToken of
+                Bold ->
+                    [ Text [ Bold ] "" ]
+
+                Italic ->
+                    [ Text [ Italic ] "" ]
+
+                Strike ->
+                    [ Text [ Strike ] "" ]
+
+        current :: remaining ->
+            let
+                newText =
+                    case styleToken of
+                        Bold ->
+                            flipStyle Bold current
+
+                        Italic ->
+                            flipStyle Italic current
+
+                        Strike ->
+                            flipStyle Strike current
+            in
+            newText :: current :: remaining
+
+
+flipStyle newStyle textStyle =
+    case textStyle of
+        Text styles str ->
+            if List.member newStyle styles then
+                Text (List.filter ((/=) newStyle) styles) ""
+
+            else
+                Text (newStyle :: styles) ""
+
+
+measure start textStr =
+    let
+        len =
+            String.length textStr
+    in
+    { start
+        | offset = start.offset + len
+        , column = start.column + len
+    }
