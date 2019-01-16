@@ -329,8 +329,29 @@ startWith fn start rest =
     Value
         (Parser.succeed fn
             |= getParser start
+            |. Parser.oneOf
+                [ Parser.succeed ()
+                    |. Parser.token (Parser.Token "\n" Newline)
+                    |. Parser.loop () manyBlankLines
+                , Parser.succeed ()
+                ]
+            |. (Parser.getIndent
+                    |> Parser.andThen
+                        (\indent ->
+                            Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
+                        )
+               )
             |= getParser rest
         )
+
+
+manyBlankLines _ =
+    Parser.oneOf
+        [ Parser.succeed (Parser.Loop ())
+            |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+            |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+        , Parser.succeed (Parser.Done ())
+        ]
 
 
 {-| Define your own parser using [\`elm/parser'](https://package.elm-lang.org/packages/elm/parser/latest/).
