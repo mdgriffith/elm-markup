@@ -302,6 +302,32 @@ sectionWithRecordDoc =
         )
 
 
+nestedStartWithStubs : Mark.Document (List ( String, String ))
+nestedStartWithStubs =
+    let
+        parent : Mark.Block (List ( String, String ))
+        parent =
+            Mark.block "Parent"
+                List.singleton
+                (Mark.startWith
+                    Tuple.pair
+                    first
+                    second
+                )
+
+        first : Mark.Block String
+        first =
+            Mark.stub "First" "I'm first"
+
+        second : Mark.Block String
+        second =
+            Mark.stub "Second" "I'm second"
+    in
+    Mark.document
+        identity
+        parent
+
+
 suite : Test
 suite =
     describe "Mark"
@@ -416,7 +442,7 @@ suite =
     Here is my second.
 
     Here is my third.
-  
+
     Here is my fourth.
 
         And my indented line.
@@ -432,7 +458,7 @@ suite =
     Here is my second.
 
     Here is my third.
-  
+
     Here is my fourth.
 
         And my indented line.
@@ -513,6 +539,18 @@ Then some text.
                             , Indexed 2 []
                             ]
                         )
+            , test "Nested startWith with stubs" <|
+                \_ ->
+                    Expect.equal
+                        (Result.mapError (List.map .problem)
+                            (Mark.parse nestedStartWithStubs """| Parent
+
+    | First
+
+    | Second
+""")
+                        )
+                        (Ok [ ( "I'm first", "I'm second" ) ])
             ]
         , describe "Blocks"
             [ test "Misspelled Block" <|
@@ -667,7 +705,7 @@ Finally, a sentence
     one = hello
 
     two = world
-    
+
     three = !
 """
                     in
