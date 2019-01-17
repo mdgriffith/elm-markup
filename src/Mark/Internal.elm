@@ -3,14 +3,15 @@ module Mark.Internal exposing
     , Block, Found(..)
     , document
     , block
-    , string, int, float, floatBetween, intBetween
-    , oneOf, manyOf, startWith
-    , getDesc, toString
-    , record2, field
+    , string, int, float, floatBetween, intBetween, date
+    , oneOf, manyOf, startWith, nested
+    , record2, field, Field
     , Text(..), Style(..), text, replacement, balanced
-    , map
-    , Range, Position
     , inline, inlineString, inlineText
+    , map
+    , getDesc, toString
+    , Range, Position
+    , Outcome(..)
     , getContainingDescriptions, prettyDescription, prettyFound, prettyParsed
     )
 
@@ -24,21 +25,23 @@ module Mark.Internal exposing
 
 @docs block
 
-@docs string, int, float, floatBetween, intBetween, bool
+@docs string, int, float, floatBetween, intBetween, bool, date
 
-@docs oneOf, manyOf, startWith
+@docs oneOf, manyOf, startWith, nested
 
-@docs getDesc, toString
-
-@docs record2, field
+@docs record2, field, Field
 
 @docs Text, Style, text, replacement, balanced
 
+@docs inline, inlineString, inlineText
+
 @docs map
+
+@docs getDesc, toString
 
 @docs Range, Position
 
-@docs inline, inlineString, inlineText
+@docs Outcome
 
 -}
 
@@ -58,24 +61,101 @@ import Time
 -- compile :  Document data -> String -> Result (Partial data) data
 
 
+type Outcome failure almost success
+    = Success success
+    | Almost almost
+    | Failure failure
+
+
 {-| -}
 parse :
     Document data
     -> String
-    -> Result (List (Parser.DeadEnd Context Problem)) Parsed
+    -> Outcome ErrorMessage (Partial Parsed) Parsed
 parse (Document blocks) source =
-    Parser.run blocks.parser source
+    case Parser.run blocks.parser source of
+        Ok ((Parsed errors description) as parsed) ->
+            case errors of
+                [] ->
+                    Success parsed
+
+                _ ->
+                    Almost
+                        { errors = errors
+                        , result = parsed
+                        }
+
+        Err deadEnds ->
+            Failure
+                { message = []
+                , title = "PARSING ERROR"
+                , region =
+                    case List.head deadEnds of
+                        Nothing ->
+                            { start =
+                                { offset = 0
+                                , line = 0
+                                , column = 0
+                                }
+                            , end =
+                                { offset = 0
+                                , line = 0
+                                , column = 0
+                                }
+                            }
+
+                        Just deadEnd ->
+                            { start =
+                                { offset = 0
+                                , line = deadEnd.row
+                                , column = deadEnd.col
+                                }
+                            , end =
+                                { offset = 0
+                                , line = deadEnd.row
+                                , column = deadEnd.col
+                                }
+                            }
+                }
 
 
 {-| -}
-compile : Document data -> String -> Result AstError data
+type Parsed
+    = Parsed (List ErrorMessage) (Found Description)
+
+
+type NoMatch
+    = Nom
+
+
+{-| -}
+compile : Document data -> String -> Outcome NoMatch (Partial data) data
 compile (Document blocks) source =
     case Parser.run blocks.parser source of
         Ok ast ->
-            blocks.converter ast
+            case blocks.converter ast of
+                Ok rendered ->
+                    Success rendered
+
+                Err noMatch ->
+                    -- Invalid Ast.
+                    -- This should never happen because
+                    -- we definitely have the same document in both parsing and converting.
+                    Failure Nom
 
         Err err ->
-            Err InvalidAst
+            --  Parsing Failed
+            Failure Nom
+
+
+
+-- {-| -}
+-- convert : Document data -> Parsed -> Result (Partial data) data
+-- convert (Document blocks) ast =
+--     case blocks.converter ast of
+--         Ok result ->
+--         Err invalidAst ->
+--             Failure invalidAst
 
 
 type alias Partial data =
@@ -91,10 +171,6 @@ type Document data
         , expect : Expectation
         , parser : Parser Context Problem Parsed
         }
-
-
-type Parsed
-    = Parsed (Found Description)
 
 
 {-| A `Block data` is just a parser that results in `data`.
@@ -120,19 +196,20 @@ type Block data
         }
 
 
-
-{- These are `soft` parse errors.
-
-   Only a few can happen.
-
-       1. Block names don't match (If they do match and the content is wrong, that's an Unexpected)
-
-
--}
+{-| -}
+type Found item
+    = Found (Range Position) item
+    | Unexpected
+        { range : Range Position
+        , problem : ProblemMessage
+        }
 
 
-type ParseError
-    = Unknown
+{-| -}
+type alias UnexpectedDetails =
+    { range : Range Position
+    , problem : ProblemMessage
+    }
 
 
 getParser : Block data -> Parser Context Problem Description
@@ -172,25 +249,7 @@ type AstError
     | NoMatch
 
 
-type Found item
-    = Found (Range Position) item
-    | Unexpected
-        { range : Range Position
-
-        -- , source : String
-        , problem : ProblemMessage
-        }
-
-
-type alias UnexpectedDetails =
-    { range : Range Position
-
-    -- , source : String
-    , problem : ProblemMessage
-    }
-
-
-prettyParsed (Parsed foundDescription) =
+prettyParsed (Parsed errors foundDescription) =
     prettyFound 0 prettyDescription foundDescription
 
 
@@ -346,11 +405,11 @@ type InlineValueExpectation
 
 
 getDesc : { start : Int, end : Int } -> Parsed -> List Description
-getDesc offset (Parsed foundDesc) =
+getDesc offset (Parsed errors foundDesc) =
     getWithinFound offset foundDesc
 
 
-withinOffsetRange range offset =
+withinOffsetRange offset range =
     range.start.offset <= offset.start && range.end.offset >= offset.end
 
 
@@ -358,7 +417,7 @@ getWithinFound : { start : Int, end : Int } -> Found Description -> List Descrip
 getWithinFound offset found =
     case found of
         Found range item ->
-            if withinOffsetRange range offset then
+            if withinOffsetRange offset range then
                 if isPrimitive item then
                     [ item ]
 
@@ -373,13 +432,13 @@ getWithinFound offset found =
             []
 
 
-withinFoundLeaf found offset =
+withinFoundLeaf offset found =
     case found of
         Found range item ->
-            withinOffsetRange range offset
+            withinOffsetRange offset range
 
         Unexpected unexpected ->
-            withinOffsetRange unexpected.range offset
+            withinOffsetRange offset unexpected.range
 
 
 isPrimitive : Description -> Bool
@@ -438,6 +497,7 @@ isPrimitive description =
             True
 
 
+{-| -}
 getContainingDescriptions : Description -> { start : Int, end : Int } -> List Description
 getContainingDescriptions description offset =
     case description of
@@ -445,73 +505,131 @@ getContainingDescriptions description offset =
             getWithinFound offset details.found
 
         Record name details ->
-            []
+            case details.found of
+                Found range fields ->
+                    if withinOffsetRange offset range then
+                        List.concatMap (getWithinFound offset << Tuple.second) fields
+
+                    else
+                        []
+
+                Unexpected unexpected ->
+                    if withinOffsetRange offset unexpected.range then
+                        []
+
+                    else
+                        []
 
         OneOf expected found ->
-            []
+            getWithinFound offset found
 
         ManyOf expected rng foundList ->
             List.concatMap (getWithinFound offset) foundList
 
-        StartsWith _ fst snd ->
-            []
+        StartsWith range fst snd ->
+            if withinOffsetRange offset range then
+                getContainingDescriptions fst.found offset ++ getContainingDescriptions snd.found offset
+
+            else
+                []
 
         DescribeTree details ->
-            []
+            case details.found of
+                ( range, items ) ->
+                    if withinOffsetRange offset range then
+                        List.concatMap (getWithinNested offset) items
+
+                    else
+                        []
 
         -- Primitives
         DescribeStub name found ->
-            []
+            if withinFoundLeaf offset found then
+                [ description ]
+
+            else
+                []
 
         DescribeBoolean found ->
-            []
+            if withinFoundLeaf offset found then
+                [ description ]
+
+            else
+                []
 
         DescribeInteger found ->
-            []
+            if withinFoundLeaf offset found then
+                [ description ]
+
+            else
+                []
 
         DescribeFloat found ->
-            []
+            if withinFoundLeaf offset found then
+                [ description ]
+
+            else
+                []
 
         DescribeFloatBetween _ _ found ->
-            []
+            if withinFoundLeaf offset found then
+                [ description ]
+
+            else
+                []
 
         DescribeIntBetween _ _ found ->
-            if withinFoundLeaf found offset then
+            if withinFoundLeaf offset found then
                 [ description ]
 
             else
                 []
 
         DescribeText rng textNodes ->
-            if withinOffsetRange rng offset then
+            if withinOffsetRange offset rng then
                 [ description ]
 
             else
                 []
 
         DescribeString rng str ->
-            if withinOffsetRange rng offset then
+            if withinOffsetRange offset rng then
                 [ description ]
 
             else
                 []
 
         DescribeMultiline rng str ->
-            if withinOffsetRange rng offset then
+            if withinOffsetRange offset rng then
                 [ description ]
 
             else
                 []
 
         DescribeStringExactly rng str ->
-            if withinOffsetRange rng offset then
+            if withinOffsetRange offset rng then
                 [ description ]
 
             else
                 []
 
         DescribeDate found ->
-            []
+            if withinFoundLeaf offset found then
+                [ description ]
+
+            else
+                []
+
+
+getWithinNested offset (Nested nest) =
+    case nest.content of
+        ( desc, items ) ->
+            getContainingDescriptions desc offset
+                ++ List.concatMap
+                    (\item ->
+                        getContainingDescriptions item offset
+                    )
+                    items
 
 
 {-| -}
@@ -696,7 +814,7 @@ document renderer child =
     Document
         { expect = expectation
         , converter =
-            \(Parsed found) ->
+            \(Parsed errors found) ->
                 case found of
                     Found range childDesc ->
                         case renderBlock child childDesc of
@@ -721,7 +839,7 @@ document renderer child =
         , parser =
             Parser.map
                 (\( range, val ) ->
-                    Parsed (Found range val)
+                    Parsed [] (Found range val)
                 )
                 (withRange
                     (Parser.withIndent 0 (getParser child))
@@ -1509,6 +1627,71 @@ string =
         }
 
 
+{-| Parse an ISO-8601 date string.
+
+Format: `YYYY-MM-DDTHH:mm:ss.SSSZ`
+
+Though you don't need to specify all segments, so `YYYY-MM-DD` works as well.
+
+Results in a `Posix` integer, which works well with [elm/time](https://package.elm-lang.org/packages/elm/time/latest/).
+
+-}
+date : Block Time.Posix
+date =
+    Value
+        { expect = ExpectDate
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeDate found ->
+                        Ok found
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.map
+                (\( pos, parsedPosix ) ->
+                    case parsedPosix of
+                        Err str ->
+                            DescribeDate
+                                (Unexpected
+                                    { range = pos
+                                    , problem = MsgBadDate str
+                                    }
+                                )
+
+                        Ok posix ->
+                            DescribeDate (Found pos posix)
+                )
+                (withRange
+                    (Parser.getChompedString
+                        (Parser.chompWhile
+                            (\c -> c /= '\n')
+                        )
+                        |> Parser.andThen
+                            (\str ->
+                                case Iso8601.toTime str of
+                                    Err err ->
+                                        Parser.succeed (Err str)
+
+                                    Ok parsedPosix ->
+                                        Parser.succeed (Ok parsedPosix)
+                            )
+                    )
+                )
+        }
+
+
+foundToResult found err =
+    case found of
+        Found _ b ->
+            Ok b
+
+        _ ->
+            Err err
+
+
+{-| -}
 exactly : String -> value -> Block value
 exactly key value =
     Value
@@ -3250,8 +3433,7 @@ parseInlineComponents ( components, found ) =
             Parser.succeed (Parser.Done (Just (List.reverse found)))
 
         current :: remaining ->
-            -- CURRENT TODO:
-            -- Make these return Nothing if they run into an issue.
+            -- Returning `Nothing` will return an Error describing what this inline should look like.
             -- When `Nothing` is returned, the parser needs to consume everything until either `}` or `\n`
             case current of
                 -- If `|` fails -> Nothing
