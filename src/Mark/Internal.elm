@@ -3181,8 +3181,10 @@ styledTextParserLoop options meaningful untilStrings found =
                     |= Parser.oneOf
                         [ Parser.map (always True) (Parser.token (Parser.Token "}" InlineEnd))
                         , Parser.succeed False
+                            |. parseTillEnd
                         ]
                 , Parser.succeed Nothing
+                    |. parseTillEnd
                 ]
             |= getPosition
         , -- chomp until a meaningful character
@@ -3250,54 +3252,129 @@ parseInlineComponents ( components, found ) =
         current :: remaining ->
             -- CURRENT TODO:
             -- Make these return Nothing if they run into an issue.
+            -- When `Nothing` is returned, the parser needs to consume everything until either `}` or `\n`
             case current of
+                -- If `|` fails -> Nothing
+                -- if Keyword fails -> Nothing
+                -- if `=` fails -> Nothing
                 ExpectInlineString inlineName ->
-                    Parser.succeed
-                        (\start str end ->
-                            Parser.Loop
-                                ( remaining
-                                , DescribeInlineString
-                                    inlineName
-                                    { start = start
-                                    , end = end
-                                    }
-                                    str
-                                    :: found
-                                )
-                        )
-                        |. Parser.chompIf (\c -> c == '|') (Expecting "|")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= getPosition
-                        |. Parser.keyword
-                            (Parser.Token
-                                inlineName
-                                (ExpectingFieldName inlineName)
+                    Parser.oneOf
+                        [ (Parser.succeed
+                            (\start hasName hasEquals ->
+                                if hasName && hasEquals then
+                                    -- Parser.Loop
+                                    --     ( remaining
+                                    --     , DescribeInlineString
+                                    --         inlineName
+                                    --         { start = start
+                                    --         , end = end
+                                    --         }
+                                    --         str
+                                    --         :: found
+                                    --     )
+                                    ( True, start )
+
+                                else
+                                    ( False, start )
                             )
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= Parser.getChompedString
-                            (Parser.chompWhile (\c -> c /= '|' && c /= '}'))
-                        |= getPosition
+                            |. Parser.chompIf (\c -> c == '|') (Expecting "|")
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |= getPosition
+                            |= Parser.oneOf
+                                [ Parser.map (always True)
+                                    (Parser.keyword
+                                        (Parser.Token
+                                            inlineName
+                                            (ExpectingFieldName inlineName)
+                                        )
+                                    )
+                                , Parser.succeed False
+                                ]
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |= Parser.oneOf
+                                [ Parser.map (always True) (Parser.chompIf (\c -> c == '=') (Expecting "="))
+                                , Parser.succeed False
+                                ]
+                          )
+                            |> Parser.andThen
+                                (\( continue, start ) ->
+                                    if continue then
+                                        Parser.succeed
+                                            (\str end ->
+                                                Parser.Loop
+                                                    ( remaining
+                                                    , DescribeInlineString
+                                                        inlineName
+                                                        { start = start
+                                                        , end = end
+                                                        }
+                                                        str
+                                                        :: found
+                                                    )
+                                            )
+                                            |. Parser.chompWhile (\c -> c == ' ')
+                                            |= Parser.getChompedString
+                                                (Parser.chompWhile (\c -> c /= '|' && c /= '}' && c /= '\n'))
+                                            |= getPosition
+
+                                    else
+                                        Parser.succeed
+                                            (\end ->
+                                                Parser.Done Nothing
+                                            )
+                                            |. parseTillEnd
+                                            |= getPosition
+                                )
+                        , Parser.succeed
+                            (\start end ->
+                                Parser.Done Nothing
+                            )
+                            |= getPosition
+                            |. parseTillEnd
+                            |= getPosition
+                        ]
 
                 ExpectInlineText ->
-                    Parser.succeed
-                        (\start str end ->
-                            Parser.Loop
-                                ( remaining
-                                , DescribeInlineText
-                                    { start = start
-                                    , end = end
-                                    }
-                                    str
-                                    :: found
-                                )
-                        )
-                        |. Parser.chompIf (\c -> c == '|') (Expecting "|")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= getPosition
-                        |= Parser.loop [] (parseInlineText { replacements = [] })
-                        |= getPosition
+                    -- if `|` fails,
+                    -- parseInline Text cannot fail.  (though we could make it fail on unclosed formatting.)
+                    Parser.oneOf
+                        [ Parser.succeed
+                            (\start str end ->
+                                Parser.Loop
+                                    ( remaining
+                                    , DescribeInlineText
+                                        { start = start
+                                        , end = end
+                                        }
+                                        str
+                                        :: found
+                                    )
+                            )
+                            |. Parser.chompIf (\c -> c == '|') (Expecting "|")
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |= getPosition
+                            |= Parser.loop [] (parseInlineText { replacements = [] })
+                            |= getPosition
+                        , Parser.succeed
+                            (\start end ->
+                                Parser.Done Nothing
+                            )
+                            |= getPosition
+                            |. parseTillEnd
+                            |= getPosition
+                        ]
+
+
+parseTillEnd =
+    Parser.succeed
+        (\str endsWithBracket ->
+            endsWithBracket
+        )
+        |= Parser.chompWhile (\c -> c /= '\n' && c /= '}')
+        |= Parser.oneOf
+            [ Parser.map (always True) (Parser.token (Parser.Token "}" InlineEnd))
+            , Parser.succeed False
+            ]
 
 
 {-| -}
@@ -3330,7 +3407,7 @@ parseInlineText options found =
         , -- chomp until a meaningful character
           Parser.chompWhile
             (\c ->
-                not (List.member c [ '}', '/', '|', '*', '~' ])
+                not (List.member c [ '}', '/', '|', '*', '~', '\n' ])
             )
             |> Parser.getChompedString
             |> Parser.andThen
