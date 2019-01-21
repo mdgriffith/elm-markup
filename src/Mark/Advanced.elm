@@ -1,4 +1,4 @@
-module Mark.Internal exposing
+module Mark.Advanced exposing
     ( parse, compile, convert, Outcome(..), Parsed(..)
     , errorToString, errorToHtml, Theme(..)
     , Block, Found(..)
@@ -198,7 +198,7 @@ convert (Document blocks) ((Parsed errors description) as parsed) =
 
 type Edit
     = Replace
-        { target : Range Position
+        { target : Range
         , new : String
         }
 
@@ -243,16 +243,16 @@ type Block data
 
 {-| -}
 type Found item
-    = Found (Range Position) item
+    = Found Range item
     | Unexpected
-        { range : Range Position
+        { range : Range
         , problem : ProblemMessage
         }
 
 
 {-| -}
 type alias UnexpectedDetails =
-    { range : Range Position
+    { range : Range
     , problem : ProblemMessage
     }
 
@@ -376,9 +376,9 @@ type Description
         , expected : Expectation
         }
     | OneOf (List Expectation) (Found Description)
-    | ManyOf (List Expectation) (Range Position) (List (Found Description))
+    | ManyOf (List Expectation) Range (List (Found Description))
     | StartsWith
-        (Range Position)
+        Range
         { found : Description
         , expected : Expectation
         }
@@ -386,7 +386,7 @@ type Description
         , expected : Expectation
         }
     | DescribeTree
-        { found : ( Range Position, List (Nested ( Description, List Description )) )
+        { found : ( Range, List (Nested ( Description, List Description )) )
         , expected : Expectation
         }
       -- Primitives
@@ -396,22 +396,22 @@ type Description
     | DescribeFloat (Found ( String, Float ))
     | DescribeFloatBetween Float Float (Found ( String, Float ))
     | DescribeIntBetween Int Int (Found Int)
-    | DescribeText (Range Position) (List TextDescription)
-    | DescribeString (Range Position) String
-    | DescribeMultiline (Range Position) String
-    | DescribeStringExactly (Range Position) String
+    | DescribeText Range (List TextDescription)
+    | DescribeString Range String
+    | DescribeMultiline Range String
+    | DescribeStringExactly Range String
     | DescribeDate (Found ( String, Time.Posix ))
 
 
 type TextDescription
-    = Styled (Range Position) Text
-    | DescribeInline String (Range Position) (List InlineDescription)
+    = Styled Range Text
+    | DescribeInline String Range (List InlineDescription)
     | UnexpectedInline UnexpectedDetails
 
 
 type InlineDescription
-    = DescribeInlineString String (Range Position) String
-    | DescribeInlineText (Range Position) (List Text)
+    = DescribeInlineString String Range String
+    | DescribeInlineText Range (List Text)
 
 
 {-| A text fragment with some styling.
@@ -773,7 +773,7 @@ getWithinNested offset (Nested nest) =
 
 {-| Add spaces and newlines in order to make up the discrepancy between cursor and target
 -}
-advanceSpace : PrintCursor -> Range Position -> ( PrintCursor, String )
+advanceSpace : PrintCursor -> Range -> ( PrintCursor, String )
 advanceSpace current target =
     let
         lineDiff =
@@ -869,7 +869,7 @@ writeNewlines n cursor =
 
 {-| Add spaces and newlines in order to make up the discrepancy between cursor and target
 -}
-advanceTo : Range Position -> PrintCursor -> PrintCursor
+advanceTo : Range -> PrintCursor -> PrintCursor
 advanceTo target cursor =
     let
         lineDiff =
@@ -1153,9 +1153,9 @@ type alias Position =
     }
 
 
-type alias Range x =
-    { start : x
-    , end : x
+type alias Range =
+    { start : Position
+    , end : Position
     }
 
 
@@ -1745,7 +1745,7 @@ nested config =
 {-| -}
 record2 :
     String
-    -> (Range Position -> one -> two -> data)
+    -> (Range -> one -> two -> data)
     -> (UnexpectedDetails -> data)
     -> Field one
     -> Field two
@@ -1802,7 +1802,7 @@ In order to render this, the above sentence is chopped up into `Text` fragments 
 
 -}
 text :
-    { view : Range Position -> Text -> rendered
+    { view : Range -> Text -> rendered
     , error : UnexpectedDetails -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
@@ -1828,7 +1828,7 @@ text options =
 
 
 renderText :
-    { view : Range Position -> Text -> rendered
+    { view : Range -> Text -> rendered
     , error : UnexpectedDetails -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
@@ -2575,7 +2575,7 @@ floating =
 {- PARSER HELPERS -}
 
 
-withRange : Parser Context Problem thing -> Parser Context Problem ( Range Position, thing )
+withRange : Parser Context Problem thing -> Parser Context Problem ( Range, thing )
 withRange parser =
     Parser.succeed
         (\start val end ->
@@ -2807,7 +2807,7 @@ renderRecordResult renderUnexpected pos result =
 
 type alias RecordFields =
     { remaining : List ( String, Parser Context Problem ( String, Found Description ) )
-    , found : Result ( Maybe (Range Position), ProblemMessage ) (List ( String, Found Description ))
+    , found : Result ( Maybe Range, ProblemMessage ) (List ( String, Found Description ))
     }
 
 
@@ -2876,7 +2876,7 @@ parseFields :
     String
     -> List String
     -> RecordFields
-    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe (Range Position), ProblemMessage ) (List ( String, Found Description ))))
+    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, ProblemMessage ) (List ( String, Found Description ))))
 parseFields recordName fieldNames fields =
     case fields.remaining of
         [] ->
@@ -4582,7 +4582,7 @@ formatNewline =
 
 
 
--- highlight : Range Position -> String -> List ()
+-- highlight : Range -> String -> List ()
 
 
 highlight range source =
