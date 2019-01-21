@@ -4,14 +4,14 @@ module Mark.Internal exposing
     , Block, Found(..)
     , document
     , block
-    , string, int, float, floatBetween, intBetween, date, multiline
+    , string, exactly, int, float, floatBetween, intBetween, date, multiline
     , oneOf, manyOf, startWith, nested
     , record2, field, Field
     , Text(..), Style(..), text, replacement, balanced
     , inline, inlineString, inlineText
     , map
     , getDesc, toString
-    , Range, Position
+    , Range, Position, Nested(..)
     , getContainingDescriptions, prettyDescription, prettyFound, prettyParsed
     )
 
@@ -27,7 +27,7 @@ module Mark.Internal exposing
 
 @docs block
 
-@docs string, int, float, floatBetween, intBetween, bool, date, multiline
+@docs string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
 
 @docs oneOf, manyOf, startWith, nested
 
@@ -41,7 +41,7 @@ module Mark.Internal exposing
 
 @docs getDesc, toString
 
-@docs Range, Position
+@docs Range, Position, Nested
 
 -}
 
@@ -298,7 +298,7 @@ prettyParsed (Parsed errors foundDescription) =
     prettyFound 0 prettyDescription foundDescription
 
 
-prettyDescription indent desc =
+prettyDescription indentation desc =
     case desc of
         DescribeBlock name details ->
             name
@@ -350,18 +350,18 @@ prettyDescription indent desc =
             str
 
         DescribeDate foundPosix ->
-            prettyFound indent (always Iso8601.fromTime) foundPosix
+            prettyFound indentation (always Iso8601.fromTime) (mapFound Tuple.second foundPosix)
 
 
-prettyFound indent contentToString found =
+prettyFound indentation contentToString found =
     case found of
         Found range actual ->
-            String.repeat (indent * 4) " "
+            String.repeat (indentation * 4) " "
                 ++ "Found\n"
-                ++ contentToString (indent + 1) actual
+                ++ contentToString (indentation + 1) actual
 
         Unexpected unexpected ->
-            String.repeat (indent * 4) " " ++ "Unexpected"
+            String.repeat (indentation * 4) " " ++ "Unexpected"
 
 
 type Description
@@ -393,14 +393,14 @@ type Description
     | DescribeStub String (Found String)
     | DescribeBoolean (Found Bool)
     | DescribeInteger (Found Int)
-    | DescribeFloat (Found Float)
-    | DescribeFloatBetween Float Float (Found Float)
+    | DescribeFloat (Found ( String, Float ))
+    | DescribeFloatBetween Float Float (Found ( String, Float ))
     | DescribeIntBetween Int Int (Found Int)
     | DescribeText (Range Position) (List TextDescription)
     | DescribeString (Range Position) String
     | DescribeMultiline (Range Position) String
     | DescribeStringExactly (Range Position) String
-    | DescribeDate (Found Time.Posix)
+    | DescribeDate (Found ( String, Time.Posix ))
 
 
 type TextDescription
@@ -771,77 +771,304 @@ getWithinNested offset (Nested nest) =
                     items
 
 
-{-| -}
-toString : Int -> Description -> String
-toString indent description =
-    case description of
-        DescribeBlock name details ->
-            String.repeat (indent * 4) " "
-                ++ "| "
-                ++ name
-                ++ "\n"
-                ++ foundToString (toString (indent + 1)) details.found
+{-| Add spaces and newlines in order to make up the discrepancy between cursor and target
+-}
+advanceSpace : PrintCursor -> Range Position -> ( PrintCursor, String )
+advanceSpace current target =
+    let
+        lineDiff =
+            abs (target.start.line - current.position.line)
+    in
+    -- if lineDiff == 0 then
+    ( { current | position = target.start }
+    , String.repeat (target.start.column - current.position.column) " "
+    )
 
-        DescribeStub name range ->
-            String.repeat (indent * 4) " "
-                ++ "| "
-                ++ name
-                ++ "\n"
+
+
+-- else
+--     -- lineDiff /must/ be positive
+--     String.repeat lineDiff "\n"
+--         ++ String.repeat target.start.column " "
+--         ++ str
+
+
+type alias PrintCursor =
+    { indent : Int
+    , position : Position
+    , printed : String
+    }
+
+
+{-| -}
+toString : Parsed -> String
+toString (Parsed _ foundDescription) =
+    writeFound writeDescription
+        foundDescription
+        { indent = 0
+        , position = { line = 1, column = 1, offset = 0 }
+        , printed = ""
+        }
+        |> .printed
+
+
+write : String -> PrintCursor -> PrintCursor
+write str cursor =
+    let
+        _ =
+            if String.contains "\n" str then
+                Debug.log "with newline" str
+
+            else
+                str
+    in
+    { cursor
+        | printed = cursor.printed ++ str
+        , position =
+            (\pos ->
+                { pos
+                    | offset = pos.offset + String.length str
+                    , column = pos.column + String.length str
+                }
+            )
+                cursor.position
+    }
+
+
+writeNewline : PrintCursor -> PrintCursor
+writeNewline cursor =
+    { cursor
+        | printed = cursor.printed ++ "\n"
+        , position =
+            (\pos ->
+                { pos
+                    | offset = pos.offset + 1
+                    , column = 1
+                    , line = pos.line + 1
+                }
+            )
+                cursor.position
+    }
+
+
+writeNewlines : Int -> PrintCursor -> PrintCursor
+writeNewlines n cursor =
+    { cursor
+        | printed = cursor.printed ++ String.repeat n "\n"
+        , position =
+            (\pos ->
+                { pos
+                    | offset = pos.offset + n
+                    , column = 1
+                    , line = pos.line + n
+                }
+            )
+                cursor.position
+    }
+
+
+{-| Add spaces and newlines in order to make up the discrepancy between cursor and target
+-}
+advanceTo : Range Position -> PrintCursor -> PrintCursor
+advanceTo target cursor =
+    let
+        lineDiff =
+            abs (target.start.line - cursor.position.line)
+
+        _ =
+            Debug.log "advance to" ( cursor.position, target.start )
+    in
+    if target.start == cursor.position then
+        cursor
+
+    else if lineDiff == 0 then
+        write (String.repeat (target.start.column - cursor.position.column) " ") cursor
+
+    else
+        cursor
+            |> writeNewlines lineDiff
+            |> write (String.repeat (target.start.column - 1) " ")
+
+
+writeIndent : PrintCursor -> PrintCursor
+writeIndent cursor =
+    write (String.repeat (cursor.indent * 4) " ") cursor
+
+
+writeLine line cursor =
+    cursor
+        |> write line
+        |> writeNewline
+
+
+indent : PrintCursor -> PrintCursor
+indent cursor =
+    { cursor | indent = cursor.indent + 1 }
+
+
+dedent : PrintCursor -> PrintCursor
+dedent cursor =
+    { cursor | indent = max 0 cursor.indent - 1 }
+
+
+{-| -}
+writeDescription : Description -> PrintCursor -> PrintCursor
+writeDescription description cursor =
+    case Debug.log "write desc" description of
+        DescribeBlock name details ->
+            cursor
+                |> write ("| " ++ name)
+                |> indent
+                |> writeFound writeDescription details.found
+                |> dedent
+
+        DescribeStub name found ->
+            cursor
+                |> write "|"
+                |> writeFound (writeWith identity) found
 
         Record name details ->
-            String.repeat (indent * 4) " "
-                ++ "| "
-                ++ name
-                ++ "\n"
+            writeIndent cursor
+                |> write ("| " ++ name)
+                |> indent
+                |> writeFound
+                    (\fields curs -> List.foldr writeField curs fields)
+                    details.found
+                |> dedent
 
-        -- ++ String.join "\n" (List.map (fieldToString (indent + 1)) fields)
         OneOf expected found ->
-            ""
+            cursor
+                |> writeFound writeDescription found
 
-        -- toString indent found
         ManyOf expected range found ->
-            found
-                |> List.map (foundToString (toString indent))
-                |> String.join "\n\n"
+            List.foldl
+                (writeFound writeDescription)
+                cursor
+                found
 
         StartsWith range start end ->
-            ""
+            cursor
+                |> writeDescription start.found
+                |> writeDescription end.found
 
-        -- toString indent start ++ toString indent end
         DescribeBoolean foundBoolean ->
-            foundToString boolToString foundBoolean
+            writeFound (writeWith boolToString) foundBoolean cursor
 
         DescribeInteger found ->
-            foundToString String.fromInt found
+            writeFound (writeWith String.fromInt) found cursor
 
         DescribeFloat found ->
-            foundToString String.fromFloat found
+            writeFound (writeWith Tuple.first) found cursor
 
         DescribeFloatBetween low high found ->
-            foundToString String.fromFloat found
+            writeFound (writeWith Tuple.first) found cursor
 
         DescribeIntBetween low high found ->
-            foundToString String.fromInt found
+            writeFound (writeWith String.fromInt) found cursor
 
         DescribeText range textNodes ->
-            ""
+            cursor
+                |> advanceTo range
+                |> (\c -> List.foldl writeTextDescription c textNodes)
 
         DescribeString range str ->
-            str
+            cursor
+                |> advanceTo range
+                |> write str
 
         DescribeMultiline range str ->
-            str
+            let
+                indented =
+                    String.lines str
+                        |> List.indexedMap
+                            (\i s ->
+                                if s == "" || i == 0 then
+                                    s
+
+                                else
+                                    String.repeat (cursor.indent * 4) " " ++ s
+                            )
+
+                numLines =
+                    List.length indented
+            in
+            cursor
+                |> advanceTo range
+                |> (\curs ->
+                        List.foldl
+                            (\line ( i, advancedCurs ) ->
+                                if i == numLines then
+                                    ( i + 1, write line advancedCurs )
+
+                                else
+                                    ( i + 1, writeLine line advancedCurs )
+                            )
+                            ( 1, curs )
+                            indented
+                   )
+                |> Tuple.second
 
         DescribeStringExactly range str ->
-            str
+            cursor
+                |> advanceTo range
+                |> write str
 
         DescribeDate foundPosix ->
-            ""
+            writeFound (writeWith Tuple.first) foundPosix cursor
 
         DescribeTree tree ->
+            case tree.found of
+                ( range, nestedItems ) ->
+                    cursor
+                        |> advanceTo range
+                        |> (\curs -> List.foldl writeNested curs nestedItems)
+
+
+writeNested (Nested node) cursor =
+    cursor
+        |> writeDescription (Tuple.first node.content)
+        |> (\curs -> List.foldl writeDescription curs (Tuple.second node.content))
+        |> indent
+        |> (\curs -> List.foldl writeNested curs node.children)
+        |> dedent
+
+
+textDescriptionToString txt =
+    case txt of
+        Styled range t ->
+            textToString t
+
+        DescribeInline name range inlineDesc ->
+            "{" ++ name ++ String.join "" (List.map inlineDescToString inlineDesc) ++ "}"
+
+        UnexpectedInline unexpected ->
             ""
 
 
+inlineDescToString : InlineDescription -> String
+inlineDescToString inlineDesc =
+    case inlineDesc of
+        DescribeInlineString name range value ->
+            name ++ " = " ++ value
+
+        DescribeInlineText range txts ->
+            String.join "" (List.map textToString txts)
+
+
+writeTextDescription desc curs =
+    write (textDescriptionToString desc) curs
+
+
+writeTextNode node curs =
+    write (textToString node) curs
+
+
+textToString : Text -> String
+textToString (Text styles txt) =
+    txt
+
+
+boolToString : Bool -> String
 boolToString b =
     if b then
         "True"
@@ -850,17 +1077,33 @@ boolToString b =
         "False"
 
 
-foundToString innerToString found =
+writeWith toStr a cursor =
+    write (toStr a) cursor
+
+
+writeFound : (a -> PrintCursor -> PrintCursor) -> Found a -> PrintCursor -> PrintCursor
+writeFound fn found cursor =
     case found of
-        Found _ inner ->
-            innerToString inner
+        Found range fnd ->
+            cursor
+                |> advanceTo range
+                |> fn fnd
 
         Unexpected unexpected ->
-            ":/"
+            cursor
 
 
-fieldToString indent ( name, val ) =
-    String.repeat (indent * 4) " " ++ name ++ " = " ++ toString indent val
+writeField : ( String, Found Description ) -> PrintCursor -> PrintCursor
+writeField ( name, foundVal ) cursor =
+    case foundVal of
+        Found rng fnd ->
+            cursor
+                |> advanceTo rng
+                |> write (name ++ " = ")
+                |> writeDescription fnd
+
+        Unexpected unexpected ->
+            cursor
 
 
 type alias ErrorMessage =
@@ -1102,7 +1345,7 @@ block name renderer child =
                 withRange
                     (Parser.getIndent
                         |> Parser.andThen
-                            (\indent ->
+                            (\indentation ->
                                 Parser.succeed identity
                                     |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
                                     |. Parser.chompWhile (\c -> c == ' ')
@@ -1110,7 +1353,7 @@ block name renderer child =
                                     |= Parser.oneOf
                                         [ (Parser.succeed identity
                                             |= getPosition
-                                            |. Parser.token (Parser.Token (String.repeat (indent + 4) " ") (ExpectingIndent (indent + 4)))
+                                            |. Parser.token (Parser.Token (String.repeat (indentation + 4) " ") (ExpectingIndent (indentation + 4)))
                                           )
                                             |> Parser.andThen
                                                 (\start ->
@@ -1120,15 +1363,15 @@ block name renderer child =
                                                             (\end ->
                                                                 Err
                                                                     ( { start = start, end = end }
-                                                                    , MsgExpectingIndent (indent + 4)
+                                                                    , MsgExpectingIndent (indentation + 4)
                                                                     )
                                                             )
                                                             |. Parser.chompIf (\c -> c == ' ') Space
                                                             |. Parser.chompWhile (\c -> c == ' ')
                                                             |= getPosition
-                                                            |. Parser.loop "" (raggedIndentedStringAbove indent)
+                                                            |. Parser.loop "" (raggedIndentedStringAbove indentation)
                                                         , Parser.map Ok <|
-                                                            Parser.withIndent (indent + 4) (Parser.inContext (InBlock name) (getParser child))
+                                                            Parser.withIndent (indentation + 4) (Parser.inContext (InBlock name) (getParser child))
                                                         ]
                                                 )
 
@@ -1137,10 +1380,10 @@ block name renderer child =
                                         -- take care of that itself by returning Unexpected
                                         , Parser.succeed
                                             (\( pos, foundIndent ) ->
-                                                Err ( pos, MsgExpectingIndent (indent + 4) )
+                                                Err ( pos, MsgExpectingIndent (indentation + 4) )
                                             )
                                             |= withRange (Parser.chompWhile (\c -> c == ' '))
-                                            |. Parser.loop "" (raggedIndentedStringAbove indent)
+                                            |. Parser.loop "" (raggedIndentedStringAbove indentation)
                                         ]
                             )
                     )
@@ -1236,14 +1479,14 @@ oneOf renderUnexpected blocks =
                     (List.reverse childBlocks
                         ++ [ Parser.getIndent
                                 |> Parser.andThen
-                                    (\indent ->
+                                    (\indentation ->
                                         Parser.succeed
                                             (\( pos, foundWord ) ->
                                                 Err ( pos, MsgUnknownBlock blockNames )
                                             )
                                             |= withRange word
                                             |. newline
-                                            |. Parser.loop "" (raggedIndentedStringAbove indent)
+                                            |. Parser.loop "" (raggedIndentedStringAbove indentation)
                                     )
                            ]
                     )
@@ -1341,14 +1584,14 @@ manyOf renderUnexpected blocks =
                             (List.reverse childBlocks
                                 ++ [ Parser.getIndent
                                         |> Parser.andThen
-                                            (\indent ->
+                                            (\indentation ->
                                                 Parser.succeed
                                                     (\( pos, foundWord ) ->
                                                         Err ( pos, MsgUnknownBlock blockNames )
                                                     )
                                                     |= withRange word
                                                     |. newline
-                                                    |. Parser.loop "" (raggedIndentedStringAbove indent)
+                                                    |. Parser.loop "" (raggedIndentedStringAbove indentation)
                                             )
                                    ]
                             )
@@ -1413,9 +1656,9 @@ manyOf renderUnexpected blocks =
                 |= withRange
                     (Parser.getIndent
                         |> Parser.andThen
-                            (\indent ->
+                            (\indentation ->
                                 Parser.loop ( False, [] )
-                                    (blocksOrNewlines (Parser.oneOf (blockParser :: List.reverse childValues)) indent)
+                                    (blocksOrNewlines (Parser.oneOf (blockParser :: List.reverse childValues)) indentation)
                             )
                     )
         }
@@ -1764,8 +2007,8 @@ multiline =
                 (withRange
                     (Parser.getIndent
                         |> Parser.andThen
-                            (\indent ->
-                                Parser.loop "" (indentedString indent)
+                            (\indentation ->
+                                Parser.loop "" (indentedString indentation)
                             )
                     )
                 )
@@ -1816,7 +2059,7 @@ date =
             \desc ->
                 case desc of
                     DescribeDate found ->
-                        Ok found
+                        Ok (mapFound Tuple.second found)
 
                     _ ->
                         Err InvalidAst
@@ -1832,8 +2075,8 @@ date =
                                     }
                                 )
 
-                        Ok posix ->
-                            DescribeDate (Found pos posix)
+                        Ok ( str, posix ) ->
+                            DescribeDate (Found pos ( str, posix ))
                 )
                 (withRange
                     (Parser.getChompedString
@@ -1847,7 +2090,7 @@ date =
                                         Parser.succeed (Err str)
 
                                     Ok parsedPosix ->
-                                        Parser.succeed (Ok parsedPosix)
+                                        Parser.succeed (Ok ( str, parsedPosix ))
                             )
                     )
                 )
@@ -1914,7 +2157,7 @@ float =
             \desc ->
                 case desc of
                     DescribeFloat found ->
-                        Ok found
+                        Ok (mapFound Tuple.second found)
 
                     _ ->
                         Err NoMatch
@@ -1986,7 +2229,7 @@ floatBetween one two =
             \desc ->
                 case desc of
                     DescribeFloatBetween low high found ->
-                        Ok found
+                        Ok (mapFound Tuple.second found)
 
                     _ ->
                         Err InvalidAst
@@ -1995,7 +2238,7 @@ floatBetween one two =
                 (\found ->
                     DescribeFloatBetween bottom top <|
                         case found of
-                            Found rng i ->
+                            Found rng ( str, i ) ->
                                 if i >= bottom && i <= top then
                                     found
 
@@ -2077,7 +2320,7 @@ type Problem
 
 {-| -}
 raggedIndentedStringAbove : Int -> String -> Parser Context Problem (Parser.Step String String)
-raggedIndentedStringAbove indent found =
+raggedIndentedStringAbove indentation found =
     Parser.oneOf
         [ Parser.succeed
             (\extra ->
@@ -2100,7 +2343,7 @@ raggedIndentedStringAbove indent found =
                 Parser.Loop (found ++ String.repeat indentCount " " ++ str)
             )
             |= Parser.oneOf
-                (indentationBetween (indent + 1) (indent + 4))
+                (indentationBetween (indentation + 1) (indentation + 4))
             |= Parser.getChompedString
                 (Parser.chompWhile
                     (\c -> c /= '\n')
@@ -2135,7 +2378,7 @@ indentationBetween lower higher =
 
 {-| -}
 indentedString : Int -> String -> Parser Context Problem (Parser.Step String String)
-indentedString indent found =
+indentedString indentation found =
     Parser.oneOf
         -- First line, indentation is already handled by the block constructor.
         [ Parser.succeed (Parser.Done found)
@@ -2168,7 +2411,7 @@ indentedString indent found =
                 (\str ->
                     Parser.Loop (found ++ str)
                 )
-                |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
+                |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndent indentation))
                 |= Parser.getChompedString
                     (Parser.chompWhile
                         (\c -> c /= '\n')
@@ -2179,7 +2422,7 @@ indentedString indent found =
 
 {-| -}
 blocksOrNewlines : Parser Context Problem thing -> Int -> ( Bool, List thing ) -> Parser Context Problem (Parser.Step ( Bool, List thing ) (List thing))
-blocksOrNewlines myParser indent ( parsedSomething, existing ) =
+blocksOrNewlines myParser indentation ( parsedSomething, existing ) =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -2202,7 +2445,7 @@ blocksOrNewlines myParser indent ( parsedSomething, existing ) =
                     (\foundBlock ->
                         Parser.Loop ( True, foundBlock :: existing )
                     )
-                    |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
+                    |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndent indentation))
                     |= myParser
                 , Parser.succeed (Parser.Loop ( True, existing ))
                     |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
@@ -2278,7 +2521,7 @@ integer =
 
 {-| Parses a float and must end with whitespace, not additional characters.
 -}
-floating : Parser Context Problem (Found Float)
+floating : Parser Context Problem (Found ( String, Float ))
 floating =
     Parser.map
         (\( pos, floatResult ) ->
@@ -2295,25 +2538,31 @@ floating =
         (withRange
             (Parser.oneOf
                 [ Parser.succeed
-                    (\fl str ->
-                        if str == "" then
-                            Ok (negate fl)
+                    (\start fl end src extra ->
+                        if extra == "" then
+                            Ok ( String.slice start end src, negate fl )
 
                         else
-                            Err (String.fromFloat fl ++ str)
+                            Err (String.fromFloat fl ++ extra)
                     )
+                    |= Parser.getOffset
                     |. Parser.token (Parser.Token "-" (Expecting "-"))
                     |= Parser.float FloatingPoint InvalidNumber
+                    |= Parser.getOffset
+                    |= Parser.getSource
                     |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
                 , Parser.succeed
-                    (\fl str ->
-                        if str == "" then
-                            Ok fl
+                    (\start fl end src extra ->
+                        if extra == "" then
+                            Ok ( String.slice start end src, fl )
 
                         else
-                            Err (String.fromFloat fl ++ str)
+                            Err (String.fromFloat fl ++ extra)
                     )
+                    |= Parser.getOffset
                     |= Parser.float FloatingPoint InvalidNumber
+                    |= Parser.getOffset
+                    |= Parser.getSource
                     |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
                 , Parser.succeed Err
                     |= word
@@ -2451,12 +2700,12 @@ parseRecord recordName expectations fields =
         |= withRange
             (Parser.getIndent
                 |> Parser.andThen
-                    (\indent ->
+                    (\indentation ->
                         Parser.succeed identity
                             |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
                             |. Parser.chompWhile (\c -> c == ' ')
                             |. Parser.chompIf (\c -> c == '\n') Newline
-                            |= Parser.withIndent (indent + 4)
+                            |= Parser.withIndent (indentation + 4)
                                 (Parser.loop
                                     { remaining = fields
                                     , found = Ok []
@@ -2471,7 +2720,7 @@ withFieldName : String -> Parser Context Problem Description -> Parser Context P
 withFieldName name parser =
     Parser.getIndent
         |> Parser.andThen
-            (\indent ->
+            (\indentation ->
                 Parser.map
                     (\( pos, description ) ->
                         ( name, Found pos description )
@@ -2483,7 +2732,7 @@ withFieldName name parser =
                             |. Parser.chompWhile (\c -> c == ' ')
                             |. Parser.chompIf (\c -> c == '=') (Expecting "=")
                             |. Parser.chompWhile (\c -> c == ' ')
-                            |= Parser.withIndent (indent + 4) (Parser.inContext (InRecordField name) parser)
+                            |= Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
                         )
             )
 
@@ -2491,7 +2740,7 @@ withFieldName name parser =
 unexpectedField recordName options =
     Parser.getIndent
         |> Parser.andThen
-            (\indent ->
+            (\indentation ->
                 Parser.map
                     (\( ( range, name ), content ) ->
                         ( name
@@ -2512,7 +2761,7 @@ unexpectedField recordName options =
                         |. Parser.chompIf (\c -> c == '=') (Expecting "=")
                         |. Parser.chompWhile (\c -> c == ' ')
                         -- TODO: parse multiline string
-                        |= Parser.withIndent (indent + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
+                        |= Parser.withIndent (indentation + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
                      -- |. newline
                      -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
                     )
@@ -2578,10 +2827,10 @@ type Indented thing
         -> Is improperly indented
 
 -}
-indentOrSkip indent successParser =
+indentOrSkip indentation successParser =
     Parser.oneOf
         [ Parser.succeed identity
-            |. Parser.token (Parser.Token (String.repeat indent " ") (ExpectingIndent indent))
+            |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndent indentation))
             |= Parser.oneOf
                 [ Parser.map (always EmptyLine) newline
                 , Parser.succeed
@@ -2638,9 +2887,9 @@ parseFields recordName fieldNames fields =
                 Ok found ->
                     Parser.getIndent
                         |> Parser.andThen
-                            (\indent ->
+                            (\indentation ->
                                 Parser.oneOf
-                                    [ indentOrSkip indent (captureField found recordName fields fieldNames)
+                                    [ indentOrSkip indentation (captureField found recordName fields fieldNames)
                                         |> Parser.map
                                             (\indentedField ->
                                                 case indentedField of
@@ -2653,7 +2902,7 @@ parseFields recordName fieldNames fields =
                                                     WeirdIndent i ->
                                                         Parser.Loop
                                                             { found =
-                                                                Err ( Nothing, MsgExpectingIndent indent )
+                                                                Err ( Nothing, MsgExpectingIndent indentation )
                                                             , remaining =
                                                                 fields.remaining
                                                             }
@@ -2679,9 +2928,9 @@ parseFields recordName fieldNames fields =
                     -- the entire indented block.  so that the parser can continue.
                     Parser.getIndent
                         |> Parser.andThen
-                            (\indent ->
+                            (\indentation ->
                                 Parser.succeed (Parser.Done fields.found)
-                                    |. Parser.loop "" (raggedIndentedStringAbove (indent - 4))
+                                    |. Parser.loop "" (raggedIndentedStringAbove (indentation - 4))
                             )
 
 
@@ -2927,16 +3176,16 @@ renderTreeNodeSmall config (Nested cursor) =
 
 buildTree baseIndent items =
     let
-        gather ( indent, icon, item ) (TreeBuilder builder) =
-            addItem (indent - baseIndent) ( icon, item ) (TreeBuilder builder)
+        gather ( indentation, icon, item ) (TreeBuilder builder) =
+            addItem (indentation - baseIndent) ( icon, item ) (TreeBuilder builder)
 
-        groupByIcon ( indent, maybeIcon, item ) maybeCursor =
+        groupByIcon ( indentation, maybeIcon, item ) maybeCursor =
             case maybeCursor of
                 Nothing ->
                     case maybeIcon of
                         Just icon ->
                             Just
-                                { indent = indent
+                                { indent = indentation
                                 , icon = icon
                                 , items = [ item ]
                                 , accumulated = []
@@ -2958,7 +3207,7 @@ buildTree baseIndent items =
                                 }
 
                             Just icon ->
-                                { indent = indent
+                                { indent = indentation
                                 , icon = icon
                                 , items = [ item ]
                                 , accumulated =
@@ -3016,11 +3265,7 @@ indentedBlocksOrNewlines :
     -> Block thing
     -> ( NestedIndex, List ( Int, Maybe Description, Description ) )
     -> Parser Context Problem (Parser.Step ( NestedIndex, List ( Int, Maybe Description, Description ) ) (List ( Int, Maybe Description, Description )))
-indentedBlocksOrNewlines icon item ( indent, existing ) =
-    let
-        _ =
-            Debug.log "indented blocks/nl" ( indent, existing )
-    in
+indentedBlocksOrNewlines icon item ( indentation, existing ) =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -3029,22 +3274,19 @@ indentedBlocksOrNewlines icon item ( indent, existing ) =
                 )
 
         -- Whitespace Line
-        , skipBlankLineWith (Parser.Loop ( indent, existing ))
+        , skipBlankLineWith (Parser.Loop ( indentation, existing ))
         , case existing of
             [] ->
                 -- Indent is already parsed by the block constructor for first element, skip it
                 Parser.succeed
                     (\foundIcon foundBlock ->
                         let
-                            _ =
-                                Debug.log "parse first" ( foundIcon, foundBlock )
-
                             newIndex =
-                                { prev = indent.base
-                                , base = indent.base
+                                { prev = indentation.base
+                                , base = indentation.base
                                 }
                         in
-                        Parser.Loop ( newIndex, ( indent.base, Just foundIcon, foundBlock ) :: existing )
+                        Parser.Loop ( newIndex, ( indentation.base, Just foundIcon, foundBlock ) :: existing )
                     )
                     |= getParser icon
                     |= getParser item
@@ -3052,7 +3294,7 @@ indentedBlocksOrNewlines icon item ( indent, existing ) =
             _ ->
                 Parser.oneOf
                     [ -- block with required indent
-                      expectIndentation indent.base indent.prev
+                      expectIndentation indentation.base indentation.prev
                         |> Parser.andThen
                             (\newIndent ->
                                 -- If the indent has changed, then the delimiter is required
@@ -3063,7 +3305,7 @@ indentedBlocksOrNewlines icon item ( indent, existing ) =
                                                 let
                                                     newIndex =
                                                         { prev = newIndent
-                                                        , base = indent.base
+                                                        , base = indentation.base
                                                         }
                                                 in
                                                 Parser.Loop
@@ -3074,19 +3316,19 @@ indentedBlocksOrNewlines icon item ( indent, existing ) =
                                             |= getParser icon
                                             |= getParser item
                                          )
-                                            :: (if newIndent - 4 == indent.prev then
+                                            :: (if newIndent - 4 == indentation.prev then
                                                     [ getParser item
                                                         |> Parser.map
                                                             (\foundBlock ->
                                                                 let
                                                                     newIndex =
-                                                                        { prev = indent.prev
-                                                                        , base = indent.base
+                                                                        { prev = indentation.prev
+                                                                        , base = indentation.base
                                                                         }
                                                                 in
                                                                 Parser.Loop
                                                                     ( newIndex
-                                                                    , ( indent.prev, Nothing, foundBlock ) :: existing
+                                                                    , ( indentation.prev, Nothing, foundBlock ) :: existing
                                                                     )
                                                             )
                                                     ]
@@ -3221,7 +3463,7 @@ addItem :
     -> node
     -> TreeBuilder node
     -> TreeBuilder node
-addItem indent content (TreeBuilder builder) =
+addItem indentation content (TreeBuilder builder) =
     let
         newItem =
             Nested
@@ -3230,7 +3472,7 @@ addItem indent content (TreeBuilder builder) =
                 }
 
         deltaLevel =
-            indent
+            indentation
                 - builder.previousIndent
 
         addToLevel brandNewItem levels =
@@ -3247,7 +3489,7 @@ addItem indent content (TreeBuilder builder) =
     case builder.levels of
         [] ->
             TreeBuilder
-                { previousIndent = indent
+                { previousIndent = indentation
                 , levels =
                     [ Level
                         [ newItem ]
@@ -3258,7 +3500,7 @@ addItem indent content (TreeBuilder builder) =
             if deltaLevel == 0 then
                 -- add to current level
                 TreeBuilder
-                    { previousIndent = indent
+                    { previousIndent = indentation
                     , levels =
                         Level (newItem :: lvl)
                             :: remaining
@@ -3267,7 +3509,7 @@ addItem indent content (TreeBuilder builder) =
             else if deltaLevel > 0 then
                 -- add new level
                 TreeBuilder
-                    { previousIndent = indent
+                    { previousIndent = indentation
                     , levels =
                         Level [ newItem ]
                             :: Level lvl
@@ -3278,7 +3520,7 @@ addItem indent content (TreeBuilder builder) =
                 -- We've dedented, so we need to first collapse the current level
                 -- into the one below, then add an item to that level
                 TreeBuilder
-                    { previousIndent = indent
+                    { previousIndent = indentation
                     , levels =
                         collapseLevel (abs deltaLevel // 4) builder.levels
                             |> addToLevel newItem
