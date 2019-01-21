@@ -46,7 +46,9 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 It includes all the blocks and inline blocks referenced in this module.
 
-**Note** this document requires a `title` as the first block of each document by using `Mark.startWith`. If that isn't what you want, create your own document with your own constraints.
+**Note** this document requires a `title` as the first block of each document by using `Mark.startWith`.
+
+This might not be what you want, in which case you should define your own document using `Mark`.
 
 -}
 document : Mark.Document (model -> Element msg)
