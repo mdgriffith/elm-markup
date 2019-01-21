@@ -1,5 +1,5 @@
 module Mark.Advanced exposing
-    ( parse, compile, convert, Outcome(..), Parsed(..)
+    ( parse, compile, convert, Outcome(..), Parsed
     , errorToString, errorToHtml, Theme(..)
     , Block, Found(..)
     , document
@@ -771,28 +771,6 @@ getWithinNested offset (Nested nest) =
                     items
 
 
-{-| Add spaces and newlines in order to make up the discrepancy between cursor and target
--}
-advanceSpace : PrintCursor -> Range -> ( PrintCursor, String )
-advanceSpace current target =
-    let
-        lineDiff =
-            abs (target.start.line - current.position.line)
-    in
-    -- if lineDiff == 0 then
-    ( { current | position = target.start }
-    , String.repeat (target.start.column - current.position.column) " "
-    )
-
-
-
--- else
---     -- lineDiff /must/ be positive
---     String.repeat lineDiff "\n"
---         ++ String.repeat target.start.column " "
---         ++ str
-
-
 type alias PrintCursor =
     { indent : Int
     , position : Position
@@ -814,14 +792,6 @@ toString (Parsed _ foundDescription) =
 
 write : String -> PrintCursor -> PrintCursor
 write str cursor =
-    let
-        _ =
-            if String.contains "\n" str then
-                Debug.log "with newline" str
-
-            else
-                str
-    in
     { cursor
         | printed = cursor.printed ++ str
         , position =
