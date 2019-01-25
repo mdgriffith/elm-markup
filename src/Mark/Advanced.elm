@@ -1,31 +1,34 @@
 module Mark.Advanced exposing
-    ( parse, compile, convert, Outcome(..), Parsed
-    , errorToString, errorToHtml, Theme(..)
+    ( Document, Description(..), TextDescription(..), InlineDescription(..)
+    , parse, compile, convert, Outcome(..), Parsed
+    , ErrorMessage, errorToString, errorToHtml, Theme(..)
     , Block, Found(..)
     , document
-    , block
-    , string, exactly, int, float, floatBetween, intBetween, date, multiline
+    , block, stub
+    , string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
     , oneOf, manyOf, startWith, nested
     , record2, field, Field
-    , Text(..), Style(..), text, replacement, balanced
-    , inline, inlineString, inlineText
+    , Text(..), Style(..), text, replacement, balanced, Replacement
+    , Inline, inline, inlineString, inlineText, mapInline
     , map
-    , getDesc, toString
-    , Range, Position, Nested(..)
-    , getContainingDescriptions, prettyDescription, prettyFound, prettyParsed
+    , focus, parent, getDesc, getDescription, toString
+    , Range, Position, Nested(..), foldNested, foldNestedList, replaceNested
+    , update, Edit, updateFloat, updateInt, updateString, replaceOneOf, deleteBlock, insertAt
     )
 
 {-|
 
+@docs Document, Description, TextDescription, InlineDescription
+
 @docs parse, compile, convert, Outcome, Parsed
 
-@docs errorToString, errorToHtml, Theme
+@docs ErrorMessage, errorToString, errorToHtml, Theme
 
 @docs Block, Found
 
 @docs document
 
-@docs block
+@docs block, stub
 
 @docs string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
 
@@ -33,15 +36,17 @@ module Mark.Advanced exposing
 
 @docs record2, field, Field
 
-@docs Text, Style, text, replacement, balanced
+@docs Text, Style, text, replacement, balanced, Replacement
 
-@docs inline, inlineString, inlineText
+@docs Inline, inline, inlineString, inlineText, mapInline
 
 @docs map
 
-@docs getDesc, toString
+@docs focus, parent, getDesc, getDescription, toString
 
-@docs Range, Position, Nested
+@docs Range, Position, Nested, foldNested, foldNestedList, replaceNested
+
+@docs update, Edit, updateFloat, updateInt, updateString, replaceOneOf, deleteBlock, insertAt
 
 -}
 
@@ -70,54 +75,60 @@ parse :
     -> Outcome ErrorMessage (Partial Parsed) Parsed
 parse (Document blocks) source =
     case Parser.run blocks.parser source of
-        Ok ((Parsed errors description) as parsed) ->
-            case errors of
+        Ok ((Parsed parsedDetails) as parsed) ->
+            case parsedDetails.errors of
                 [] ->
                     Success parsed
 
                 _ ->
                     Almost
-                        { errors = errors
+                        { errors = parsedDetails.errors
                         , result = parsed
                         }
 
         Err deadEnds ->
-            Failure
-                { message = []
-                , title = "PARSING ERROR"
-                , region =
-                    case List.head deadEnds of
-                        Nothing ->
-                            { start =
-                                { offset = 0
-                                , line = 0
-                                , column = 0
+            Failure <|
+                renderError
+                    source
+                    { problem = MsgParsingIssue deadEnds
+                    , range =
+                        case List.head deadEnds of
+                            Nothing ->
+                                { start =
+                                    { offset = 0
+                                    , line = 0
+                                    , column = 0
+                                    }
+                                , end =
+                                    { offset = 0
+                                    , line = 0
+                                    , column = 0
+                                    }
                                 }
-                            , end =
-                                { offset = 0
-                                , line = 0
-                                , column = 0
-                                }
-                            }
 
-                        Just deadEnd ->
-                            { start =
-                                { offset = 0
-                                , line = deadEnd.row
-                                , column = deadEnd.col
+                            Just deadEnd ->
+                                { start =
+                                    { offset = 0
+                                    , line = deadEnd.row
+                                    , column = deadEnd.col
+                                    }
+                                , end =
+                                    { offset = 0
+                                    , line = deadEnd.row
+                                    , column = deadEnd.col
+                                    }
                                 }
-                            , end =
-                                { offset = 0
-                                , line = deadEnd.row
-                                , column = deadEnd.col
-                                }
-                            }
-                }
+                    }
 
 
 {-| -}
 type Parsed
-    = Parsed (List ErrorMessage) (Found Description)
+    = Parsed
+        { errors : List ErrorMessage
+        , found : Found Description
+        , expected : Expectation
+        , focus : Maybe Position
+        }
 
 
 {-| -}
@@ -128,16 +139,27 @@ type alias Partial data =
 
 
 {-| -}
-type NoMatch
-    = Nom
+startDocRange : Range
+startDocRange =
+    { start =
+        { offset = 0
+        , line = 0
+        , column = 0
+        }
+    , end =
+        { offset = 0
+        , line = 0
+        , column = 0
+        }
+    }
 
 
 {-| -}
-compile : Document data -> String -> Outcome NoMatch (Partial data) data
+compile : Document data -> String -> Outcome ErrorMessage (Partial data) data
 compile (Document blocks) source =
     case Parser.run blocks.parser source of
-        Ok ((Parsed errors description) as parsed) ->
-            case errors of
+        Ok ((Parsed parsedDetails) as parsed) ->
+            case parsedDetails.errors of
                 [] ->
                     case blocks.converter parsed of
                         Ok rendered ->
@@ -147,13 +169,18 @@ compile (Document blocks) source =
                             -- Invalid Ast.
                             -- This should never happen because
                             -- we definitely have the same document in both parsing and converting.
-                            Failure Nom
+                            Failure
+                                (renderError source
+                                    { problem = MsgDocumentMismatch
+                                    , range = startDocRange
+                                    }
+                                )
 
                 _ ->
                     case blocks.converter parsed of
                         Ok rendered ->
                             Almost
-                                { errors = errors
+                                { errors = parsedDetails.errors
                                 , result = rendered
                                 }
 
@@ -161,52 +188,701 @@ compile (Document blocks) source =
                             -- Invalid Ast.
                             -- This should never happen because
                             -- we definitely have the same document in both parsing and converting.
-                            Failure Nom
+                            Failure
+                                (renderError source
+                                    { problem = MsgDocumentMismatch
+                                    , range = startDocRange
+                                    }
+                                )
 
-        Err err ->
-            let
-                _ =
-                    Debug.log "parsing errors" err
-            in
-            --  Parsing Failed
-            Failure Nom
+        Err deadEnds ->
+            Failure <|
+                renderError
+                    source
+                    { problem = MsgParsingIssue deadEnds
+                    , range =
+                        case List.head deadEnds of
+                            Nothing ->
+                                startDocRange
+
+                            Just deadEnd ->
+                                { start =
+                                    { offset = 0
+                                    , line = deadEnd.row
+                                    , column = deadEnd.col
+                                    }
+                                , end =
+                                    { offset = 0
+                                    , line = deadEnd.row
+                                    , column = deadEnd.col
+                                    }
+                                }
+                    }
 
 
 {-| -}
-convert : Document data -> Parsed -> Outcome NoMatch (Partial data) data
-convert (Document blocks) ((Parsed errors description) as parsed) =
-    case errors of
+convert : Document data -> Parsed -> Outcome ErrorMessage (Partial data) data
+convert (Document blocks) ((Parsed parsedDetails) as parsed) =
+    case parsedDetails.errors of
         [] ->
             case blocks.converter parsed of
                 Ok rendered ->
                     Success rendered
 
                 Err noMatch ->
-                    Failure Nom
+                    Failure
+                        (renderError ""
+                            { problem = MsgDocumentMismatch
+                            , range = startDocRange
+                            }
+                        )
 
         _ ->
             case blocks.converter parsed of
                 Ok rendered ->
                     Almost
-                        { errors = errors
+                        { errors = parsedDetails.errors
                         , result = rendered
                         }
 
                 Err noMatch ->
-                    Failure Nom
+                    Failure
+                        (renderError ""
+                            { problem = MsgDocumentMismatch
+                            , range = startDocRange
+                            }
+                        )
 
 
+type Id category
+    = Id Range
+
+
+type ManyOptions
+    = ManyOptions
+
+
+type Options
+    = Options
+
+
+
+{- All the above ids are opaque, so we know they can't be spoofed.
+
+   The editing commands all require one of these opaque values to be constructed.
+
+   An id captures:
+
+       1. The coordinates of a specific point
+       2. What operations can be performed at that point
+       3. A valid payload
+
+
+
+
+-}
+-- {-| -}
+-- type Edit
+--     = UpdateFloat (Id Float) Float
+--     | UpdateString (Id String) String
+--     | UpdateInt (Id Int) Int
+--     | ReplaceOneOf (Id Options) Description
+--     | InsertAt (Id ManyOptions) Int Description
+--     | DeleteBlock (Id ManyOptions) Int
+
+
+updateInt =
+    UpdateInt
+
+
+updateString =
+    UpdateString
+
+
+replaceOneOf =
+    ReplaceOneOf
+
+
+deleteBlock =
+    DeleteBlock
+
+
+insertAt =
+    InsertAt
+
+
+updateFloat =
+    UpdateFloat
+
+
+{-| -}
 type Edit
-    = Replace
-        { target : Range
-        , new : String
-        }
+    = UpdateFloat Range Float
+    | UpdateString Range String
+    | UpdateInt Range Int
+    | ReplaceOneOf Range Description
+    | InsertAt Range Int Description
+    | DeleteBlock Range Int
+
+
+
+{- EDITING
+
+   A general sketch of Edits.
+
+   If a human is sending updates, then likely these will be single character updates or deletions.
+
+
+
+   Simple case, the edit is completely within a leaf node
+
+       -> replace leaf node
+
+   More advanced
+
+       -> get smallest containing block
+       -> generate source for that block
+       -> replace target range with new string
+       -> generate parser for that block
+            -> Adjusting correctly for offsets
+       -> reparse
+       -> replace on AST
+            -> Adjust node indexes
+
+   Issues:
+       -> Seems like a lot of work.
+
+   Individual Edits
+
+       -> addChar
+           -> add space
+           -> add newline
+       -> deleteChar
+
+
+-}
 
 
 {-| -}
 update : Edit -> Parsed -> Parsed
-update edit original =
-    original
+update edit (Parsed original) =
+    case edit of
+        UpdateFloat id newFloat ->
+            Parsed
+                { original
+                    | found =
+                        makeFoundEdit
+                            id
+                            (updateFoundFloat id newFloat)
+                            original.found
+                }
+
+        UpdateString id newStr ->
+            Parsed
+                { original
+                    | found =
+                        makeFoundEdit
+                            id
+                            (updateFoundString id newStr)
+                            original.found
+                }
+
+        UpdateInt id newInt ->
+            Parsed
+                { original
+                    | found =
+                        makeFoundEdit
+                            id
+                            (updateFoundInt id newInt)
+                            original.found
+                }
+
+        ReplaceOneOf id desc ->
+            Parsed
+                { original
+                    | found =
+                        makeFoundEdit
+                            id
+                            (replaceOption id desc)
+                            original.found
+                }
+
+        InsertAt id index desc ->
+            Parsed
+                { original
+                    | found =
+                        makeFoundEdit
+                            id
+                            (insertAtIndex id index desc)
+                            original.found
+                }
+
+        DeleteBlock id index ->
+            Parsed
+                { original
+                    | found =
+                        makeFoundEdit
+                            id
+                            (makeDeleteBlock id index)
+                            original.found
+                }
+
+
+removeByIndex index list =
+    List.foldl
+        (\item ( i, found ) ->
+            if i == index then
+                ( i + 1, found )
+
+            else
+                ( i + 1, item :: found )
+        )
+        ( 0, [] )
+        list
+        |> Tuple.second
+        |> List.reverse
+
+
+
+-- TODO: return coordinate adjustment
+
+
+makeInsertAt index new list =
+    List.foldl
+        (\item found ->
+            if found.index == index then
+                { index = found.index + 1
+                , inserted = True
+                , list = item :: Found startDocRange new :: found.list
+                }
+
+            else
+                { index = found.index + 1
+                , inserted = found.inserted
+                , list = item :: found.list
+                }
+        )
+        { index = 0
+        , inserted = False
+        , list = []
+        }
+        list
+        |> (\found ->
+                if found.inserted then
+                    found.list
+
+                else
+                    Found startDocRange new :: found.list
+           )
+        |> List.reverse
+
+
+makeDeleteBlock id index desc =
+    case desc of
+        ManyOf expectations range found ->
+            if id == range then
+                Just (ManyOf expectations range (removeByIndex index found))
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
+
+
+insertAtIndex id index new desc =
+    case desc of
+        ManyOf expectations range found ->
+            if id == range then
+                Just (ManyOf expectations range (makeInsertAt index new found))
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
+
+
+replaceOption id new desc =
+    case desc of
+        OneOf expectations found ->
+            case found of
+                Found range val ->
+                    if id == range then
+                        Just (OneOf expectations (Found range new))
+
+                    else
+                        Nothing
+
+                Unexpected unexpected ->
+                    Nothing
+
+        _ ->
+            Nothing
+
+
+updateFoundFloat id newFloat desc =
+    case desc of
+        DescribeFloatBetween bottom top found ->
+            case found of
+                Found floatRng fl ->
+                    if floatRng == id then
+                        if newFloat >= bottom && newFloat <= top then
+                            Just
+                                (DescribeFloatBetween
+                                    bottom
+                                    top
+                                    (Found floatRng
+                                        ( String.fromFloat newFloat, newFloat )
+                                    )
+                                )
+
+                        else
+                            Just
+                                (DescribeFloatBetween
+                                    bottom
+                                    top
+                                    (Unexpected
+                                        { range = floatRng
+                                        , problem =
+                                            MsgFloatOutOfRange
+                                                { found = newFloat
+                                                , min = bottom
+                                                , max = top
+                                                }
+                                        }
+                                    )
+                                )
+
+                    else
+                        Nothing
+
+                Unexpected unexpected ->
+                    if unexpected.range == id then
+                        if newFloat >= bottom && newFloat <= top then
+                            Just
+                                (DescribeFloatBetween
+                                    bottom
+                                    top
+                                    (Found unexpected.range
+                                        ( String.fromFloat newFloat, newFloat )
+                                    )
+                                )
+
+                        else
+                            Just
+                                (DescribeFloatBetween
+                                    bottom
+                                    top
+                                    (Unexpected
+                                        { range = unexpected.range
+                                        , problem =
+                                            MsgFloatOutOfRange
+                                                { found = newFloat
+                                                , min = bottom
+                                                , max = top
+                                                }
+                                        }
+                                    )
+                                )
+
+                    else
+                        Nothing
+
+        DescribeFloat found ->
+            case found of
+                Found floatRng fl ->
+                    if floatRng == id then
+                        Just
+                            (DescribeFloat
+                                (Found floatRng
+                                    ( String.fromFloat newFloat, newFloat )
+                                )
+                            )
+
+                    else
+                        Nothing
+
+                Unexpected unexpected ->
+                    if unexpected.range == id then
+                        Just
+                            (DescribeFloat
+                                (Found unexpected.range
+                                    ( String.fromFloat newFloat, newFloat )
+                                )
+                            )
+
+                    else
+                        Nothing
+
+        _ ->
+            Nothing
+
+
+updateFoundString id newString desc =
+    case desc of
+        DescribeString range _ ->
+            if range == id then
+                Just
+                    (DescribeString range
+                        newString
+                    )
+
+            else
+                Nothing
+
+        DescribeMultiline range _ ->
+            if range == id then
+                Just
+                    (DescribeMultiline range
+                        newString
+                    )
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
+
+
+updateFoundInt id newInt desc =
+    case desc of
+        DescribeIntBetween bottom top found ->
+            case found of
+                Found floatRng fl ->
+                    if floatRng == id then
+                        if newInt >= bottom && newInt <= top then
+                            Just
+                                (DescribeIntBetween
+                                    bottom
+                                    top
+                                    (Found floatRng
+                                        newInt
+                                    )
+                                )
+
+                        else
+                            Just
+                                (DescribeIntBetween
+                                    bottom
+                                    top
+                                    (Unexpected
+                                        { range = floatRng
+                                        , problem =
+                                            MsgIntOutOfRange
+                                                { found = newInt
+                                                , min = bottom
+                                                , max = top
+                                                }
+                                        }
+                                    )
+                                )
+
+                    else
+                        Nothing
+
+                Unexpected unexpected ->
+                    if unexpected.range == id then
+                        if newInt >= bottom && newInt <= top then
+                            Just
+                                (DescribeIntBetween
+                                    bottom
+                                    top
+                                    (Found unexpected.range
+                                        newInt
+                                    )
+                                )
+
+                        else
+                            Just
+                                (DescribeIntBetween
+                                    bottom
+                                    top
+                                    (Unexpected
+                                        { range = unexpected.range
+                                        , problem =
+                                            MsgIntOutOfRange
+                                                { found = newInt
+                                                , min = bottom
+                                                , max = top
+                                                }
+                                        }
+                                    )
+                                )
+
+                    else
+                        Nothing
+
+        DescribeInteger found ->
+            case found of
+                Found floatRng fl ->
+                    if floatRng == id then
+                        Just
+                            (DescribeInteger
+                                (Found floatRng
+                                    newInt
+                                )
+                            )
+
+                    else
+                        Nothing
+
+                Unexpected unexpected ->
+                    if unexpected.range == id then
+                        Just
+                            (DescribeInteger
+                                (Found unexpected.range
+                                    newInt
+                                )
+                            )
+
+                    else
+                        Nothing
+
+        _ ->
+            Nothing
+
+
+replacePrimitive fn desc =
+    case fn desc of
+        Just newDesc ->
+            newDesc
+
+        Nothing ->
+            desc
+
+
+makeFoundEdit id fn foundDesc =
+    case foundDesc of
+        Found range desc ->
+            if within id range then
+                case fn desc of
+                    Nothing ->
+                        Found range (makeEdit id fn desc)
+
+                    Just newDesc ->
+                        Found range newDesc
+
+            else
+                foundDesc
+
+        Unexpected unexpected ->
+            foundDesc
+
+
+makeEdit : Range -> (Description -> Maybe Description) -> Description -> Description
+makeEdit id fn desc =
+    case desc of
+        DescribeBlock name details ->
+            case fn desc of
+                Just newDesc ->
+                    -- replace current description
+                    newDesc
+
+                Nothing ->
+                    -- dive further
+                    case details.found of
+                        Found rng child ->
+                            DescribeBlock name
+                                { details
+                                    | found = Found rng (makeEdit id fn child)
+                                }
+
+                        Unexpected unexpected ->
+                            desc
+
+        Record name details ->
+            case fn desc of
+                Just newDesc ->
+                    newDesc
+
+                Nothing ->
+                    case details.found of
+                        Found rng fields ->
+                            if within id rng then
+                                Record name
+                                    { details
+                                        | found =
+                                            Found rng
+                                                (List.map (Tuple.mapSecond (makeFoundEdit id fn)) fields)
+                                    }
+
+                            else
+                                desc
+
+                        Unexpected unexpected ->
+                            desc
+
+        OneOf expected found ->
+            case fn desc of
+                Just newDesc ->
+                    -- replace current description
+                    newDesc
+
+                Nothing ->
+                    -- dive further
+                    case found of
+                        Found rng child ->
+                            OneOf expected
+                                (Found rng (makeEdit id fn child))
+
+                        Unexpected unexpected ->
+                            desc
+
+        ManyOf expected range foundList ->
+            if within id range then
+                ManyOf expected
+                    range
+                    (List.map (makeFoundEdit id fn) foundList)
+
+            else
+                desc
+
+        StartsWith range fst snd ->
+            -- if id is within range
+            if within id range then
+                -- TODO
+                desc
+
+            else
+                desc
+
+        DescribeTree details ->
+            desc
+
+        -- Primitives
+        DescribeStub name found ->
+            replacePrimitive fn desc
+
+        DescribeBoolean found ->
+            replacePrimitive fn desc
+
+        DescribeInteger found ->
+            replacePrimitive fn desc
+
+        DescribeFloat found ->
+            replacePrimitive fn desc
+
+        DescribeFloatBetween top bottom found ->
+            replacePrimitive fn desc
+
+        DescribeIntBetween top bottom found ->
+            replacePrimitive fn desc
+
+        DescribeText rng textNodes ->
+            replacePrimitive fn desc
+
+        DescribeString rng str ->
+            replacePrimitive fn desc
+
+        DescribeMultiline rng str ->
+            replacePrimitive fn desc
+
+        DescribeStringExactly rng str ->
+            replacePrimitive fn desc
+
+        DescribeDate found ->
+            replacePrimitive fn desc
 
 
 {-| -}
@@ -292,76 +968,6 @@ getBlockExpectation fromBlock =
 type AstError
     = InvalidAst
     | NoMatch
-
-
-prettyParsed (Parsed errors foundDescription) =
-    prettyFound 0 prettyDescription foundDescription
-
-
-prettyDescription indentation desc =
-    case desc of
-        DescribeBlock name details ->
-            name
-
-        Record name details ->
-            name
-
-        OneOf expected foundDesciption ->
-            "oneOf"
-
-        ManyOf expected foundRange foundDesciptions ->
-            "manyOf"
-
-        StartsWith _ start end ->
-            ""
-
-        DescribeTree details ->
-            ""
-
-        -- Primitives
-        DescribeStub name foundStub ->
-            ""
-
-        DescribeBoolean foundBool ->
-            ""
-
-        DescribeInteger foundInt ->
-            ""
-
-        DescribeFloat foundFloat ->
-            ""
-
-        DescribeFloatBetween bottom top foundFloat ->
-            ""
-
-        DescribeIntBetween bottom top foundInt ->
-            ""
-
-        DescribeText range textDescriptions ->
-            ""
-
-        DescribeString range str ->
-            str
-
-        DescribeMultiline range str ->
-            str
-
-        DescribeStringExactly range str ->
-            str
-
-        DescribeDate foundPosix ->
-            prettyFound indentation (always Iso8601.fromTime) (mapFound Tuple.second foundPosix)
-
-
-prettyFound indentation contentToString found =
-    case found of
-        Found range actual ->
-            String.repeat (indentation * 4) " "
-                ++ "Found\n"
-                ++ contentToString (indentation + 1) actual
-
-        Unexpected unexpected ->
-            String.repeat (indentation * 4) " " ++ "Unexpected"
 
 
 type Description
@@ -453,9 +1059,31 @@ type InlineValueExpectation
     | ExpectInlineText
 
 
+{-| -}
+focus : Position -> Parsed -> Parsed
+focus pos (Parsed parsed) =
+    Parsed { parsed | focus = Just pos }
+
+
+{-| -}
+parent : Parsed -> Parsed
+parent parsed =
+    -- TODO: implement
+    Debug.todo "implement!"
+
+
+getDescription (Parsed parsed) =
+    parsed.found
+
+
+{-| -}
 getDesc : { start : Int, end : Int } -> Parsed -> List Description
-getDesc offset (Parsed errors foundDesc) =
-    getWithinFound offset foundDesc
+getDesc offset (Parsed parsed) =
+    getWithinFound offset parsed.found
+
+
+within rangeOne rangeTwo =
+    withinOffsetRange { start = rangeOne.start.offset, end = rangeOne.end.offset } rangeTwo
 
 
 withinOffsetRange offset range =
@@ -780,9 +1408,9 @@ type alias PrintCursor =
 
 {-| -}
 toString : Parsed -> String
-toString (Parsed _ foundDescription) =
+toString (Parsed parsed) =
     writeFound writeDescription
-        foundDescription
+        parsed.found
         { indent = 0
         , position = { line = 1, column = 1, offset = 0 }
         , printed = ""
@@ -844,9 +1472,6 @@ advanceTo target cursor =
     let
         lineDiff =
             abs (target.start.line - cursor.position.line)
-
-        _ =
-            Debug.log "advance to" ( cursor.position, target.start )
     in
     if target.start == cursor.position then
         cursor
@@ -884,7 +1509,7 @@ dedent cursor =
 {-| -}
 writeDescription : Description -> PrintCursor -> PrintCursor
 writeDescription description cursor =
-    case Debug.log "write desc" description of
+    case description of
         DescribeBlock name details ->
             cursor
                 |> write ("| " ++ name)
@@ -1085,7 +1710,9 @@ type alias ErrorMessage =
 
 {-| -}
 type ProblemMessage
-    = MsgUnknownBlock (List String)
+    = MsgDocumentMismatch
+    | MsgParsingIssue (List (Parser.DeadEnd Context Problem))
+    | MsgUnknownBlock (List String)
     | MsgUnknownInline (List InlineExpectation)
     | MsgMissingFields (List String)
     | MsgNonMatchingFields
@@ -1166,8 +1793,8 @@ document renderer child =
     Document
         { expect = expectation
         , converter =
-            \(Parsed errors found) ->
-                case found of
+            \(Parsed parsed) ->
+                case parsed.found of
                     Found range childDesc ->
                         case renderBlock child childDesc of
                             Err err ->
@@ -1192,8 +1819,11 @@ document renderer child =
             Parser.succeed
                 (\source ( range, val ) ->
                     Parsed
-                        (List.map (renderError source) (getUnexpecteds val))
-                        (Found range val)
+                        { errors = List.map (renderError source) (getUnexpecteds val)
+                        , found = Found range val
+                        , expected = getBlockExpectation child
+                        , focus = Nothing
+                        }
                 )
                 |= Parser.getSource
                 |= withRange
@@ -1221,6 +1851,7 @@ map fn child =
                 }
 
 
+{-| -}
 mapFound : (a -> b) -> Found a -> Found b
 mapFound fn found =
     case found of
@@ -1229,6 +1860,42 @@ mapFound fn found =
 
         Unexpected unexp ->
             Unexpected unexp
+
+
+{-| -}
+stub : String -> (Range -> result) -> Block result
+stub name renderer =
+    Block name
+        { expect = ExpectStub name
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeStub actualBlockName found ->
+                        if actualBlockName == name then
+                            case found of
+                                Found range _ ->
+                                    Ok (Found range (renderer range))
+
+                                Unexpected unexpected ->
+                                    Ok (Unexpected unexpected)
+
+                        else
+                            Err InvalidAst
+
+                    _ ->
+                        Err InvalidAst
+        , parser =
+            Parser.map
+                (\( range, _ ) ->
+                    DescribeStub name (Found range name)
+                )
+                (withRange
+                    (Parser.succeed ()
+                        |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
+                        |. Parser.chompWhile (\c -> c == ' ')
+                    )
+                )
+        }
 
 
 {-| -}
@@ -1712,6 +2379,74 @@ nested config =
         }
 
 
+mapNested : (a -> b) -> Nested a -> Nested b
+mapNested fn (Nested node) =
+    Debug.todo "map it"
+
+
+{-| -}
+type alias Index =
+    List Int
+
+
+replaceNested : (Index -> a -> List b -> b) -> Nested a -> b
+replaceNested =
+    replaceNestedHelper []
+
+
+replaceNestedHelper : Index -> (Index -> a -> List b -> b) -> Nested a -> b
+replaceNestedHelper index fn (Nested node) =
+    let
+        newIndex =
+            1 :: index
+
+        children =
+            List.foldl
+                (\child ( i, gathered ) ->
+                    ( i + 1, replaceNestedHelper (i :: newIndex) fn child :: gathered )
+                )
+                ( 1, [] )
+                node.children
+    in
+    fn newIndex node.content (Tuple.second children)
+
+
+{-| -}
+foldNestedList : (Index -> a -> b -> b) -> b -> List (Nested a) -> b
+foldNestedList fn accum nodes =
+    List.foldl
+        (\child ( i, gathered ) ->
+            ( i + 1, foldNestedHelper [ i ] fn gathered child )
+        )
+        ( 1, accum )
+        nodes
+        |> Tuple.second
+
+
+{-| -}
+foldNested : (Index -> a -> b -> b) -> b -> Nested a -> b
+foldNested fn accum node =
+    foldNestedHelper [ 1 ] fn accum node
+
+
+foldNestedHelper : Index -> (Index -> a -> b -> b) -> b -> Nested a -> b
+foldNestedHelper index fn accum (Nested node) =
+    let
+        newIndex =
+            1 :: index
+
+        advanced =
+            fn newIndex node.content accum
+    in
+    List.foldl
+        (\child ( i, gathered ) ->
+            ( i + 1, foldNestedHelper (i :: newIndex) fn gathered child )
+        )
+        ( 1, advanced )
+        node.children
+        |> Tuple.second
+
+
 {-| -}
 record2 :
     String
@@ -1883,6 +2618,18 @@ getInlineExpectation (Inline name details) =
 
 
 -}
+
+
+{-| -}
+mapInline : (a -> b) -> Inline a -> Inline b
+mapInline fn (Inline name details) =
+    Inline name
+        { converter =
+            \desc ->
+                Result.map (List.map fn) (details.converter desc)
+        , expect =
+            details.expect
+        }
 
 
 {-| -}
@@ -2104,6 +2851,47 @@ exactly key value =
         }
 
 
+{-| Parse either `True` or `False`.
+-}
+bool : Block Bool
+bool =
+    Value
+        { expect = ExpectBoolean
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeBoolean found ->
+                        Ok found
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            Parser.map
+                (\( range, boolResult ) ->
+                    DescribeBoolean <|
+                        case boolResult of
+                            Err err ->
+                                Unexpected
+                                    { range = range
+                                    , problem = MsgBadBool err
+                                    }
+
+                            Ok b ->
+                                Found range b
+                )
+                (withRange
+                    (Parser.oneOf
+                        [ Parser.token (Parser.Token "True" (Expecting "True"))
+                            |> Parser.map (always (Ok True))
+                        , Parser.token (Parser.Token "False" (Expecting "False"))
+                            |> Parser.map (always (Ok False))
+                        , Parser.map Err word
+                        ]
+                    )
+                )
+        }
+
+
 int : Block Int
 int =
     Value
@@ -2240,7 +3028,6 @@ type Context
     | InInline String
     | InRecord String
     | InRecordField String
-    | InRemapped Position
 
 
 {-| -}
@@ -2253,12 +3040,6 @@ type Problem
     | ExpectingBlockName String
     | ExpectingInlineName String
     | ExpectingFieldName String
-    | NonMatchingFields
-        { expecting : List String
-        , found : List String
-        }
-    | MissingField String
-    | RecordError
     | Escape
     | EscapedChar
     | Newline
@@ -2267,25 +3048,6 @@ type Problem
     | Integer
     | FloatingPoint
     | InvalidNumber
-    | UnexpectedEnd
-    | CantStartTextWithSpace
-    | UnclosedStyles (List Style)
-    | BadDate String
-    | IntOutOfRange
-        { found : Int
-        , min : Int
-        , max : Int
-        }
-    | FloatOutOfRange
-        { found : Float
-        , min : Float
-        , max : Float
-        }
-    | UnexpectedField
-        { found : String
-        , options : List String
-        , recordName : String
-        }
 
 
 {-| -}
@@ -4263,9 +5025,37 @@ measure start textStr =
 renderError : String -> UnexpectedDetails -> ErrorMessage
 renderError source current =
     case current.problem of
+        MsgDocumentMismatch ->
+            { title = "DOCUMENT MISMATCH"
+            , region =
+                current.range
+            , message =
+                [ Format.text "Your "
+                , Format.yellow (Format.text "document")
+                , Format.text " and your "
+                , Format.yellow (Format.text "Parsed")
+                , Format.text " structure don't match for some reason.\n\n"
+                , Format.text "This usually occurs because you've stored the "
+                , Format.yellow (Format.text "Parsed")
+                , Format.text " data somewhere and then made a breaking change to your document."
+                ]
+            }
+
+        MsgParsingIssue issues ->
+            { title = "PARSING ISSUE"
+            , region =
+                current.range
+            , message =
+                List.concat
+                    [ [ Format.text "I ran into an issue parsing your document.\n\n" ]
+                    , renderParserIssue issues
+                    , [ Format.text "\n\n" ]
+                    ]
+            }
+
         MsgUnknownBlock expecting ->
             let
-                focus =
+                target =
                     String.slice current.range.start.offset current.range.end.offset source
             in
             { title = "UNKNOWN BLOCK"
@@ -4277,7 +5067,7 @@ renderError source current =
                     , highlight current.range source
                     , [ Format.text "Do you mean one of these instead?\n\n"
                       , expecting
-                            |> List.sortBy (\exp -> 0 - similarity focus exp)
+                            |> List.sortBy (\exp -> 0 - similarity target exp)
                             |> List.map (addIndent 4)
                             |> String.join "\n"
                             |> Format.text
@@ -4288,7 +5078,7 @@ renderError source current =
 
         MsgUnknownInline expecting ->
             let
-                focus =
+                target =
                     String.slice current.range.start.offset current.range.end.offset source
             in
             { title = "UNKNOWN INLINE"
@@ -4301,7 +5091,7 @@ renderError source current =
                     , [ Format.text "But I was expecting one of these instead:\n\n"
                       , expecting
                             |> List.map getInlineName
-                            |> List.sortBy (\exp -> 0 - similarity focus exp)
+                            |> List.sortBy (\exp -> 0 - similarity target exp)
                             |> List.map (addIndent 4)
                             |> String.join "\n"
                             |> Format.text
@@ -4351,11 +5141,8 @@ renderError source current =
 
         MsgUnexpectedField msgUnexpectedField ->
             let
-                focus =
+                target =
                     String.slice current.range.start.offset current.range.end.offset source
-
-                -- focus =
-                --     getPrevWord current line
             in
             { title = "UNKNOWN FIELD"
             , region =
@@ -4370,7 +5157,7 @@ renderError source current =
                     , highlight current.range source
                     , [ Format.text "\nDo you mean one of these instead?\n\n"
                       , msgUnexpectedField.options
-                            |> List.sortBy (\exp -> 0 - similarity focus exp)
+                            |> List.sortBy (\exp -> 0 - similarity target exp)
                             |> List.map (addIndent 4)
                             |> String.join "\n"
                             |> Format.text
@@ -4541,6 +5328,68 @@ renderError source current =
                             |> Format.yellow
                         ]
             }
+
+
+renderParserIssue deadends =
+    List.map
+        (Format.yellow
+            << Format.text
+            << addIndent 4
+            << parsingProblemToString
+            << .problem
+        )
+        deadends
+
+
+parsingProblemToString prob =
+    case prob of
+        ExpectingIndent i ->
+            "ExpectingIndent i" ++ "\n"
+
+        InlineStart ->
+            "InlineStart\n"
+
+        InlineEnd ->
+            "InlineEnd\n"
+
+        BlockStart ->
+            "BlockStart\n"
+
+        Expecting str ->
+            "Expecting " ++ str ++ "\n"
+
+        ExpectingBlockName name ->
+            "ExpectingBlockName " ++ name ++ "\n"
+
+        ExpectingInlineName name ->
+            "ExpectingInlineName " ++ name ++ "\n"
+
+        ExpectingFieldName name ->
+            "ExpectingFieldName " ++ name ++ "\n"
+
+        Escape ->
+            "Escape\n"
+
+        EscapedChar ->
+            "EscapedChar\n"
+
+        Newline ->
+            "Newline\n"
+
+        Space ->
+            "Space\n"
+
+        End ->
+            "End\n"
+
+        Integer ->
+            "Integer\n"
+
+        FloatingPoint ->
+            "FloatingPoint\n"
+
+        InvalidNumber ->
+            "InvalidNumber\n"
 
 
 formatNewline =
@@ -4745,9 +5594,6 @@ similarity source target =
 
             else
                 total
-
-        _ =
-            Debug.log "sim" ( source, target, lenSimilarity )
     in
     List.map2 Tuple.pair (String.toList source) (String.toList target)
         |> List.foldl addCompared 0
