@@ -254,23 +254,6 @@ convert (Document blocks) ((Parsed parsedDetails) as parsed) =
                         )
 
 
-type Id category
-    = Id Range
-
-
-manyOptionId : Range -> Id ManyOptions
-manyOptionId =
-    Id
-
-
-type ManyOptions
-    = ManyOptions
-
-
-type Options
-    = Options
-
-
 
 {- All the above ids are opaque, so we know they can't be spoofed.
 
@@ -337,12 +320,39 @@ updateFloat =
 
 {-| -}
 type Edit
-    = UpdateFloat Range Float
+    = UpdateFloat (Id Float) Float
     | UpdateString Range String
-    | UpdateInt Range Int
-    | ReplaceOneOf Range Description
-    | InsertAt Range Int Description
-    | DeleteBlock Range Int
+    | UpdateInt (Id Int) Int
+    | ReplaceOneOf (Id Options) Description
+    | InsertAt (Id ManyOptions) Int Description
+    | DeleteBlock (Id ManyOptions) Int
+
+
+type Id category
+    = Id Range
+
+
+getRange : Id anything -> Range
+getRange (Id range) =
+    range
+
+
+manyOptionId : Range -> Id ManyOptions
+manyOptionId =
+    Id
+
+
+optionId : Range -> Id Options
+optionId =
+    Id
+
+
+type ManyOptions
+    = ManyOptions
+
+
+type Options
+    = Options
 
 
 
@@ -392,7 +402,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            id
+                            (getRange id)
                             (updateFoundFloat id newFloat)
                             original.found
                 }
@@ -412,7 +422,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            id
+                            (getRange id)
                             (updateFoundInt id newInt)
                             original.found
                 }
@@ -422,7 +432,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            id
+                            (getRange id)
                             (replaceOption id desc)
                             original.found
                 }
@@ -432,7 +442,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            id
+                            (getRange id)
                             (insertAtIndex id index desc)
                             original.found
                 }
@@ -442,7 +452,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            id
+                            (getRange id)
                             (makeDeleteBlock id index)
                             original.found
                 }
@@ -497,9 +507,14 @@ makeInsertAt index new list =
 
 makeDeleteBlock id index desc =
     case desc of
-        ManyOf expectations range found ->
-            if id == range then
-                Just (ManyOf expectations range (removeByIndex index found))
+        ManyOf many ->
+            if id == many.id then
+                Just
+                    (ManyOf
+                        { many
+                            | children = removeByIndex index many.children
+                        }
+                    )
 
             else
                 Nothing
@@ -510,9 +525,14 @@ makeDeleteBlock id index desc =
 
 insertAtIndex id index new desc =
     case desc of
-        ManyOf expectations range found ->
-            if id == range then
-                Just (ManyOf expectations range (makeInsertAt index new found))
+        ManyOf many ->
+            if id == many.id then
+                Just
+                    (ManyOf
+                        { many
+                            | children = makeInsertAt index new many.children
+                        }
+                    )
 
             else
                 Nothing
@@ -523,17 +543,17 @@ insertAtIndex id index new desc =
 
 replaceOption id new desc =
     case desc of
-        OneOf expectations found ->
-            case found of
-                Found range val ->
-                    if id == range then
-                        Just (OneOf expectations (Found range new))
+        OneOf one ->
+            if id == one.id then
+                case one.child of
+                    Found range val ->
+                        Just (OneOf { one | child = Found range new })
 
-                    else
+                    Unexpected unexpected ->
                         Nothing
 
-                Unexpected unexpected ->
-                    Nothing
+            else
+                Nothing
 
         _ ->
             Nothing
@@ -541,97 +561,93 @@ replaceOption id new desc =
 
 updateFoundFloat id newFloat desc =
     case desc of
-        DescribeFloatBetween bottom top found ->
-            case found of
-                Found floatRng fl ->
-                    if floatRng == id then
-                        if newFloat >= bottom && newFloat <= top then
+        DescribeFloatBetween details ->
+            if details.id == id then
+                case details.found of
+                    Found intRng fl ->
+                        if newFloat >= details.min && newFloat <= details.max then
                             Just
                                 (DescribeFloatBetween
-                                    bottom
-                                    top
-                                    (Found floatRng
-                                        ( String.fromFloat newFloat, newFloat )
-                                    )
+                                    { details
+                                        | found =
+                                            Found intRng
+                                                ( String.fromFloat newFloat, newFloat )
+                                    }
                                 )
 
                         else
                             Just
                                 (DescribeFloatBetween
-                                    bottom
-                                    top
-                                    (Unexpected
-                                        { range = floatRng
-                                        , problem =
-                                            MsgFloatOutOfRange
-                                                { found = newFloat
-                                                , min = bottom
-                                                , max = top
+                                    { details
+                                        | found =
+                                            Unexpected
+                                                { range = intRng
+                                                , problem =
+                                                    MsgFloatOutOfRange
+                                                        { found = newFloat
+                                                        , min = details.min
+                                                        , max = details.max
+                                                        }
                                                 }
-                                        }
-                                    )
+                                    }
                                 )
 
-                    else
-                        Nothing
-
-                Unexpected unexpected ->
-                    if unexpected.range == id then
-                        if newFloat >= bottom && newFloat <= top then
+                    Unexpected unexpected ->
+                        if newFloat >= details.min && newFloat <= details.max then
                             Just
                                 (DescribeFloatBetween
-                                    bottom
-                                    top
-                                    (Found unexpected.range
-                                        ( String.fromFloat newFloat, newFloat )
-                                    )
+                                    { details
+                                        | found =
+                                            Found unexpected.range
+                                                ( String.fromFloat newFloat, newFloat )
+                                    }
                                 )
 
                         else
                             Just
                                 (DescribeFloatBetween
-                                    bottom
-                                    top
-                                    (Unexpected
-                                        { range = unexpected.range
-                                        , problem =
-                                            MsgFloatOutOfRange
-                                                { found = newFloat
-                                                , min = bottom
-                                                , max = top
+                                    { details
+                                        | found =
+                                            Unexpected
+                                                { range = unexpected.range
+                                                , problem =
+                                                    MsgFloatOutOfRange
+                                                        { found = newFloat
+                                                        , min = details.min
+                                                        , max = details.max
+                                                        }
                                                 }
-                                        }
-                                    )
+                                    }
                                 )
 
-                    else
-                        Nothing
+            else
+                Nothing
 
-        DescribeFloat found ->
-            case found of
-                Found floatRng fl ->
-                    if floatRng == id then
+        DescribeFloat details ->
+            if details.id == id then
+                case details.found of
+                    Found floatRng fl ->
                         Just
                             (DescribeFloat
-                                (Found floatRng
-                                    ( String.fromFloat newFloat, newFloat )
-                                )
+                                { id = details.id
+                                , found =
+                                    Found floatRng
+                                        ( String.fromFloat newFloat, newFloat )
+                                }
                             )
 
-                    else
-                        Nothing
-
-                Unexpected unexpected ->
-                    if unexpected.range == id then
+                    Unexpected unexpected ->
                         Just
                             (DescribeFloat
-                                (Found unexpected.range
-                                    ( String.fromFloat newFloat, newFloat )
-                                )
+                                { id = details.id
+                                , found =
+                                    Found unexpected.range
+                                        ( String.fromFloat newFloat, newFloat )
+                                }
                             )
 
-                    else
-                        Nothing
+            else
+                Nothing
 
         _ ->
             Nothing
@@ -665,97 +681,93 @@ updateFoundString id newString desc =
 
 updateFoundInt id newInt desc =
     case desc of
-        DescribeIntBetween bottom top found ->
-            case found of
-                Found floatRng fl ->
-                    if floatRng == id then
-                        if newInt >= bottom && newInt <= top then
+        DescribeIntBetween details ->
+            if details.id == id then
+                case details.found of
+                    Found intRng fl ->
+                        if newInt >= details.min && newInt <= details.max then
                             Just
                                 (DescribeIntBetween
-                                    bottom
-                                    top
-                                    (Found floatRng
-                                        newInt
-                                    )
+                                    { details
+                                        | found =
+                                            Found intRng
+                                                newInt
+                                    }
                                 )
 
                         else
                             Just
                                 (DescribeIntBetween
-                                    bottom
-                                    top
-                                    (Unexpected
-                                        { range = floatRng
-                                        , problem =
-                                            MsgIntOutOfRange
-                                                { found = newInt
-                                                , min = bottom
-                                                , max = top
+                                    { details
+                                        | found =
+                                            Unexpected
+                                                { range = intRng
+                                                , problem =
+                                                    MsgIntOutOfRange
+                                                        { found = newInt
+                                                        , min = details.min
+                                                        , max = details.max
+                                                        }
                                                 }
-                                        }
-                                    )
+                                    }
                                 )
 
-                    else
-                        Nothing
-
-                Unexpected unexpected ->
-                    if unexpected.range == id then
-                        if newInt >= bottom && newInt <= top then
+                    Unexpected unexpected ->
+                        if newInt >= details.min && newInt <= details.max then
                             Just
                                 (DescribeIntBetween
-                                    bottom
-                                    top
-                                    (Found unexpected.range
-                                        newInt
-                                    )
+                                    { details
+                                        | found =
+                                            Found unexpected.range
+                                                newInt
+                                    }
                                 )
 
                         else
                             Just
                                 (DescribeIntBetween
-                                    bottom
-                                    top
-                                    (Unexpected
-                                        { range = unexpected.range
-                                        , problem =
-                                            MsgIntOutOfRange
-                                                { found = newInt
-                                                , min = bottom
-                                                , max = top
+                                    { details
+                                        | found =
+                                            Unexpected
+                                                { range = unexpected.range
+                                                , problem =
+                                                    MsgIntOutOfRange
+                                                        { found = newInt
+                                                        , min = details.min
+                                                        , max = details.max
+                                                        }
                                                 }
-                                        }
-                                    )
+                                    }
                                 )
 
-                    else
-                        Nothing
+            else
+                Nothing
 
-        DescribeInteger found ->
-            case found of
-                Found floatRng fl ->
-                    if floatRng == id then
+        DescribeInteger details ->
+            if details.id == id then
+                case details.found of
+                    Found floatRng fl ->
                         Just
                             (DescribeInteger
-                                (Found floatRng
-                                    newInt
-                                )
+                                { id = details.id
+                                , found =
+                                    Found floatRng
+                                        newInt
+                                }
                             )
 
-                    else
-                        Nothing
-
-                Unexpected unexpected ->
-                    if unexpected.range == id then
+                    Unexpected unexpected ->
                         Just
                             (DescribeInteger
-                                (Found unexpected.range
-                                    newInt
-                                )
+                                { id = details.id
+                                , found =
+                                    Found unexpected.range
+                                        newInt
+                                }
                             )
 
-                    else
-                        Nothing
+            else
+                Nothing
 
         _ ->
             Nothing
@@ -791,7 +803,7 @@ makeFoundEdit id fn foundDesc =
 makeEdit : Range -> (Description -> Maybe Description) -> Description -> Description
 makeEdit id fn desc =
     case desc of
-        DescribeBlock name details ->
+        DescribeBlock details ->
             case fn desc of
                 Just newDesc ->
                     -- replace current description
@@ -801,7 +813,7 @@ makeEdit id fn desc =
                     -- dive further
                     case details.found of
                         Found rng child ->
-                            DescribeBlock name
+                            DescribeBlock
                                 { details
                                     | found = Found rng (makeEdit id fn child)
                                 }
@@ -809,7 +821,7 @@ makeEdit id fn desc =
                         Unexpected unexpected ->
                             desc
 
-        Record name details ->
+        Record details ->
             case fn desc of
                 Just newDesc ->
                     newDesc
@@ -818,7 +830,7 @@ makeEdit id fn desc =
                     case details.found of
                         Found rng fields ->
                             if within id rng then
-                                Record name
+                                Record
                                     { details
                                         | found =
                                             Found rng
@@ -831,7 +843,7 @@ makeEdit id fn desc =
                         Unexpected unexpected ->
                             desc
 
-        OneOf expected found ->
+        OneOf one ->
             case fn desc of
                 Just newDesc ->
                     -- replace current description
@@ -839,19 +851,23 @@ makeEdit id fn desc =
 
                 Nothing ->
                     -- dive further
-                    case found of
+                    case one.child of
                         Found rng child ->
-                            OneOf expected
-                                (Found rng (makeEdit id fn child))
+                            OneOf
+                                { one
+                                    | child =
+                                        Found rng (makeEdit id fn child)
+                                }
 
                         Unexpected unexpected ->
                             desc
 
-        ManyOf expected range foundList ->
-            if within id range then
-                ManyOf expected
-                    range
-                    (List.map (makeFoundEdit id fn) foundList)
+        ManyOf many ->
+            if within id (getRange many.id) then
+                ManyOf
+                    { many
+                        | children = List.map (makeFoundEdit id fn) many.children
+                    }
 
             else
                 desc
@@ -881,10 +897,10 @@ makeEdit id fn desc =
         DescribeFloat found ->
             replacePrimitive fn desc
 
-        DescribeFloatBetween top bottom found ->
+        DescribeFloatBetween _ ->
             replacePrimitive fn desc
 
-        DescribeIntBetween top bottom found ->
+        DescribeIntBetween _ ->
             replacePrimitive fn desc
 
         DescribeText rng textNodes ->
@@ -989,17 +1005,25 @@ type AstError
 
 type Description
     = DescribeBlock
-        String
-        { found : Found Description
+        { name : String
+        , found : Found Description
         , expected : Expectation
         }
     | Record
-        String
-        { found : Found (List ( String, Found Description ))
+        { name : String
+        , found : Found (List ( String, Found Description ))
         , expected : Expectation
         }
-    | OneOf (List Expectation) (Found Description)
-    | ManyOf (List Expectation) Range (List (Found Description))
+    | OneOf
+        { id : Id Options
+        , expected : List Expectation
+        , child : Found Description
+        }
+    | ManyOf
+        { id : Id ManyOptions
+        , expected : List Expectation
+        , children : List (Found Description)
+        }
     | StartsWith
         Range
         { found : Description
@@ -1015,10 +1039,26 @@ type Description
       -- Primitives
     | DescribeStub String (Found String)
     | DescribeBoolean (Found Bool)
-    | DescribeInteger (Found Int)
-    | DescribeFloat (Found ( String, Float ))
-    | DescribeFloatBetween Float Float (Found ( String, Float ))
-    | DescribeIntBetween Int Int (Found Int)
+    | DescribeInteger
+        { id : Id Int
+        , found : Found Int
+        }
+    | DescribeIntBetween
+        { max : Int
+        , min : Int
+        , found : Found Int
+        , id : Id Int
+        }
+    | DescribeFloat
+        { id : Id Float
+        , found : Found ( String, Float )
+        }
+    | DescribeFloatBetween
+        { max : Float
+        , min : Float
+        , found : Found ( String, Float )
+        , id : Id Float
+        }
     | DescribeText Range (List TextDescription)
     | DescribeString Range String
     | DescribeMultiline Range String
@@ -1138,16 +1178,16 @@ withinFoundLeaf offset found =
 isPrimitive : Description -> Bool
 isPrimitive description =
     case description of
-        DescribeBlock name details ->
+        DescribeBlock _ ->
             False
 
-        Record name details ->
+        Record _ ->
             False
 
-        OneOf expected found ->
+        OneOf _ ->
             False
 
-        ManyOf expected rng foundList ->
+        ManyOf _ ->
             False
 
         StartsWith _ fst snd ->
@@ -1169,10 +1209,10 @@ isPrimitive description =
         DescribeFloat found ->
             True
 
-        DescribeFloatBetween _ _ found ->
+        DescribeFloatBetween _ ->
             True
 
-        DescribeIntBetween _ _ found ->
+        DescribeIntBetween _ ->
             True
 
         DescribeText rng textNodes ->
@@ -1194,10 +1234,10 @@ isPrimitive description =
 getUnexpecteds : Description -> List UnexpectedDetails
 getUnexpecteds description =
     case description of
-        DescribeBlock name details ->
+        DescribeBlock details ->
             spelunkUnexpectedsFromFound details.found
 
-        Record name details ->
+        Record details ->
             case details.found of
                 Found _ fields ->
                     List.concatMap
@@ -1207,11 +1247,11 @@ getUnexpecteds description =
                 Unexpected unexpected ->
                     [ unexpected ]
 
-        OneOf expected found ->
-            spelunkUnexpectedsFromFound found
+        OneOf one ->
+            spelunkUnexpectedsFromFound one.child
 
-        ManyOf expected rng foundList ->
-            List.concatMap spelunkUnexpectedsFromFound foundList
+        ManyOf many ->
+            List.concatMap spelunkUnexpectedsFromFound many.children
 
         StartsWith _ fst snd ->
             getUnexpecteds fst.found ++ getUnexpecteds snd.found
@@ -1226,17 +1266,17 @@ getUnexpecteds description =
         DescribeBoolean found ->
             unexpectedFromFound found
 
-        DescribeInteger found ->
-            unexpectedFromFound found
+        DescribeInteger details ->
+            unexpectedFromFound details.found
 
-        DescribeFloat found ->
-            unexpectedFromFound found
+        DescribeFloat details ->
+            unexpectedFromFound details.found
 
-        DescribeFloatBetween _ _ found ->
-            unexpectedFromFound found
+        DescribeFloatBetween details ->
+            unexpectedFromFound details.found
 
-        DescribeIntBetween _ _ found ->
-            unexpectedFromFound found
+        DescribeIntBetween details ->
+            unexpectedFromFound details.found
 
         DescribeText rng textNodes ->
             []
@@ -1285,10 +1325,10 @@ unexpectedFromFound found =
 getContainingDescriptions : Description -> { start : Int, end : Int } -> List Description
 getContainingDescriptions description offset =
     case description of
-        DescribeBlock name details ->
+        DescribeBlock details ->
             getWithinFound offset details.found
 
-        Record name details ->
+        Record details ->
             case details.found of
                 Found range fields ->
                     if withinOffsetRange offset range then
@@ -1304,11 +1344,11 @@ getContainingDescriptions description offset =
                     else
                         []
 
-        OneOf expected found ->
-            getWithinFound offset found
+        OneOf one ->
+            getWithinFound offset one.child
 
-        ManyOf expected rng foundList ->
-            List.concatMap (getWithinFound offset) foundList
+        ManyOf many ->
+            List.concatMap (getWithinFound offset) many.children
 
         StartsWith range fst snd ->
             if withinOffsetRange offset range then
@@ -1341,29 +1381,29 @@ getContainingDescriptions description offset =
             else
                 []
 
-        DescribeInteger found ->
-            if withinFoundLeaf offset found then
+        DescribeInteger details ->
+            if withinFoundLeaf offset details.found then
                 [ description ]
 
             else
                 []
 
-        DescribeFloat found ->
-            if withinFoundLeaf offset found then
+        DescribeFloat details ->
+            if withinFoundLeaf offset details.found then
                 [ description ]
 
             else
                 []
 
-        DescribeFloatBetween _ _ found ->
-            if withinFoundLeaf offset found then
+        DescribeFloatBetween details ->
+            if withinFoundLeaf offset details.found then
                 [ description ]
 
             else
                 []
 
-        DescribeIntBetween _ _ found ->
-            if withinFoundLeaf offset found then
+        DescribeIntBetween details ->
+            if withinFoundLeaf offset details.found then
                 [ description ]
 
             else
@@ -1527,9 +1567,9 @@ dedent cursor =
 writeDescription : Description -> PrintCursor -> PrintCursor
 writeDescription description cursor =
     case description of
-        DescribeBlock name details ->
+        DescribeBlock details ->
             cursor
-                |> write ("| " ++ name)
+                |> write ("| " ++ details.name)
                 |> indent
                 |> writeFound writeDescription details.found
                 |> dedent
@@ -1539,24 +1579,24 @@ writeDescription description cursor =
                 |> write "|"
                 |> writeFound (writeWith identity) found
 
-        Record name details ->
+        Record details ->
             writeIndent cursor
-                |> write ("| " ++ name)
+                |> write ("| " ++ details.name)
                 |> indent
                 |> writeFound
                     (\fields curs -> List.foldr writeField curs fields)
                     details.found
                 |> dedent
 
-        OneOf expected found ->
+        OneOf one ->
             cursor
-                |> writeFound writeDescription found
+                |> writeFound writeDescription one.child
 
-        ManyOf expected range found ->
+        ManyOf many ->
             List.foldl
                 (writeFound writeDescription)
                 cursor
-                found
+                many.children
 
         StartsWith range start end ->
             cursor
@@ -1566,17 +1606,17 @@ writeDescription description cursor =
         DescribeBoolean foundBoolean ->
             writeFound (writeWith boolToString) foundBoolean cursor
 
-        DescribeInteger found ->
-            writeFound (writeWith String.fromInt) found cursor
+        DescribeInteger details ->
+            writeFound (writeWith String.fromInt) details.found cursor
 
-        DescribeFloat found ->
-            writeFound (writeWith Tuple.first) found cursor
+        DescribeFloat details ->
+            writeFound (writeWith Tuple.first) details.found cursor
 
-        DescribeFloatBetween low high found ->
-            writeFound (writeWith Tuple.first) found cursor
+        DescribeFloatBetween details ->
+            writeFound (writeWith Tuple.first) details.found cursor
 
-        DescribeIntBetween low high found ->
-            writeFound (writeWith String.fromInt) found cursor
+        DescribeIntBetween details ->
+            writeFound (writeWith String.fromInt) details.found cursor
 
         DescribeText range textNodes ->
             cursor
@@ -1932,9 +1972,9 @@ block name renderer child =
         , converter =
             \desc ->
                 case desc of
-                    DescribeBlock actualBlockName blockDetails ->
-                        if actualBlockName == name then
-                            case blockDetails.found of
+                    DescribeBlock details ->
+                        if details.name == name then
+                            case details.found of
                                 Found range found ->
                                     case renderBlock child found of
                                         Err err ->
@@ -1951,7 +1991,7 @@ block name renderer child =
                                                         { found =
                                                             -- Found renderedChild
                                                             renderedChild
-                                                        , expected = blockDetails.expected
+                                                        , expected = details.expected
                                                         }
                                                     )
                                                 )
@@ -1962,7 +2002,7 @@ block name renderer child =
                                             (renderer
                                                 { found =
                                                     Unexpected unexpected
-                                                , expected = blockDetails.expected
+                                                , expected = details.expected
                                                 }
                                             )
                                         )
@@ -1980,14 +2020,16 @@ block name renderer child =
                 (\( range, valueResult ) ->
                     case valueResult of
                         Ok value ->
-                            DescribeBlock name
+                            DescribeBlock
                                 { found = Found range value
+                                , name = name
                                 , expected = ExpectBlock name (getBlockExpectation child)
                                 }
 
                         Err ( pos, errorMessage ) ->
-                            DescribeBlock name
-                                { found =
+                            DescribeBlock
+                                { name = name
+                                , found =
                                     Unexpected
                                         { range = pos
                                         , problem = errorMessage
@@ -2166,8 +2208,8 @@ oneOf renderUnexpected blocks =
         , converter =
             \desc ->
                 case desc of
-                    OneOf expected foundResult ->
-                        case foundResult of
+                    OneOf details ->
+                        case details.child of
                             Found rng found ->
                                 case List.foldl (applyDesc found) Nothing blocks of
                                     Nothing ->
@@ -2186,15 +2228,22 @@ oneOf renderUnexpected blocks =
                 (\( range, result ) ->
                     case result of
                         Ok found ->
-                            OneOf expectations (Found range found)
+                            OneOf
+                                { expected = expectations
+                                , child = Found range found
+                                , id = optionId range
+                                }
 
                         Err ( pos, unexpected ) ->
-                            OneOf expectations
-                                (Unexpected
-                                    { range = pos
-                                    , problem = unexpected
-                                    }
-                                )
+                            OneOf
+                                { expected = expectations
+                                , child =
+                                    Unexpected
+                                        { range = pos
+                                        , problem = unexpected
+                                        }
+                                , id = optionId range
+                                }
                 )
                 |= withRange
                     (Parser.oneOf
@@ -2289,23 +2338,27 @@ manyOf renderUnexpected blocks =
                                             Nothing ->
                                                 Err NoMatch
 
-                                            Just (Found _ result) ->
+                                            Just (Found rng result) ->
                                                 Ok (result :: existing)
 
                                             Just (Unexpected unexpected) ->
                                                 Ok (renderUnexpected unexpected :: existing)
                 in
                 case desc of
-                    ManyOf _ range found ->
-                        List.foldl getRendered (Ok []) found
-                            |> Result.map (\items -> Found range (List.reverse items))
+                    ManyOf many ->
+                        List.foldl getRendered (Ok []) many.children
+                            |> Result.map (\items -> Found (getRange many.id) (List.reverse items))
 
                     _ ->
                         Err NoMatch
         , parser =
             Parser.succeed
                 (\( range, results ) ->
-                    ManyOf expectations range (List.map resultToFound results)
+                    ManyOf
+                        { expected = expectations
+                        , id = manyOptionId range
+                        , children = List.map resultToFound results
+                        }
                 )
                 |= withRange
                     (Parser.getIndent
@@ -2482,9 +2535,9 @@ record2 recordName renderer renderUnexpected field1 field2 =
         , converter =
             \desc ->
                 case desc of
-                    Record name fields ->
-                        if name == recordName then
-                            case fields.found of
+                    Record details ->
+                        if details.name == recordName then
+                            case details.found of
                                 Found pos fieldDescriptions ->
                                     Ok (Ok (renderer pos))
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
@@ -2915,13 +2968,21 @@ int =
         { converter =
             \desc ->
                 case desc of
-                    DescribeInteger found ->
-                        Ok found
+                    DescribeInteger details ->
+                        Ok details.found
 
                     _ ->
                         Err NoMatch
         , expect = ExpectInteger
-        , parser = Parser.map DescribeInteger integer
+        , parser =
+            Parser.map
+                (\( id, foundInt ) ->
+                    DescribeInteger
+                        { id = id
+                        , found = foundInt
+                        }
+                )
+                integer
         }
 
 
@@ -2931,13 +2992,19 @@ float =
         { converter =
             \desc ->
                 case desc of
-                    DescribeFloat found ->
-                        Ok (mapFound Tuple.second found)
+                    DescribeFloat details ->
+                        Ok (mapFound Tuple.second details.found)
 
                     _ ->
                         Err NoMatch
         , expect = ExpectFloat
-        , parser = Parser.map DescribeFloat floating
+        , parser =
+            Parser.map
+                (\( id, fl ) ->
+                    DescribeFloat
+                        { id = id, found = fl }
+                )
+                floating
         }
 
 
@@ -2956,33 +3023,38 @@ intBetween one two =
         , converter =
             \desc ->
                 case desc of
-                    DescribeIntBetween low high found ->
-                        Ok found
+                    DescribeIntBetween details ->
+                        Ok details.found
 
                     _ ->
                         Err NoMatch
         , parser =
             Parser.map
-                (\found ->
-                    DescribeIntBetween bottom top <|
-                        case found of
-                            Found rng i ->
-                                if i >= bottom && i <= top then
+                (\( id, found ) ->
+                    DescribeIntBetween
+                        { min = bottom
+                        , max = top
+                        , id = id
+                        , found =
+                            case found of
+                                Found rng i ->
+                                    if i >= bottom && i <= top then
+                                        found
+
+                                    else
+                                        Unexpected
+                                            { range = rng
+                                            , problem =
+                                                MsgIntOutOfRange
+                                                    { found = i
+                                                    , min = bottom
+                                                    , max = top
+                                                    }
+                                            }
+
+                                _ ->
                                     found
-
-                                else
-                                    Unexpected
-                                        { range = rng
-                                        , problem =
-                                            MsgIntOutOfRange
-                                                { found = i
-                                                , min = bottom
-                                                , max = top
-                                                }
-                                        }
-
-                            _ ->
-                                found
+                        }
                 )
                 integer
         }
@@ -3003,33 +3075,38 @@ floatBetween one two =
         , converter =
             \desc ->
                 case desc of
-                    DescribeFloatBetween low high found ->
-                        Ok (mapFound Tuple.second found)
+                    DescribeFloatBetween details ->
+                        Ok (mapFound Tuple.second details.found)
 
                     _ ->
                         Err NoMatch
         , parser =
             Parser.map
-                (\found ->
-                    DescribeFloatBetween bottom top <|
-                        case found of
-                            Found rng ( str, i ) ->
-                                if i >= bottom && i <= top then
+                (\( id, found ) ->
+                    DescribeFloatBetween
+                        { min = bottom
+                        , max = top
+                        , id = id
+                        , found =
+                            case found of
+                                Found rng ( str, i ) ->
+                                    if i >= bottom && i <= top then
+                                        found
+
+                                    else
+                                        Unexpected
+                                            { range = rng
+                                            , problem =
+                                                MsgFloatOutOfRange
+                                                    { found = i
+                                                    , min = bottom
+                                                    , max = top
+                                                    }
+                                            }
+
+                                _ ->
                                     found
-
-                                else
-                                    Unexpected
-                                        { range = rng
-                                        , problem =
-                                            MsgFloatOutOfRange
-                                                { found = i
-                                                , min = bottom
-                                                , max = top
-                                                }
-                                        }
-
-                            _ ->
-                                found
+                        }
                 )
                 floating
         }
@@ -3224,19 +3301,21 @@ skipBlankLineWith x =
             ]
 
 
-integer : Parser Context Problem (Found Int)
+integer : Parser Context Problem ( Id Int, Found Int )
 integer =
     Parser.map
         (\( pos, intResult ) ->
             case intResult of
                 Ok i ->
-                    Found pos i
+                    ( Id pos, Found pos i )
 
                 Err str ->
-                    Unexpected
+                    ( Id pos
+                    , Unexpected
                         { range = pos
                         , problem = MsgBadInt str
                         }
+                    )
         )
         (withRange
             (Parser.oneOf
@@ -3270,19 +3349,21 @@ integer =
 
 {-| Parses a float and must end with whitespace, not additional characters.
 -}
-floating : Parser Context Problem (Found ( String, Float ))
+floating : Parser Context Problem ( Id Float, Found ( String, Float ) )
 floating =
     Parser.map
         (\( pos, floatResult ) ->
             case floatResult of
                 Ok f ->
-                    Found pos f
+                    ( Id pos, Found pos f )
 
                 Err str ->
-                    Unexpected
+                    ( Id pos
+                    , Unexpected
                         { range = pos
                         , problem = MsgBadFloat str
                         }
+                    )
         )
         (withRange
             (Parser.oneOf
@@ -3429,15 +3510,17 @@ parseRecord recordName expectations fields =
         (\( pos, foundFields ) ->
             case foundFields of
                 Ok ok ->
-                    Record recordName
+                    Record
                         { expected = expectations
+                        , name = recordName
                         , found =
                             Found pos ok
                         }
 
                 Err ( maybePosition, problem ) ->
-                    Record recordName
+                    Record
                         { expected = expectations
+                        , name = recordName
                         , found =
                             Unexpected
                                 --unexpected
