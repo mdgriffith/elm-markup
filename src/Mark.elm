@@ -457,7 +457,7 @@ exactly key val =
 {-| -}
 int : Block Int
 int =
-    Advanced.map Just Advanced.int
+    Advanced.map Just (Advanced.int 0)
 
 
 {-| Parse an `Int` within an inclusive range.
@@ -469,13 +469,19 @@ Will parse any Int between 0 and 100.
 -}
 intBetween : Int -> Int -> Block Int
 intBetween bottom top =
-    Advanced.map Just (Advanced.intBetween bottom top)
+    Advanced.map Just
+        (Advanced.intBetween
+            { min = bottom
+            , max = top
+            , default = min bottom top
+            }
+        )
 
 
 {-| -}
 float : Block Float
 float =
-    Advanced.map Just Advanced.float
+    Advanced.map Just (Advanced.float 0)
 
 
 {-| Parse a `Float` within an inclusive range.
@@ -487,21 +493,27 @@ Will parse any Float between 0 and 1.
 -}
 floatBetween : Float -> Float -> Block Float
 floatBetween bottom top =
-    Advanced.map Just (Advanced.floatBetween bottom top)
+    Advanced.map Just
+        (Advanced.floatBetween
+            { min = bottom
+            , max = top
+            , default = min bottom top
+            }
+        )
 
 
 {-| Parse either `True` or `False`.
 -}
 bool : Block Bool
 bool =
-    Advanced.map Just Advanced.bool
+    Advanced.map Just (Advanced.bool True)
 
 
 {-| Parse a single line and return it as a string.
 -}
 string : Block String
 string =
-    Advanced.map Just Advanced.string
+    Advanced.map Just (Advanced.string "A Default")
 
 
 {-| Parse multiple lines at the current indentation level.
@@ -530,7 +542,7 @@ Where `str` in the above function will be
 -}
 multiline : Block String
 multiline =
-    Advanced.map Just Advanced.multiline
+    Advanced.map Just (Advanced.multiline "A String")
 
 
 {-| -}
