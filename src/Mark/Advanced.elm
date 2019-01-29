@@ -54,6 +54,7 @@ import Html
 import Html.Attributes
 import Iso8601
 import Mark.Format as Format
+import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 import Time
 
@@ -88,9 +89,9 @@ parse (Document blocks) source =
 
         Err deadEnds ->
             Failure <|
-                renderError
+                Error.render
                     source
-                    { problem = MsgParsingIssue deadEnds
+                    { problem = Error.ParsingIssue deadEnds
                     , range =
                         case List.head deadEnds of
                             Nothing ->
@@ -170,8 +171,8 @@ compile (Document blocks) source =
                             -- This should never happen because
                             -- we definitely have the same document in both parsing and converting.
                             Failure
-                                (renderError source
-                                    { problem = MsgDocumentMismatch
+                                (Error.render source
+                                    { problem = Error.DocumentMismatch
                                     , range = startDocRange
                                     }
                                 )
@@ -189,17 +190,17 @@ compile (Document blocks) source =
                             -- This should never happen because
                             -- we definitely have the same document in both parsing and converting.
                             Failure
-                                (renderError source
-                                    { problem = MsgDocumentMismatch
+                                (Error.render source
+                                    { problem = Error.DocumentMismatch
                                     , range = startDocRange
                                     }
                                 )
 
         Err deadEnds ->
             Failure <|
-                renderError
+                Error.render
                     source
-                    { problem = MsgParsingIssue deadEnds
+                    { problem = Error.ParsingIssue deadEnds
                     , range =
                         case List.head deadEnds of
                             Nothing ->
@@ -231,8 +232,8 @@ convert (Document blocks) ((Parsed parsedDetails) as parsed) =
 
                 Err noMatch ->
                     Failure
-                        (renderError ""
-                            { problem = MsgDocumentMismatch
+                        (Error.render ""
+                            { problem = Error.DocumentMismatch
                             , range = startDocRange
                             }
                         )
@@ -247,8 +248,8 @@ convert (Document blocks) ((Parsed parsedDetails) as parsed) =
 
                 Err noMatch ->
                     Failure
-                        (renderError ""
-                            { problem = MsgDocumentMismatch
+                        (Error.render ""
+                            { problem = Error.DocumentMismatch
                             , range = startDocRange
                             }
                         )
@@ -954,7 +955,7 @@ updateFoundFloat id newFloat desc =
                                             Unexpected
                                                 { range = intRng
                                                 , problem =
-                                                    MsgFloatOutOfRange
+                                                    Error.FloatOutOfRange
                                                         { found = newFloat
                                                         , min = details.min
                                                         , max = details.max
@@ -982,7 +983,7 @@ updateFoundFloat id newFloat desc =
                                             Unexpected
                                                 { range = unexpected.range
                                                 , problem =
-                                                    MsgFloatOutOfRange
+                                                    Error.FloatOutOfRange
                                                         { found = newFloat
                                                         , min = details.min
                                                         , max = details.max
@@ -1074,7 +1075,7 @@ updateFoundInt id newInt desc =
                                             Unexpected
                                                 { range = intRng
                                                 , problem =
-                                                    MsgIntOutOfRange
+                                                    Error.IntOutOfRange
                                                         { found = newInt
                                                         , min = details.min
                                                         , max = details.max
@@ -1102,7 +1103,7 @@ updateFoundInt id newInt desc =
                                             Unexpected
                                                 { range = unexpected.range
                                                 , problem =
-                                                    MsgIntOutOfRange
+                                                    Error.IntOutOfRange
                                                         { found = newInt
                                                         , min = details.min
                                                         , max = details.max
@@ -1349,14 +1350,14 @@ type Found item
     = Found Range item
     | Unexpected
         { range : Range
-        , problem : ProblemMessage
+        , problem : Error.Error
         }
 
 
 {-| -}
 type alias UnexpectedDetails =
     { range : Range
-    , problem : ProblemMessage
+    , problem : Error.Error
     }
 
 
@@ -2474,45 +2475,6 @@ type alias ErrorMessage =
     }
 
 
-{-| -}
-type ProblemMessage
-    = MsgDocumentMismatch
-    | MsgParsingIssue (List (Parser.DeadEnd Context Problem))
-    | MsgUnknownBlock (List String)
-    | MsgUnknownInline (List String)
-    | MsgMissingFields (List String)
-    | MsgNonMatchingFields
-        { expecting : List String
-        , found : List String
-        }
-    | MsgUnexpectedField
-        { found : String
-        , options : List String
-        , recordName : String
-        }
-    | MsgExpectingIndent Int
-    | MsgCantStartTextWithSpace
-    | MsgUnclosedStyle
-        { bold : Bool
-        , italic : Bool
-        , strike : Bool
-        }
-    | MsgBadDate String
-    | MsgBadFloat String
-    | MsgBadInt String
-    | MsgBadBool String
-    | MsgIntOutOfRange
-        { found : Int
-        , min : Int
-        , max : Int
-        }
-    | MsgFloatOutOfRange
-        { found : Float
-        , min : Float
-        , max : Float
-        }
-
-
 type alias Position =
     { offset : Int
     , line : Int
@@ -2589,7 +2551,7 @@ document renderer child =
             Parser.succeed
                 (\source ( range, val ) ->
                     Parsed
-                        { errors = List.map (renderError source) (getUnexpecteds val)
+                        { errors = List.map (Error.render source) (getUnexpecteds val)
                         , found = Found range val
                         , expected = getBlockExpectation child
                         , focus = Nothing
@@ -2762,7 +2724,7 @@ block name renderer child =
                                     |= Parser.oneOf
                                         [ (Parser.succeed identity
                                             |= getPosition
-                                            |. Parser.token (Parser.Token (String.repeat (indentation + 4) " ") (ExpectingIndent (indentation + 4)))
+                                            |. Parser.token (Parser.Token (String.repeat (indentation + 4) " ") (ExpectingIndentation (indentation + 4)))
                                           )
                                             |> Parser.andThen
                                                 (\start ->
@@ -2772,7 +2734,7 @@ block name renderer child =
                                                             (\end ->
                                                                 Err
                                                                     ( { start = start, end = end }
-                                                                    , MsgExpectingIndent (indentation + 4)
+                                                                    , Error.ExpectingIndent (indentation + 4)
                                                                     )
                                                             )
                                                             |. Parser.chompIf (\c -> c == ' ') Space
@@ -2789,7 +2751,7 @@ block name renderer child =
                                         -- take care of that itself by returning Unexpected
                                         , Parser.succeed
                                             (\( pos, foundIndent ) ->
-                                                Err ( pos, MsgExpectingIndent (indentation + 4) )
+                                                Err ( pos, Error.ExpectingIndent (indentation + 4) )
                                             )
                                             |= withRange (Parser.chompWhile (\c -> c == ' '))
                                             |. Parser.loop "" (raggedIndentedStringAbove indentation)
@@ -2891,7 +2853,7 @@ oneOf renderUnexpected blocks =
                                     (\indentation ->
                                         Parser.succeed
                                             (\( pos, foundWord ) ->
-                                                Err ( pos, MsgUnknownBlock blockNames )
+                                                Err ( pos, Error.UnknownBlock blockNames )
                                             )
                                             |= withRange word
                                             |. newline
@@ -3003,7 +2965,7 @@ manyOf renderUnexpected blocks =
                                             (\indentation ->
                                                 Parser.succeed
                                                     (\( pos, foundWord ) ->
-                                                        Err ( pos, MsgUnknownBlock blockNames )
+                                                        Err ( pos, Error.UnknownBlock blockNames )
                                                     )
                                                     |= withRange word
                                                     |. newline
@@ -3344,7 +3306,7 @@ renderTextComponent options comp found =
                 Err err ->
                     options.error
                         { range = range
-                        , problem = MsgUnknownInline (List.map (getInlineName << getInlineExpectation) options.inlines)
+                        , problem = Error.UnknownInline (List.map (getInlineName << getInlineExpectation) options.inlines)
                         }
                         :: found
 
@@ -3571,7 +3533,7 @@ date =
                             DescribeDate
                                 (Unexpected
                                     { range = pos
-                                    , problem = MsgBadDate str
+                                    , problem = Error.BadDate str
                                     }
                                 )
 
@@ -3656,7 +3618,7 @@ bool default =
                             Err err ->
                                 Unexpected
                                     { range = range
-                                    , problem = MsgBadBool err
+                                    , problem = Error.BadBool err
                                     }
 
                             Ok b ->
@@ -3775,7 +3737,7 @@ intBetween bounds =
                                         Unexpected
                                             { range = rng
                                             , problem =
-                                                MsgIntOutOfRange
+                                                Error.IntOutOfRange
                                                     { found = i
                                                     , min = bottom
                                                     , max = top
@@ -3832,7 +3794,7 @@ floatBetween bounds =
                                         Unexpected
                                             { range = rng
                                             , problem =
-                                                MsgFloatOutOfRange
+                                                Error.FloatOutOfRange
                                                     { found = i
                                                     , min = bottom
                                                     , max = top
@@ -3849,34 +3811,6 @@ floatBetween bounds =
 
 
 {- Parser Heleprs -}
-
-
-{-| -}
-type Context
-    = InBlock String
-    | InInline String
-    | InRecord String
-    | InRecordField String
-
-
-{-| -}
-type Problem
-    = ExpectingIndent Int
-    | InlineStart
-    | InlineEnd
-    | BlockStart
-    | Expecting String
-    | ExpectingBlockName String
-    | ExpectingInlineName String
-    | ExpectingFieldName String
-    | Escape
-    | EscapedChar
-    | Newline
-    | Space
-    | End
-    | Integer
-    | FloatingPoint
-    | InvalidNumber
 
 
 {-| -}
@@ -3930,7 +3864,7 @@ indentationBetween lower higher =
                 Parser.succeed numSpaces
                     |. Parser.token
                         (Parser.Token (String.repeat numSpaces " ")
-                            (ExpectingIndent numSpaces)
+                            (ExpectingIndentation numSpaces)
                         )
             )
             (List.range bottom top)
@@ -3972,7 +3906,7 @@ indentedString indentation found =
                 (\str ->
                     Parser.Loop (found ++ str)
                 )
-                |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndent indentation))
+                |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
                 |= Parser.getChompedString
                     (Parser.chompWhile
                         (\c -> c /= '\n')
@@ -4006,7 +3940,7 @@ blocksOrNewlines myParser indentation ( parsedSomething, existing ) =
                     (\foundBlock ->
                         Parser.Loop ( True, foundBlock :: existing )
                     )
-                    |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndent indentation))
+                    |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
                     |= myParser
                 , Parser.succeed (Parser.Loop ( True, existing ))
                     |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
@@ -4048,7 +3982,7 @@ integer =
                     ( Id pos
                     , Unexpected
                         { range = pos
-                        , problem = MsgBadInt str
+                        , problem = Error.BadInt str
                         }
                     )
         )
@@ -4096,7 +4030,7 @@ floating =
                     ( Id pos
                     , Unexpected
                         { range = pos
-                        , problem = MsgBadFloat str
+                        , problem = Error.BadFloat str
                         }
                     )
         )
@@ -4144,7 +4078,8 @@ withRange : Parser Context Problem thing -> Parser Context Problem ( Range, thin
 withRange parser =
     Parser.succeed
         (\start val end ->
-            ( { start = start, end = end }, val )
+            ( { start = start
+            , end = end }, val )
         )
         |= getPosition
         |= parser
@@ -4314,7 +4249,7 @@ unexpectedField recordName options =
                         , Unexpected
                             { range = range
                             , problem =
-                                MsgUnexpectedField
+                                Error.UnexpectedField
                                     { found = name
                                     , options = options
                                     , recordName = recordName
@@ -4374,7 +4309,7 @@ renderRecordResult renderUnexpected pos result =
 
 type alias RecordFields =
     { remaining : List ( String, Parser Context Problem ( String, Found Description ) )
-    , found : Result ( Maybe Range, ProblemMessage ) (List ( String, Found Description ))
+    , found : Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))
     }
 
 
@@ -4397,7 +4332,7 @@ type Indented thing
 indentOrSkip indentation successParser =
     Parser.oneOf
         [ Parser.succeed identity
-            |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndent indentation))
+            |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
             |= Parser.oneOf
                 [ Parser.map (always EmptyLine) newline
                 , Parser.succeed
@@ -4443,7 +4378,7 @@ parseFields :
     String
     -> List String
     -> RecordFields
-    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, ProblemMessage ) (List ( String, Found Description ))))
+    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))))
 parseFields recordName fieldNames fields =
     case fields.remaining of
         [] ->
@@ -4469,7 +4404,7 @@ parseFields recordName fieldNames fields =
                                                     WeirdIndent i ->
                                                         Parser.Loop
                                                             { found =
-                                                                Err ( Nothing, MsgExpectingIndent indentation )
+                                                                Err ( Nothing, Error.ExpectingIndent indentation )
                                                             , remaining =
                                                                 fields.remaining
                                                             }
@@ -4484,7 +4419,7 @@ parseFields recordName fieldNames fields =
                                     , Parser.succeed
                                         (Parser.Done
                                             (Err
-                                                ( Nothing, MsgMissingFields (List.map Tuple.first fields.remaining) )
+                                                ( Nothing, Error.MissingFields (List.map Tuple.first fields.remaining) )
                                             )
                                         )
                                     ]
@@ -4555,12 +4490,12 @@ applyField foundField possiblyFn =
                     Err unexpected
 
 
-getField : Field value -> List ( String, Found Description ) -> Result ProblemMessage (Found value)
+getField : Field value -> List ( String, Found Description ) -> Result Error.Error (Found value)
 getField (Field name fieldBlock) fields =
-    List.foldl (matchField name fieldBlock) (Err (MsgMissingFields [ name ])) fields
+    List.foldl (matchField name fieldBlock) (Err (Error.MissingFields [ name ])) fields
 
 
-matchField : String -> Block value -> ( String, Found Description ) -> Result ProblemMessage (Found value) -> Result ProblemMessage (Found value)
+matchField : String -> Block value -> ( String, Found Description ) -> Result Error.Error (Found value) -> Result Error.Error (Found value)
 matchField targetName targetBlock ( name, foundDescription ) existing =
     case existing of
         Ok _ ->
@@ -4931,9 +4866,9 @@ expectIndentation base previous =
     Parser.succeed Tuple.pair
         |= Parser.oneOf
             ([ Parser.succeed (previous + 4)
-                |. Parser.token (Parser.Token (String.repeat (previous + 4) " ") (ExpectingIndent (previous + 4)))
+                |. Parser.token (Parser.Token (String.repeat (previous + 4) " ") (ExpectingIndentation (previous + 4)))
              , Parser.succeed previous
-                |. Parser.token (Parser.Token (String.repeat previous " ") (ExpectingIndent previous))
+                |. Parser.token (Parser.Token (String.repeat previous " ") (ExpectingIndentation previous))
              ]
                 ++ descending base previous
             )
@@ -4945,7 +4880,7 @@ expectIndentation base previous =
 
                 else
                     Parser.problem
-                        (ExpectingIndent (base + indentLevel))
+                        (ExpectingIndentation (base + indentLevel))
             )
 
 
@@ -4965,7 +4900,7 @@ descending base prev =
                             base + (x * 4)
                     in
                     Parser.succeed level
-                        |. Parser.token (Parser.Token (String.repeat level " ") (ExpectingIndent level))
+                        |. Parser.token (Parser.Token (String.repeat level " ") (ExpectingIndentation level))
                 )
                 (List.range 0 (((prev - 4) - base) // 4))
             )
@@ -5310,7 +5245,7 @@ styledTextParserLoop options meaningful untilStrings found =
                                             , end = end
                                             }
                                         , problem =
-                                            MsgUnknownInline (List.map getInlineName options.inlines)
+                                            Error.UnknownInline (List.map getInlineName options.inlines)
                                         }
                                         :: current.found
 
@@ -5851,677 +5786,6 @@ measure start textStr =
         | offset = start.offset + len
         , column = start.column + len
     }
-
-
-
-{- Error Rendering -}
-
-
-renderError : String -> UnexpectedDetails -> ErrorMessage
-renderError source current =
-    case current.problem of
-        MsgDocumentMismatch ->
-            { title = "DOCUMENT MISMATCH"
-            , region =
-                current.range
-            , message =
-                [ Format.text "Your "
-                , Format.yellow (Format.text "document")
-                , Format.text " and your "
-                , Format.yellow (Format.text "Parsed")
-                , Format.text " structure don't match for some reason.\n\n"
-                , Format.text "This usually occurs because you've stored the "
-                , Format.yellow (Format.text "Parsed")
-                , Format.text " data somewhere and then made a breaking change to your document."
-                ]
-            }
-
-        MsgParsingIssue issues ->
-            { title = "PARSING ISSUE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I ran into an issue parsing your document.\n\n" ]
-                    , renderParserIssue issues
-                    , [ Format.text "\n\n" ]
-                    ]
-            }
-
-        MsgUnknownBlock expecting ->
-            let
-                target =
-                    String.slice current.range.start.offset current.range.end.offset source
-            in
-            { title = "UNKNOWN BLOCK"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I don't recognize this block name.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "Do you mean one of these instead?\n\n"
-                      , expecting
-                            |> List.sortBy (\exp -> 0 - similarity target exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                      ]
-                    ]
-            }
-
-        MsgUnknownInline expecting ->
-            let
-                target =
-                    String.slice current.range.start.offset current.range.end.offset source
-            in
-            { title = "UNKNOWN INLINE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I ran into an unexpected inline name.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "But I was expecting one of these instead:\n\n"
-                      , expecting
-                            |> List.sortBy (\exp -> 0 - similarity target exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                      ]
-                    ]
-            }
-
-        MsgExpectingIndent indentation ->
-            { title = "MISMATCHED INDENTATION"
-            , region = current.range
-            , message =
-                [ Format.text ("I was expecting " ++ String.fromInt indentation ++ " spaces of indentation.\n\n")
-                ]
-                    ++ highlight current.range source
-                    ++ hint "All indentation in `elm-markup` is a multiple of 4."
-            }
-
-        MsgCantStartTextWithSpace ->
-            let
-                line =
-                    String.slice current.range.start.offset current.range.end.offset source
-            in
-            { title = "TOO MUCH SPACE"
-            , region = current.range
-            , message =
-                List.concat
-                    [ [ Format.text "This line of text starts with extra space.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "Beyond the required indentation, text should start with non-whitespace characters." ]
-                    ]
-            }
-
-        MsgUnclosedStyle styles ->
-            let
-                line =
-                    String.slice current.range.start.offset current.range.end.offset source
-            in
-            { title = "UNCLOSED STYLE"
-            , region = current.range
-            , message =
-                List.concat
-                    [ [ Format.text (styleNames styles ++ " still open.  Add " ++ styleChars styles ++ " to close it.\n\n") ] ]
-                    ++ highlight current.range source
-                    ++ hint "`*` is used for bold and `/` is used for italic."
-            }
-
-        MsgUnexpectedField msgUnexpectedField ->
-            let
-                target =
-                    String.slice current.range.start.offset current.range.end.offset source
-            in
-            { title = "UNKNOWN FIELD"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I ran into an unexpected field name for a "
-                      , Format.text msgUnexpectedField.recordName
-                            |> Format.yellow
-                      , Format.text " record\n\n"
-                      ]
-                    , highlight current.range source
-                    , [ Format.text "\nDo you mean one of these instead?\n\n"
-                      , msgUnexpectedField.options
-                            |> List.sortBy (\exp -> 0 - similarity target exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                      ]
-                    ]
-            }
-
-        MsgBadDate found ->
-            { title = "BAD DATE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was trying to parse a date, but this format looks off.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "Dates should be in ISO 8601 format:\n\n"
-                      , Format.text (addIndent 4 "YYYY-MM-DDTHH:mm:ss.SSSZ")
-                            |> Format.yellow
-                      ]
-                    ]
-            }
-
-        MsgBadFloat found ->
-            { title = "BAD FLOAT"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was trying to parse a float, but this format looks off.\n\n" ]
-                    , highlight current.range source
-                    ]
-            }
-
-        MsgBadInt found ->
-            { title = "BAD INT"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was trying to parse an integer, but this format looks off.\n\n" ]
-                    , highlight current.range source
-                    ]
-            }
-
-        MsgBadBool found ->
-            { title = "BAD INT"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was trying to parse a boolean, but this format looks off.\n\n" ]
-                    , highlight current.range source
-                    ]
-            }
-
-        MsgIntOutOfRange found ->
-            { title = "INTEGER OUT OF RANGE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was expecting an "
-                      , Format.yellow (Format.text "Int")
-                      , Format.text " between "
-                      , Format.text (String.fromInt found.min)
-                            |> Format.yellow
-                      , Format.text " and "
-                      , Format.text (String.fromInt found.max)
-                            |> Format.yellow
-                      , Format.text ", but found:\n\n"
-                      ]
-                    , highlight current.range source
-                    ]
-            }
-
-        MsgFloatOutOfRange found ->
-            { title = "FLOAT OUT OF RANGE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was expecting a "
-                      , Format.yellow (Format.text "Float")
-                      , Format.text " between "
-                      , Format.text (String.fromFloat found.min)
-                            |> Format.yellow
-                      , Format.text " and "
-                      , Format.text (String.fromFloat found.max)
-                            |> Format.yellow
-                      , Format.text ", but found:\n\n"
-                      ]
-                    , highlight current.range source
-                    ]
-            }
-
-        MsgNonMatchingFields fields ->
-            let
-                line =
-                    String.slice current.range.start.offset current.range.end.offset source
-
-                remaining =
-                    List.filter
-                        (\f -> not <| List.member f fields.found)
-                        fields.expecting
-            in
-            { title = "MISSING FIELD"
-            , region = current.range
-            , message =
-                -- TODO: Highlight entire record section
-                -- TODO: mention record name
-                case remaining of
-                    [] ->
-                        -- TODO: This should never happen actually.
-                        --  Maybe error should be a nonempty list?
-                        [ Format.text "It looks like a field is missing." ]
-
-                    [ single ] ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You need to add the "
-                        , Format.yellow (Format.text single)
-                        , Format.text " field."
-                        ]
-
-                    multiple ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You still need to add:\n"
-                        , remaining
-                            |> List.sortBy (\exp -> 0 - similarity line exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                        ]
-            }
-
-        MsgMissingFields remaining ->
-            let
-                line =
-                    String.slice current.range.start.offset current.range.end.offset source
-            in
-            { title = "MISSING FIELD"
-            , region = current.range
-            , message =
-                -- TODO: Highlight entire record section
-                -- TODO: mention record name
-                case remaining of
-                    [] ->
-                        -- TODO: This should never happen actually.
-                        --  Maybe error should be a nonempty list?
-                        [ Format.text "It looks like a field is missing." ]
-
-                    [ single ] ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You need to add the "
-                        , Format.yellow (Format.text single)
-                        , Format.text " field."
-                        ]
-
-                    multiple ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You still need to add:\n"
-                        , remaining
-                            |> List.sortBy (\exp -> 0 - similarity line exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                        ]
-            }
-
-
-renderParserIssue deadends =
-    List.map
-        (Format.yellow
-            << Format.text
-            << addIndent 4
-            << parsingProblemToString
-            << .problem
-        )
-        deadends
-
-
-parsingProblemToString prob =
-    case prob of
-        ExpectingIndent i ->
-            "ExpectingIndent i" ++ "\n"
-
-        InlineStart ->
-            "InlineStart\n"
-
-        InlineEnd ->
-            "InlineEnd\n"
-
-        BlockStart ->
-            "BlockStart\n"
-
-        Expecting str ->
-            "Expecting " ++ str ++ "\n"
-
-        ExpectingBlockName name ->
-            "ExpectingBlockName " ++ name ++ "\n"
-
-        ExpectingInlineName name ->
-            "ExpectingInlineName " ++ name ++ "\n"
-
-        ExpectingFieldName name ->
-            "ExpectingFieldName " ++ name ++ "\n"
-
-        Escape ->
-            "Escape\n"
-
-        EscapedChar ->
-            "EscapedChar\n"
-
-        Newline ->
-            "Newline\n"
-
-        Space ->
-            "Space\n"
-
-        End ->
-            "End\n"
-
-        Integer ->
-            "Integer\n"
-
-        FloatingPoint ->
-            "FloatingPoint\n"
-
-        InvalidNumber ->
-            "InvalidNumber\n"
-
-
-formatNewline =
-    { text = "\n"
-    , color = Nothing
-    , underline = False
-    , bold = False
-    }
-
-
-
--- highlight : Range -> String -> List ()
-
-
-highlight range source =
-    if range.start.line == range.end.line then
-        -- single line
-        let
-            lineStart =
-                range.start.offset - (range.start.column - 1)
-
-            line =
-                String.slice lineStart (range.end.offset + 20) source
-                    |> String.lines
-                    |> List.head
-                    |> Maybe.withDefault ""
-
-            lineNumber =
-                String.fromInt range.start.line
-                    ++ (if String.startsWith "|" line then
-                            ""
-
-                        else
-                            "|"
-                       )
-        in
-        [ Format.text (lineNumber ++ line ++ "\n")
-        , Format.red
-            (Format.text
-                (String.repeat
-                    (range.start.column - 1 + String.length lineNumber)
-                    " "
-                    ++ String.repeat (range.end.column - range.start.column) "^"
-                    ++ "\n"
-                )
-            )
-        ]
-
-    else
-        -- multiline
-        let
-            snippet =
-                String.slice range.start.offset range.end.offset source
-
-            indented =
-                String.slice (range.start.offset + 1 - range.start.column) range.start.offset source
-
-            lines =
-                String.lines (indented ++ snippet)
-                    |> List.indexedMap
-                        (\i str ->
-                            ( i + range.start.line - 1, str )
-                        )
-        in
-        List.concatMap highlightLine lines
-
-
-highlightLine ( index, line ) =
-    [ Format.text (String.fromInt index)
-    , Format.red (Format.text ">")
-    , Format.text (line ++ "\n")
-    ]
-
-
-highlightPreviousWord cursor line =
-    let
-        rowNumLength =
-            String.length (String.fromInt cursor.row)
-
-        start =
-            String.length line - String.length (String.trimLeft line)
-
-        highlightLength =
-            line
-                |> String.dropRight (String.length line - (cursor.col - 2))
-                |> String.trimLeft
-                |> String.length
-    in
-    Format.red <| Format.text (String.repeat (rowNumLength + start + 1) " " ++ String.repeat highlightLength "^" ++ "\n")
-
-
-highlightWord cursor line =
-    let
-        rowNumLength =
-            String.length (String.fromInt cursor.row)
-
-        highlightLength =
-            line
-                |> String.dropLeft (cursor.col - rowNumLength)
-                |> String.words
-                |> List.head
-                |> Maybe.map String.length
-                |> Maybe.withDefault 1
-    in
-    Format.red <| Format.text (String.repeat (rowNumLength + cursor.col - 1) " " ++ String.repeat highlightLength "^" ++ "\n")
-
-
-addIndent x str =
-    String.repeat x " " ++ str
-
-
-singleLine row line =
-    Format.text <|
-        String.fromInt row
-            ++ (if String.startsWith "|" line then
-                    ""
-
-                else
-                    "|"
-               )
-            ++ line
-
-
-hint str =
-    [ Format.text "Hint"
-        |> Format.underline
-    , Format.text (": " ++ str)
-    ]
-
-
-getLine row lines =
-    case List.head (List.drop (row - 1) lines) of
-        Nothing ->
-            "Empty"
-
-        Just l ->
-            l
-
-
-highlightUntil end cursor line =
-    let
-        rowNumLength =
-            String.length (String.fromInt cursor.row)
-
-        highlightLength =
-            line
-                |> String.dropLeft (cursor.col - rowNumLength)
-                |> String.split (String.fromChar end)
-                |> List.head
-                |> Maybe.map (\str -> String.length str + 1)
-                |> Maybe.withDefault 1
-    in
-    Format.red <| Format.text (String.repeat (rowNumLength + cursor.col - 1) " " ++ String.repeat highlightLength "^" ++ "\n")
-
-
-getWord cursor line =
-    let
-        rowNumLength =
-            String.length (String.fromInt cursor.row)
-
-        highlightLength =
-            line
-                |> String.dropLeft (cursor.col - rowNumLength)
-                |> String.words
-                |> List.head
-                |> Maybe.map String.length
-                |> Maybe.withDefault 1
-
-        end =
-            cursor.col + highlightLength
-    in
-    String.slice (cursor.col - 1) end line
-
-
-getPrevWord cursor line =
-    let
-        start =
-            String.length line - String.length (String.trimLeft line)
-
-        highlightLength =
-            line
-                |> String.dropRight (String.length line - (cursor.col - 2))
-                |> String.trimLeft
-                |> String.length
-    in
-    String.slice start (start + highlightLength) line
-
-
-type alias Similarity =
-    Int
-
-
-similarity : String -> String -> Similarity
-similarity source target =
-    let
-        lenSimilarity =
-            0 - min 2 (abs (String.length source - String.length target))
-
-        addCompared ( x, y ) total =
-            if x == y then
-                total + 1
-
-            else
-                total
-    in
-    List.map2 Tuple.pair (String.toList source) (String.toList target)
-        |> List.foldl addCompared 0
-        |> (+) lenSimilarity
-
-
-highlightSpace col line =
-    let
-        start =
-            String.dropLeft (col - 1) line
-
-        trimmed =
-            String.trimLeft start
-
-        highlightLength =
-            String.length start
-                - String.length trimmed
-                |> max 1
-    in
-    Format.red <| Format.text (" " ++ String.repeat col " " ++ String.repeat highlightLength "^" ++ "\n")
-
-
-styleChars styles =
-    let
-        italic =
-            styles.italic
-
-        isBold =
-            styles.bold
-
-        strike =
-            styles.strike
-    in
-    case ( italic, isBold, strike ) of
-        ( False, False, False ) ->
-            "Some formatting is"
-
-        ( True, True, False ) ->
-            "/ and *"
-
-        ( True, True, True ) ->
-            "/, *, and ~"
-
-        ( True, False, True ) ->
-            "/ and ~"
-
-        ( False, True, True ) ->
-            "* and ~"
-
-        ( True, False, False ) ->
-            "/"
-
-        ( False, True, False ) ->
-            "*"
-
-        ( False, False, True ) ->
-            "~"
-
-
-styleNames styles =
-    let
-        italic =
-            styles.italic
-
-        isBold =
-            styles.bold
-
-        strike =
-            styles.strike
-    in
-    case ( italic, isBold, strike ) of
-        ( False, False, False ) ->
-            "Some formatting is"
-
-        ( True, True, False ) ->
-            "Italic and bold formatting are"
-
-        ( True, True, True ) ->
-            "Italic, strike, and bold formatting are"
-
-        ( True, False, True ) ->
-            "Italic and strike formatting are"
-
-        ( False, True, True ) ->
-            "Strike, and bold formatting are"
-
-        ( True, False, False ) ->
-            "Italic formatting is"
-
-        ( False, True, False ) ->
-            "Bold formatting is"
-
-        ( False, False, True ) ->
-            "Strike formatting is"
 
 
 {-| -}
