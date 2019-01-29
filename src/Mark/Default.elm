@@ -39,6 +39,7 @@ import Element.Font as Font
 import Element.Region
 import Html.Attributes
 import Mark
+import Mark.Description
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
@@ -320,24 +321,24 @@ link style =
 
 {-| Render a text fragment.
 -}
-textFragment : Mark.Text -> model -> Element msg
+textFragment : Mark.Description.Text -> model -> Element msg
 textFragment node model_ =
     case node of
-        Mark.Text styles txt ->
+        Mark.Description.Text styles txt ->
             Element.el (List.concatMap toStyles styles) (Element.text txt)
 
 
 {-| -}
-toStyles : Mark.Style -> List (Element.Attribute msg)
+toStyles : Mark.Description.Style -> List (Element.Attribute msg)
 toStyles style =
     case style of
-        Mark.Bold ->
+        Mark.Description.Bold ->
             [ Font.bold ]
 
-        Mark.Italic ->
+        Mark.Description.Italic ->
             [ Font.italic ]
 
-        Mark.Strike ->
+        Mark.Description.Strike ->
             [ Font.strike ]
 
 
@@ -388,14 +389,15 @@ list config textParser =
                     , Mark.exactly "--> " Arrow
                     , Mark.exactly "- " Bullet
                     , Mark.exactly "-- " Bullet
-                    , Mark.advanced
-                        (Parser.loop ( [], [] ) numberIconParser)
+
+                    -- , Mark.advanced
+                    --     (Parser.loop ( [], [] ) numberIconParser)
                     ]
             }
         )
 
 
-renderListItem config model stack (Mark.Nested item) ( index, accumulated ) =
+renderListItem config model stack (Mark.Description.Nested item) ( index, accumulated ) =
     case item.content of
         ( icon, items ) ->
             let
@@ -444,59 +446,55 @@ resetIndex reset cursor stack =
             )
 
 
-{-| -}
-numberIconParser :
-    ( List (Maybe Int), List String )
-    -> Parser Mark.Context Mark.Problem (Parser.Step ( List (Maybe Int), List String ) ListIcon)
-numberIconParser ( cursorReset, decorations ) =
-    Parser.oneOf
-        [ Parser.succeed
-            (\reset decoration ->
-                Parser.Loop
-                    ( reset :: cursorReset
-                    , decoration :: decorations
-                    )
-            )
-            |= Parser.oneOf
-                [ Parser.succeed
-                    (\lead remaining ->
-                        case ( String.toInt lead, String.toInt remaining ) of
-                            ( Just l, Just r ) ->
-                                Just <| (l * 10 * String.length remaining) + r
 
-                            ( Just l, Nothing ) ->
-                                Just l
-
-                            _ ->
-                                Nothing
-                    )
-                    |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Integer)
-                    |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
-                , Parser.succeed Nothing
-                    |. Parser.chompIf (\c -> c == '#') (Mark.Expecting "#")
-                ]
-            |= Parser.getChompedString
-                (Parser.chompWhile
-                    (\c ->
-                        c
-                            /= ' '
-                            && (c /= '#')
-                            && not (Char.isDigit c)
-                    )
-                )
-        , Parser.succeed
-            (Parser.Done
-                (Number
-                    { reset = List.reverse cursorReset
-                    , decorations = List.reverse decorations
-                    }
-                )
-            )
-            |. Parser.chompIf (\c -> c == ' ') Mark.Space
-        ]
-
-
-
+-- {-| -}
+-- numberIconParser :
+--     ( List (Maybe Int), List String )
+--     -> Parser Mark.Context Mark.Problem (Parser.Step ( List (Maybe Int), List String ) ListIcon)
+-- numberIconParser ( cursorReset, decorations ) =
+--     Parser.oneOf
+--         [ Parser.succeed
+--             (\reset decoration ->
+--                 Parser.Loop
+--                     ( reset :: cursorReset
+--                     , decoration :: decorations
+--                     )
+--             )
+--             |= Parser.oneOf
+--                 [ Parser.succeed
+--                     (\lead remaining ->
+--                         case ( String.toInt lead, String.toInt remaining ) of
+--                             ( Just l, Just r ) ->
+--                                 Just <| (l * 10 * String.length remaining) + r
+--                             ( Just l, Nothing ) ->
+--                                 Just l
+--                             _ ->
+--                                 Nothing
+--                     )
+--                     |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Integer)
+--                     |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
+--                 , Parser.succeed Nothing
+--                     |. Parser.chompIf (\c -> c == '#') (Mark.Expecting "#")
+--                 ]
+--             |= Parser.getChompedString
+--                 (Parser.chompWhile
+--                     (\c ->
+--                         c
+--                             /= ' '
+--                             && (c /= '#')
+--                             && not (Char.isDigit c)
+--                     )
+--                 )
+--         , Parser.succeed
+--             (Parser.Done
+--                 (Number
+--                     { reset = List.reverse cursorReset
+--                     , decorations = List.reverse decorations
+--                     }
+--                 )
+--             )
+--             |. Parser.chompIf (\c -> c == ' ') Mark.Space
+--         ]
 {- LIST -}
 
 

@@ -11,7 +11,7 @@ module Mark exposing
     , oneOf, manyOf, startWith
     , nested, Nested
     , Field, field, record2
-    , errorToString
+    , Error, errorToString
     )
 
 {-| `elm-markup` is about defining what you're expecting in a markup document.
@@ -40,7 +40,7 @@ The `elm-markup` language relies heavily on indentation, which is always some mu
 
 # Mapping
 
-@docs map, andThen
+@docs map
 
 
 # Text
@@ -84,19 +84,12 @@ Which would parse
         description = A super cute kitten.
         src = http://placekitten/200/500
 
-@docs Field, field, record2, record3, record4, record5, record6, record7, record8, record9, record10
+@docs Field, field, record2
 
 
 # Errors
 
-@docs Error, errorToString, errorToHtml, Theme
-
-@docs Context, Problem
-
-
-# Advanced
-
-@docs advanced
+@docs Error, errorToString
 
 -}
 
@@ -104,13 +97,14 @@ import Html
 import Html.Attributes
 import Iso8601
 import Mark.Advanced as Advanced
+import Mark.Description as Description
 import Mark.Format as Format
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 import Time
 
 
 {-| -}
-parse : Document result -> String -> Result (List ErrorMessage) result
+parse : Document result -> String -> Result (List Error) result
 parse doc source =
     case Advanced.compile doc source of
         Advanced.Success parsed ->
@@ -143,7 +137,7 @@ type alias Replacement =
 
 {-| -}
 type alias Text =
-    Advanced.Text
+    Description.Text
 
 
 {-| Create a markup `Document`. You're first goal is to describe a document in terms of the blocks you're expecting.
@@ -182,7 +176,7 @@ document renderer child =
     Advanced.document
         (\doc ->
             case doc.found of
-                Advanced.Found _ (Just f) ->
+                Description.Found _ (Just f) ->
                     Just (renderer f)
 
                 _ ->
@@ -226,7 +220,7 @@ block name renderer child =
     Advanced.block name
         (\blockResult ->
             case blockResult.found of
-                Advanced.Found _ (Just found) ->
+                Description.Found _ (Just found) ->
                     Just (renderer found)
 
                 _ ->
@@ -287,7 +281,7 @@ startWith fn start rest =
     Advanced.startWith
         (\found ->
             case found of
-                Advanced.Found _ ( Just one, Just two ) ->
+                Description.Found _ ( Just one, Just two ) ->
                     Just (fn one two)
 
                 _ ->
@@ -328,7 +322,7 @@ map fn child =
 
 {-| -}
 type alias Nested item =
-    Advanced.Nested item
+    Description.Nested item
 
 
 {-| It can be useful to parse a tree structure. For example, here's a nested list.
@@ -373,7 +367,7 @@ nested config =
                                 case ( icon, allPresent content, allPresent children ) of
                                     ( Just ic, Just ct, Just childs ) ->
                                         Just <|
-                                            Advanced.Nested
+                                            Description.Nested
                                                 { content = ( ic, ct )
                                                 , children = childs
                                                 }
@@ -1045,11 +1039,12 @@ balanced =
 {- ERROR FORMATTING -}
 
 
-type alias ErrorMessage =
-    Advanced.ErrorMessage
+{-| -}
+type alias Error =
+    Advanced.Error
 
 
 {-| -}
-errorToString : ErrorMessage -> String
+errorToString : Error -> String
 errorToString =
     Advanced.errorToString
