@@ -511,14 +511,12 @@ type alias Range =
 
 {-| -}
 document :
-    ({ found : Found child
-     , expected : Expectation
-     }
-     -> result
-    )
+    { error : UnexpectedDetails -> result
+    , view : Range -> child -> result
+    }
     -> Block child
     -> Document result
-document renderer child =
+document doc child =
     let
         expectation =
             getBlockExpectation child
@@ -533,21 +531,14 @@ document renderer child =
                             Err err ->
                                 Err err
 
-                            Ok renderedChild ->
-                                Ok
-                                    (renderer
-                                        { found = renderedChild
-                                        , expected = expectation
-                                        }
-                                    )
+                            Ok (Found r renderedChild) ->
+                                Ok (doc.view r renderedChild)
+
+                            Ok (Unexpected unexpected) ->
+                                Ok (doc.error unexpected)
 
                     Unexpected unexpected ->
-                        Ok
-                            (renderer
-                                { expected = expectation
-                                , found = Unexpected unexpected
-                                }
-                            )
+                        Ok (doc.error unexpected)
         , parser =
             Parser.succeed
                 (\source ( range, val ) ->
@@ -633,60 +624,47 @@ stub name renderer =
 
 {-| -}
 block :
-    String
-    ->
-        ({ found : Found child
-         , expected : Expectation
-         }
-         -> result
-        )
+    { name : String
+    , view : Range -> child -> result
+    , error : UnexpectedDetails -> result
+    }
     -> Block child
     -> Block result
-block name renderer child =
-    Block name
-        { expect = ExpectBlock name (getBlockExpectation child)
+block blockDetails child =
+    Block blockDetails.name
+        { expect = ExpectBlock blockDetails.name (getBlockExpectation child)
         , converter =
             \desc ->
                 case desc of
                     DescribeBlock details ->
-                        if details.name == name then
+                        if details.name == blockDetails.name then
                             case details.found of
                                 Found range found ->
                                     case renderBlock child found of
                                         Err err ->
-                                            -- However it's not obvious when this would occur compared to
-                                            -- just being Unexpected.
-                                            -- I guess if a block, had a containing block and the names didn't match.
-                                            -- In Which case, what would the error state be?
+                                            -- AST mismatch
                                             Err err
 
-                                        Ok renderedChild ->
+                                        Ok foundRenderedChild ->
                                             Ok
-                                                (Found range
-                                                    (renderer
-                                                        { found =
-                                                            -- Found renderedChild
-                                                            renderedChild
-                                                        , expected = details.expected
-                                                        }
-                                                    )
+                                                (case foundRenderedChild of
+                                                    Found rng renderedChild ->
+                                                        Found range
+                                                            (blockDetails.view rng renderedChild)
+
+                                                    Unexpected unexpectedDetails ->
+                                                        Found unexpectedDetails.range
+                                                            (blockDetails.error unexpectedDetails)
                                                 )
 
                                 Unexpected unexpected ->
                                     Ok
                                         (Found unexpected.range
-                                            (renderer
-                                                { found =
-                                                    Unexpected unexpected
-                                                , expected = details.expected
-                                                }
-                                            )
+                                            (blockDetails.error unexpected)
                                         )
 
                         else
-                            -- The NoMatch error, allows the parent to decide what to do.
-                            -- oneOf would go to the next option
-                            -- document could default to an error state
+                            -- This is not the block that was expected.
                             Err NoMatch
 
                     _ ->
@@ -698,19 +676,19 @@ block name renderer child =
                         Ok value ->
                             DescribeBlock
                                 { found = Found range value
-                                , name = name
-                                , expected = ExpectBlock name (getBlockExpectation child)
+                                , name = blockDetails.name
+                                , expected = ExpectBlock blockDetails.name (getBlockExpectation child)
                                 }
 
                         Err ( pos, errorMessage ) ->
                             DescribeBlock
-                                { name = name
+                                { name = blockDetails.name
                                 , found =
                                     Unexpected
                                         { range = pos
                                         , problem = errorMessage
                                         }
-                                , expected = ExpectBlock name (getBlockExpectation child)
+                                , expected = ExpectBlock blockDetails.name (getBlockExpectation child)
                                 }
                 )
             <|
@@ -719,7 +697,7 @@ block name renderer child =
                         |> Parser.andThen
                             (\indentation ->
                                 Parser.succeed identity
-                                    |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
+                                    |. Parser.keyword (Parser.Token blockDetails.name (ExpectingBlockName blockDetails.name))
                                     |. Parser.chompWhile (\c -> c == ' ')
                                     |. skipBlankLineWith ()
                                     |= Parser.oneOf
@@ -743,7 +721,7 @@ block name renderer child =
                                                             |= getPosition
                                                             |. Parser.loop "" (raggedIndentedStringAbove indentation)
                                                         , Parser.map Ok <|
-                                                            Parser.withIndent (indentation + 4) (Parser.inContext (InBlock name) (getParser child))
+                                                            Parser.withIndent (indentation + 4) (Parser.inContext (InBlock blockDetails.name) (getParser child))
                                                         ]
                                                 )
 
@@ -770,7 +748,13 @@ blockNameParser name =
 
 
 {-| -}
-startWith : (Found ( start, rest ) -> result) -> Block start -> Block rest -> Block result
+startWith :
+    { view : Range -> start -> rest -> result
+    , error : UnexpectedDetails -> result
+    }
+    -> Block start
+    -> Block rest
+    -> Block result
 startWith fn startBlock endBlock =
     Value
         { expect = ExpectStartsWith (getBlockExpectation startBlock) (getBlockExpectation endBlock)
@@ -783,13 +767,13 @@ startWith fn startBlock endBlock =
                                 Ok <|
                                     Found
                                         range
-                                        (fn (Found range ( renderedStart, renderedEnd )))
+                                        (fn.view range renderedStart renderedEnd)
 
                             ( Ok (Unexpected unexpected), _ ) ->
-                                Ok (Found range (fn (Unexpected unexpected)))
+                                Ok (Found range (fn.error unexpected))
 
                             ( _, Ok (Unexpected unexpected) ) ->
-                                Ok (Found range (fn (Unexpected unexpected)))
+                                Ok (Found range (fn.error unexpected))
 
                             _ ->
                                 Err NoMatch
@@ -826,8 +810,18 @@ manyBlankLines lineCount =
 
 
 {-| -}
-oneOf : (UnexpectedDetails -> a) -> List (Block a) -> Block a
-oneOf renderUnexpected blocks =
+oneOf :
+    { view :
+        { id : Id Options
+        , options : List (Choice (Id Options) Expectation)
+        }
+        -> a
+        -> b
+    , error : UnexpectedDetails -> b
+    }
+    -> List (Block a)
+    -> Block b
+oneOf oneOfDetails blocks =
     let
         gatherParsers myBlock ( names, blks, vals ) =
             case myBlock of
@@ -891,11 +885,25 @@ oneOf renderUnexpected blocks =
                                     Nothing ->
                                         Err NoMatch
 
-                                    Just result ->
-                                        Ok result
+                                    Just foundResult ->
+                                        case foundResult of
+                                            Found r child ->
+                                                Ok
+                                                    (Found r
+                                                        (oneOfDetails.view
+                                                            { id = details.id
+                                                            , options =
+                                                                List.map (Choice details.id) expectations
+                                                            }
+                                                            child
+                                                        )
+                                                    )
+
+                                            Unexpected unexpected ->
+                                                Ok (Found unexpected.range (oneOfDetails.error unexpected))
 
                             Unexpected unexpected ->
-                                Ok (Found unexpected.range (renderUnexpected unexpected))
+                                Ok (Found unexpected.range (oneOfDetails.error unexpected))
 
                     _ ->
                         Err NoMatch
@@ -932,8 +940,25 @@ oneOf renderUnexpected blocks =
 
 {-| Many blocks that are all at the same indentation level.
 -}
-manyOf : (UnexpectedDetails -> a) -> List (Block a) -> Block (List a)
-manyOf renderUnexpected blocks =
+manyOf :
+    { view :
+        { parent : Id ManyOptions
+        , index : Int
+        , options : List (Choice (Id ManyOptions) Expectation)
+        }
+        -> a
+        -> b
+    , error :
+        { parent : Id ManyOptions
+        , index : Int
+        , options : List (Choice (Id ManyOptions) Expectation)
+        }
+        -> UnexpectedDetails
+        -> b
+    }
+    -> List (Block a)
+    -> Block (List b)
+manyOf manyOfDetails blocks =
     let
         gatherParsers myBlock ( names, blks, vals ) =
             case myBlock of
@@ -998,31 +1023,62 @@ manyOf renderUnexpected blocks =
                             _ ->
                                 found
 
-                    getRendered : Found Description -> Result AstError (List a) -> Result AstError (List a)
-                    getRendered found existingResult =
+                    -- getRendered : Found Description -> Result AstError (List a) -> Result AstError (List a)
+                    getRendered id choices found ( existingResult, index ) =
                         case existingResult of
                             Err err ->
-                                Err err
+                                ( Err err, index + 1 )
 
                             Ok existing ->
                                 case found of
                                     Unexpected unexpected ->
-                                        Ok (renderUnexpected unexpected :: existing)
+                                        ( Ok
+                                            (manyOfDetails.error
+                                                { parent = id
+                                                , options = choices
+                                                , index = index
+                                                }
+                                                unexpected
+                                                :: existing
+                                            )
+                                        , index + 1
+                                        )
 
                                     Found range child ->
                                         case List.foldl (applyDesc child) Nothing blocks of
                                             Nothing ->
-                                                Err NoMatch
+                                                ( Err NoMatch, index + 1 )
 
                                             Just (Found rng result) ->
-                                                Ok (result :: existing)
+                                                ( Ok
+                                                    (manyOfDetails.view
+                                                        { parent = id
+                                                        , options = choices
+                                                        , index = index
+                                                        }
+                                                        result
+                                                        :: existing
+                                                    )
+                                                , index + 1
+                                                )
 
                                             Just (Unexpected unexpected) ->
-                                                Ok (renderUnexpected unexpected :: existing)
+                                                ( Ok
+                                                    (manyOfDetails.error
+                                                        { parent = id
+                                                        , options = choices
+                                                        , index = index
+                                                        }
+                                                        unexpected
+                                                        :: existing
+                                                    )
+                                                , index + 1
+                                                )
                 in
                 case desc of
                     ManyOf many ->
-                        List.foldl getRendered (Ok []) many.children
+                        List.foldl (getRendered many.id many.choices) ( Ok [], 0 ) many.children
+                            |> Tuple.first
                             |> Result.map (\items -> Found (getRange many.id) (List.reverse items))
 
                     _ ->
@@ -1197,7 +1253,7 @@ foldNestedHelper index fn accum (Nested node) =
 {-| -}
 record2 :
     { name : String
-    , show : Range -> one -> two -> data
+    , view : Range -> one -> two -> data
     , error : UnexpectedDetails -> data
     }
     -> Field one
@@ -1217,7 +1273,7 @@ record2 record field1 field2 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.show pos))
+                                    Ok (Ok (record.view pos))
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> renderRecordResult record.error pos
@@ -1458,7 +1514,7 @@ inlineText (Inline inlineName details) =
 {-| -}
 multiline :
     { default : String
-    , show : Id String -> String -> a
+    , view : Id String -> String -> a
     }
     -> Block a
 multiline details =
@@ -1470,7 +1526,7 @@ multiline details =
                     DescribeMultiline id str ->
                         Ok
                             (Found (getRange id)
-                                (details.show id str)
+                                (details.view id str)
                             )
 
                     _ ->
@@ -1494,7 +1550,7 @@ multiline details =
 {-| -}
 string :
     { default : String
-    , show : Id String -> String -> a
+    , view : Id String -> String -> a
     }
     -> Block a
 string details =
@@ -1506,7 +1562,7 @@ string details =
                     DescribeString id str ->
                         Ok
                             (Found (getRange id)
-                                (details.show id str)
+                                (details.view id str)
                             )
 
                     _ ->
@@ -1536,7 +1592,7 @@ Results in a `Posix` integer, which works well with [elm/time](https://package.e
 -}
 date :
     { default : Time.Posix
-    , show : Id Time.Posix -> Time.Posix -> a
+    , view : Id Time.Posix -> Time.Posix -> a
     }
     -> Block a
 date details =
@@ -1546,7 +1602,7 @@ date details =
             \desc ->
                 case desc of
                     DescribeDate found ->
-                        Ok (mapFound (\( str_, fl ) -> details.show found.id fl) found.found)
+                        Ok (mapFound (\( str_, fl ) -> details.view found.id fl) found.found)
 
                     _ ->
                         Err NoMatch
@@ -1630,17 +1686,17 @@ exactly key value =
 -}
 bool :
     { default : Bool
-    , show : Id Bool -> Bool -> a
+    , view : Id Bool -> Bool -> a
     }
     -> Block a
-bool { default, show } =
+bool { default, view } =
     Value
         { expect = ExpectBoolean default
         , converter =
             \desc ->
                 case desc of
                     DescribeBoolean details ->
-                        Ok (mapFound (show details.id) details.found)
+                        Ok (mapFound (view details.id) details.found)
 
                     _ ->
                         Err NoMatch
@@ -1682,16 +1738,16 @@ Takes a default value that is used when autofilling.
 -}
 int :
     { default : Int
-    , show : Id Int -> Int -> a
+    , view : Id Int -> Int -> a
     }
     -> Block a
-int { default, show } =
+int { default, view } =
     Value
         { converter =
             \desc ->
                 case desc of
                     DescribeInteger details ->
-                        Ok (mapFound (show details.id) details.found)
+                        Ok (mapFound (view details.id) details.found)
 
                     _ ->
                         Err NoMatch
@@ -1712,16 +1768,16 @@ int { default, show } =
 -}
 float :
     { default : Float
-    , show : Id Float -> Float -> a
+    , view : Id Float -> Float -> a
     }
     -> Block a
-float { default, show } =
+float { default, view } =
     Value
         { converter =
             \desc ->
                 case desc of
                     DescribeFloat details ->
-                        Ok (mapFound (\( str_, fl ) -> show details.id fl) details.found)
+                        Ok (mapFound (\( str_, fl ) -> view details.id fl) details.found)
 
                     _ ->
                         Err NoMatch
@@ -1741,7 +1797,7 @@ intBetween :
     { min : Int
     , max : Int
     , default : Int
-    , show : Id Int -> Int -> a
+    , view : Id Int -> Int -> a
     }
     -> Block a
 intBetween bounds =
@@ -1763,7 +1819,7 @@ intBetween bounds =
             \desc ->
                 case desc of
                     DescribeIntBetween details ->
-                        Ok (mapFound (bounds.show details.id) details.found)
+                        Ok (mapFound (bounds.view details.id) details.found)
 
                     _ ->
                         Err NoMatch
@@ -1804,7 +1860,7 @@ floatBetween :
     { min : Float
     , max : Float
     , default : Float
-    , show : Id Float -> Float -> a
+    , view : Id Float -> Float -> a
     }
     -> Block a
 floatBetween bounds =
@@ -1826,7 +1882,7 @@ floatBetween bounds =
             \desc ->
                 case desc of
                     DescribeFloatBetween details ->
-                        Ok (mapFound (\( str_, fl ) -> bounds.show details.id fl) details.found)
+                        Ok (mapFound (\( str_, fl ) -> bounds.view details.id fl) details.found)
 
                     _ ->
                         Err NoMatch
