@@ -26,6 +26,7 @@ module Mark.Description exposing
 
 -}
 
+import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Error as Error
 import Mark.Internal.Id exposing (..)
@@ -125,7 +126,10 @@ type Description
         }
       -- Primitives
     | DescribeStub String (Found String)
-    | DescribeBoolean (Found Bool)
+    | DescribeBoolean
+        { id : Id Bool
+        , found : Found Bool
+        }
     | DescribeInteger
         { id : Id Int
         , found : Found Int
@@ -150,7 +154,10 @@ type Description
     | DescribeString (Id String) String
     | DescribeMultiline (Id String) String
     | DescribeStringExactly Range String
-    | DescribeDate (Found ( String, Time.Posix ))
+    | DescribeDate
+        { id : Id Time.Posix
+        , found : Found ( String, Time.Posix )
+        }
 
 
 {-| -}
@@ -209,7 +216,7 @@ type Expectation
     | ExpectString String
     | ExpectMultiline String
     | ExpectStringExactly String
-    | ExpectDate
+    | ExpectDate Time.Posix
     | ExpectTree Expectation Expectation
 
 
@@ -274,6 +281,8 @@ move =
 type Edit
     = UpdateFloat (Id Float) Float
     | UpdateString (Id String) String
+    | UpdateDate (Id Time.Posix) Time.Posix
+    | UpdateBool (Id Bool) Bool
     | UpdateInt (Id Int) Int
     | ReplaceOneOf (Choice (Id Options) Expectation)
       -- For singular movement, Choice has to be an existing Description
@@ -465,7 +474,7 @@ match description exp =
 
         DescribeDate foundPosix ->
             case exp of
-                ExpectDate ->
+                ExpectDate _ ->
                     True
 
                 _ ->
@@ -523,7 +532,7 @@ matchExpected subExp expected =
         ( ExpectStringExactly oneName, ExpectStringExactly twoName ) ->
             oneName == twoName
 
-        ( ExpectDate, ExpectDate ) ->
+        ( ExpectDate _, ExpectDate _ ) ->
             True
 
         ( ExpectTree oneIcon oneContent, ExpectTree twoIcon twoContent ) ->
@@ -553,6 +562,30 @@ matchFields valid ( targetFieldName, targetFieldExpectation ) =
 update : Edit -> Parsed -> Parsed
 update edit (Parsed original) =
     case edit of
+        UpdateDate id newDate ->
+            Parsed
+                { original
+                    | found =
+                        makeFoundEdit
+                            { targetRange = getRange id
+                            , makeEdit = \i pos desc -> updateFoundDate id newDate desc
+                            , indentation = 0
+                            }
+                            original.found
+                }
+
+        UpdateBool id newBool ->
+            Parsed
+                { original
+                    | found =
+                        makeFoundEdit
+                            { targetRange = getRange id
+                            , makeEdit = \i pos desc -> updateFoundBool id newBool desc
+                            , indentation = 0
+                            }
+                            original.found
+                }
+
         UpdateFloat id newFloat ->
             Parsed
                 { original
@@ -760,8 +793,8 @@ makeEdit cursor desc =
         DescribeStub name found ->
             replacePrimitive cursor (foundStart found) desc
 
-        DescribeBoolean found ->
-            replacePrimitive cursor (foundStart found) desc
+        DescribeBoolean details ->
+            replacePrimitive cursor (foundStart details.found) desc
 
         DescribeInteger found ->
             replacePrimitive cursor (foundStart found.found) desc
@@ -787,8 +820,8 @@ makeEdit cursor desc =
         DescribeStringExactly rng str ->
             replacePrimitive cursor rng.start desc
 
-        DescribeDate found ->
-            replacePrimitive cursor (foundStart found) desc
+        DescribeDate details ->
+            replacePrimitive cursor (foundStart details.found) desc
 
 
 foundStart found =
@@ -1059,15 +1092,20 @@ create currentIndent base expectation =
 
                 end =
                     moveColumn (String.length boolString) base
-            in
-            ( moveNewline end
-            , DescribeBoolean
-                (Found
+
+                range =
                     { start = base
                     , end = end
                     }
-                    b
-                )
+            in
+            ( moveNewline end
+            , DescribeBoolean
+                { id = Id range
+                , found =
+                    Found
+                        range
+                        b
+                }
             )
 
         ExpectInteger i ->
@@ -1207,15 +1245,20 @@ create currentIndent base expectation =
             let
                 end =
                     moveColumn (String.length "True") base
-            in
-            ( moveNewline end
-            , DescribeBoolean
-                (Found
+
+                range =
                     { start = base
                     , end = end
                     }
-                    True
-                )
+            in
+            ( moveNewline end
+            , DescribeBoolean
+                { id = Id range
+                , found =
+                    Found
+                        range
+                        True
+                }
             )
 
 
@@ -1353,6 +1396,70 @@ replaceOption id new desc =
 
                     Unexpected unexpected ->
                         Nothing
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
+
+
+updateFoundDate id newDate desc =
+    case desc of
+        DescribeDate details ->
+            if details.id == id then
+                case details.found of
+                    Found dateRng fl ->
+                        Just
+                            (DescribeDate
+                                { id = details.id
+                                , found =
+                                    Found dateRng
+                                        ( Iso8601.fromTime newDate, newDate )
+                                }
+                            )
+
+                    Unexpected unexpected ->
+                        Just
+                            (DescribeDate
+                                { id = details.id
+                                , found =
+                                    Found unexpected.range
+                                        ( Iso8601.fromTime newDate, newDate )
+                                }
+                            )
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
+
+
+updateFoundBool id newBool desc =
+    case desc of
+        DescribeBoolean details ->
+            if details.id == id then
+                case details.found of
+                    Found boolRng fl ->
+                        Just
+                            (DescribeBoolean
+                                { id = details.id
+                                , found =
+                                    Found boolRng
+                                        newBool
+                                }
+                            )
+
+                    Unexpected unexpected ->
+                        Just
+                            (DescribeBoolean
+                                { id = details.id
+                                , found =
+                                    Found unexpected.range
+                                        newBool
+                                }
+                            )
 
             else
                 Nothing
@@ -1725,8 +1832,8 @@ getContainingDescriptions description offset =
             else
                 []
 
-        DescribeBoolean found ->
-            if withinFoundLeaf offset found then
+        DescribeBoolean details ->
+            if withinFoundLeaf offset details.found then
                 [ description ]
 
             else
@@ -1788,8 +1895,8 @@ getContainingDescriptions description offset =
             else
                 []
 
-        DescribeDate found ->
-            if withinFoundLeaf offset found then
+        DescribeDate details ->
+            if withinFoundLeaf offset details.found then
                 [ description ]
 
             else
@@ -1958,8 +2065,8 @@ writeDescription description cursor =
                 |> writeDescription start.found
                 |> writeDescription end.found
 
-        DescribeBoolean foundBoolean ->
-            writeFound (writeWith boolToString) foundBoolean cursor
+        DescribeBoolean details ->
+            writeFound (writeWith boolToString) details.found cursor
 
         DescribeInteger details ->
             writeFound (writeWith String.fromInt) details.found cursor
@@ -2020,8 +2127,8 @@ writeDescription description cursor =
                 |> advanceTo range
                 |> write str
 
-        DescribeDate foundPosix ->
-            writeFound (writeWith Tuple.first) foundPosix cursor
+        DescribeDate details ->
+            writeFound (writeWith Tuple.first) details.found cursor
 
         DescribeTree tree ->
             case tree.found of

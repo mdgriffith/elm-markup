@@ -1,18 +1,20 @@
 module Mark.Advanced exposing
     ( Document
-    , parse, compile, convert, Outcome(..), Parsed
-    , Error, errorToString, errorToHtml, Theme(..)
+    , Outcome(..)
+    , parse, Parsed
+    , compile, convert
     , Block
     , document
     , block, stub
-    , string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
     , oneOf, manyOf, startWith, nested
     , record2, field, Field
+    , string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
     , text, replacement, balanced, Replacement
     , Inline, inline, inlineString, inlineText, mapInline
     , map
     , focus, parent
     , Range, Position, foldNested, foldNestedList, replaceNested
+    , Error, errorToString, errorToHtml, Theme(..)
     )
 
 {-| An advanced `Document` gives two new advantages over `Mark.Document`
@@ -29,7 +31,7 @@ The `Description` can be
 
 1.  Edited via the edits messages in `Mark.Description.Edit`.
 
-Parsing is an intensive process because in the best case the Parser has to go through each character in a string to see if it's valid.
+Parsing is an intensive process. In the best case the Parser has to go through each character in a string to see if it's valid.
 
 This can be an issue if you're trying to make an editor, because it could mean that every keystroke causes the whole document to be parsed!
 
@@ -37,9 +39,14 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs Document
 
-@docs parse, compile, convert, Outcome, Parsed
+@docs Outcome
 
-@docs Error, errorToString, errorToHtml, Theme
+@docs parse, Parsed
+
+@docs compile, convert
+
+
+## Building Documents
 
 @docs Block
 
@@ -47,11 +54,14 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs block, stub
 
-@docs string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
-
 @docs oneOf, manyOf, startWith, nested
 
 @docs record2, field, Field
+
+@docs string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
+
+
+## Handling Text and Inline
 
 @docs text, replacement, balanced, Replacement
 
@@ -62,6 +72,11 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 @docs focus, parent
 
 @docs Range, Position, foldNested, foldNestedList, replaceNested
+
+
+## Displaying Errors
+
+@docs Error, errorToString, errorToHtml, Theme
 
 -}
 
@@ -409,8 +424,8 @@ getUnexpecteds description =
         DescribeStub name found ->
             unexpectedFromFound found
 
-        DescribeBoolean found ->
-            unexpectedFromFound found
+        DescribeBoolean details ->
+            unexpectedFromFound details.found
 
         DescribeInteger details ->
             unexpectedFromFound details.found
@@ -436,8 +451,8 @@ getUnexpecteds description =
         DescribeStringExactly rng str ->
             []
 
-        DescribeDate found ->
-            unexpectedFromFound found
+        DescribeDate details ->
+            unexpectedFromFound details.found
 
 
 getNestedUnexpecteds (Nested nest) =
@@ -1181,33 +1196,34 @@ foldNestedHelper index fn accum (Nested node) =
 
 {-| -}
 record2 :
-    String
-    -> (Range -> one -> two -> data)
-    -> (UnexpectedDetails -> data)
+    { name : String
+    , show : Range -> one -> two -> data
+    , error : UnexpectedDetails -> data
+    }
     -> Field one
     -> Field two
     -> Block data
-record2 recordName renderer renderUnexpected field1 field2 =
+record2 record field1 field2 =
     let
         expectations =
-            ExpectRecord recordName [ fieldExpectation field1, fieldExpectation field2 ]
+            ExpectRecord record.name [ fieldExpectation field1, fieldExpectation field2 ]
     in
-    Block recordName
+    Block record.name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == recordName then
+                        if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (renderer pos))
+                                    Ok (Ok (record.show pos))
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> renderRecordResult renderUnexpected pos
+                                        |> renderRecordResult record.error pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (renderUnexpected unexpected))
+                                    Ok (Found unexpected.range (record.error unexpected))
 
                         else
                             Err NoMatch
@@ -1215,7 +1231,7 @@ record2 recordName renderer renderUnexpected field1 field2 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord recordName expectations [ fieldParser field1, fieldParser field2 ]
+            parseRecord record.name expectations [ fieldParser field1, fieldParser field2 ]
         }
 
 
@@ -1440,15 +1456,22 @@ inlineText (Inline inlineName details) =
 
 
 {-| -}
-multiline : String -> Block String
-multiline default =
+multiline :
+    { default : String
+    , show : Id String -> String -> a
+    }
+    -> Block a
+multiline details =
     Value
-        { expect = ExpectMultiline default
+        { expect = ExpectMultiline details.default
         , converter =
             \desc ->
                 case desc of
-                    DescribeMultiline range str ->
-                        Ok (Found (getRange range) str)
+                    DescribeMultiline id str ->
+                        Ok
+                            (Found (getRange id)
+                                (details.show id str)
+                            )
 
                     _ ->
                         Err NoMatch
@@ -1469,15 +1492,22 @@ multiline default =
 
 
 {-| -}
-string : String -> Block String
-string default =
+string :
+    { default : String
+    , show : Id String -> String -> a
+    }
+    -> Block a
+string details =
     Value
-        { expect = ExpectString default
+        { expect = ExpectString details.default
         , converter =
             \desc ->
                 case desc of
                     DescribeString id str ->
-                        Ok (Found (getRange id) str)
+                        Ok
+                            (Found (getRange id)
+                                (details.show id str)
+                            )
 
                     _ ->
                         Err NoMatch
@@ -1504,15 +1534,19 @@ Though you don't need to specify all segments, so `YYYY-MM-DD` works as well.
 Results in a `Posix` integer, which works well with [elm/time](https://package.elm-lang.org/packages/elm/time/latest/).
 
 -}
-date : Block Time.Posix
-date =
+date :
+    { default : Time.Posix
+    , show : Id Time.Posix -> Time.Posix -> a
+    }
+    -> Block a
+date details =
     Value
-        { expect = ExpectDate
+        { expect = ExpectDate details.default
         , converter =
             \desc ->
                 case desc of
                     DescribeDate found ->
-                        Ok (mapFound Tuple.second found)
+                        Ok (mapFound (\( str_, fl ) -> details.show found.id fl) found.found)
 
                     _ ->
                         Err NoMatch
@@ -1522,14 +1556,19 @@ date =
                     case parsedPosix of
                         Err str ->
                             DescribeDate
-                                (Unexpected
-                                    { range = pos
-                                    , problem = Error.BadDate str
-                                    }
-                                )
+                                { id = Id pos
+                                , found =
+                                    Unexpected
+                                        { range = pos
+                                        , problem = Error.BadDate str
+                                        }
+                                }
 
                         Ok ( str, posix ) ->
-                            DescribeDate (Found pos ( str, posix ))
+                            DescribeDate
+                                { id = Id pos
+                                , found = Found pos ( str, posix )
+                                }
                 )
                 (withRange
                     (Parser.getChompedString
@@ -1589,31 +1628,39 @@ exactly key value =
 
 {-| Parse either `True` or `False`.
 -}
-bool : Bool -> Block Bool
-bool default =
+bool :
+    { default : Bool
+    , show : Id Bool -> Bool -> a
+    }
+    -> Block a
+bool { default, show } =
     Value
         { expect = ExpectBoolean default
         , converter =
             \desc ->
                 case desc of
-                    DescribeBoolean found ->
-                        Ok found
+                    DescribeBoolean details ->
+                        Ok (mapFound (show details.id) details.found)
 
                     _ ->
                         Err NoMatch
         , parser =
             Parser.map
                 (\( range, boolResult ) ->
-                    DescribeBoolean <|
-                        case boolResult of
-                            Err err ->
-                                Unexpected
-                                    { range = range
-                                    , problem = Error.BadBool err
-                                    }
+                    DescribeBoolean
+                        { id = Id range
+                        , found =
+                            case boolResult of
+                                Err err ->
+                                    Unexpected
+                                        { range = range
+                                        , problem = Error.BadBool err
+                                        }
 
-                            Ok b ->
-                                Found range b
+                                Ok b ->
+                                    Found range
+                                        b
+                        }
                 )
                 (withRange
                     (Parser.oneOf
@@ -1633,14 +1680,18 @@ bool default =
 Takes a default value that is used when autofilling.
 
 -}
-int : Int -> Block Int
-int default =
+int :
+    { default : Int
+    , show : Id Int -> Int -> a
+    }
+    -> Block a
+int { default, show } =
     Value
         { converter =
             \desc ->
                 case desc of
                     DescribeInteger details ->
-                        Ok details.found
+                        Ok (mapFound (show details.id) details.found)
 
                     _ ->
                         Err NoMatch
@@ -1659,14 +1710,18 @@ int default =
 
 {-| Takes a default value that is used when autofilling.
 -}
-float : Float -> Block Float
-float default =
+float :
+    { default : Float
+    , show : Id Float -> Float -> a
+    }
+    -> Block a
+float { default, show } =
     Value
         { converter =
             \desc ->
                 case desc of
                     DescribeFloat details ->
-                        Ok (mapFound Tuple.second details.found)
+                        Ok (mapFound (\( str_, fl ) -> show details.id fl) details.found)
 
                     _ ->
                         Err NoMatch
@@ -1686,8 +1741,9 @@ intBetween :
     { min : Int
     , max : Int
     , default : Int
+    , show : Id Int -> Int -> a
     }
-    -> Block Int
+    -> Block a
 intBetween bounds =
     let
         top =
@@ -1707,7 +1763,7 @@ intBetween bounds =
             \desc ->
                 case desc of
                     DescribeIntBetween details ->
-                        Ok details.found
+                        Ok (mapFound (bounds.show details.id) details.found)
 
                     _ ->
                         Err NoMatch
@@ -1748,8 +1804,9 @@ floatBetween :
     { min : Float
     , max : Float
     , default : Float
+    , show : Id Float -> Float -> a
     }
-    -> Block Float
+    -> Block a
 floatBetween bounds =
     let
         top =
@@ -1759,12 +1816,17 @@ floatBetween bounds =
             min bounds.min bounds.max
     in
     Value
-        { expect = ExpectFloatBetween bounds
+        { expect =
+            ExpectFloatBetween
+                { min = bounds.min
+                , max = bounds.max
+                , default = bounds.default
+                }
         , converter =
             \desc ->
                 case desc of
                     DescribeFloatBetween details ->
-                        Ok (mapFound Tuple.second details.found)
+                        Ok (mapFound (\( str_, fl ) -> bounds.show details.id fl) details.found)
 
                     _ ->
                         Err NoMatch
