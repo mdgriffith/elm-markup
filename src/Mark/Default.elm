@@ -38,7 +38,7 @@ import Element.Border as Border
 import Element.Font as Font
 import Element.Region
 import Html.Attributes
-import Mark
+import Mark.Advanced as Advanced exposing (Document)
 import Mark.Description
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
@@ -47,28 +47,35 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 It includes all the blocks and inline blocks referenced in this module.
 
-**Note** this document requires a `title` as the first block of each document by using `Mark.startWith`.
+**Note** this document requires a `title` as the first block of each document by using `Advanced.startWith`.
 
 This might not be what you want, in which case you should define your own document using `Mark`.
 
 -}
-document : Mark.Document (model -> Element msg)
+document : Document (model -> Element msg)
 document =
     let
         defaultText =
             textWith defaultTextStyle
     in
-    Mark.document
-        (\children model ->
-            Element.textColumn []
-                (List.map (\view -> view model) children)
-        )
-        (Mark.startWith
-            (\myTitle myContent ->
-                myTitle :: myContent
-            )
+    Advanced.document
+        { view =
+            \_ children model ->
+                Element.textColumn []
+                    (List.map (\view -> view model) children)
+        , error = viewError
+        }
+        (Advanced.startWith
+            { view =
+                \_ myTitle myContent ->
+                    myTitle :: myContent
+            , error = \unexpected -> [ viewError unexpected ]
+            }
             (title [ Font.size 48 ] defaultText)
-            (Mark.manyOf
+            (Advanced.manyOf
+                { view = \cursor item -> item
+                , error = \cursor -> viewError
+                }
                 [ header [ Font.size 36 ] defaultText
                 , list
                     { style = listStyles
@@ -93,7 +100,7 @@ document =
                     ]
 
                 -- Toplevel Text
-                , Mark.map (\viewEls model -> Element.paragraph [] (viewEls model)) defaultText
+                , Advanced.map (\viewEls model -> Element.paragraph [] (viewEls model)) defaultText
                 ]
             )
         )
@@ -106,17 +113,32 @@ document =
         description = A cute kitty cat.
 
 -}
-image : List (Element.Attribute msg) -> Mark.Block (model -> Element msg)
+image : List (Element.Attribute msg) -> Advanced.Block (model -> Element msg)
 image attrs =
-    Mark.record2 "Image"
-        (\src description model ->
-            Element.image attrs
-                { src = src
-                , description = description
+    Advanced.record2
+        { name = "Image"
+        , view =
+            \_ src description model ->
+                Element.image attrs
+                    { src = src
+                    , description = description
+                    }
+        , error = viewError
+        }
+        (Advanced.field "src"
+            (Advanced.string
+                { default = "https://placekitten.com/200/300"
+                , view = \id str -> str
                 }
+            )
         )
-        (Mark.field "src" Mark.string)
-        (Mark.field "description" Mark.string)
+        (Advanced.field "description"
+            (Advanced.string
+                { default = "A plceholder cat."
+                , view = \id str -> str
+                }
+            )
+        )
 
 
 {-| The title of your document. Renders as an `h1`.
@@ -125,15 +147,24 @@ image attrs =
         The title of my document.
 
 -}
-title : List (Element.Attribute msg) -> Mark.Block (model -> List (Element msg)) -> Mark.Block (model -> Element msg)
+title : List (Element.Attribute msg) -> Advanced.Block (model -> List (Element msg)) -> Advanced.Block (model -> Element msg)
 title attrs titleText =
-    Mark.block "Title"
-        (\elements model ->
-            Element.paragraph
-                (Element.Region.heading 1 :: attrs)
-                (elements model)
-        )
+    Advanced.block
+        { name = "Title"
+        , view =
+            \_ elements model ->
+                Element.paragraph
+                    (Element.Region.heading 1 :: attrs)
+                    (elements model)
+        , error =
+            viewError
+        }
         titleText
+
+
+viewError unexpected model =
+    -- TODO: write a nice error
+    Element.text "Oh no :/"
 
 
 {-| A header.
@@ -144,14 +175,18 @@ title attrs titleText =
 Renders as an `h2`.
 
 -}
-header : List (Element.Attribute msg) -> Mark.Block (model -> List (Element msg)) -> Mark.Block (model -> Element msg)
+header : List (Element.Attribute msg) -> Advanced.Block (model -> List (Element msg)) -> Advanced.Block (model -> Element msg)
 header attrs textParser =
-    Mark.block "Header"
-        (\elements model ->
-            Element.paragraph
-                (Element.Region.heading 2 :: attrs)
-                (elements model)
-        )
+    Advanced.block
+        { name = "Header"
+        , view =
+            \_ elements model ->
+                Element.paragraph
+                    (Element.Region.heading 2 :: attrs)
+                    (elements model)
+        , error =
+            viewError
+        }
         textParser
 
 
@@ -165,18 +200,25 @@ header attrs textParser =
         And this one.
 
 -}
-monospace : List (Element.Attribute msg) -> Mark.Block (model -> Element msg)
+monospace : List (Element.Attribute msg) -> Advanced.Block (model -> Element msg)
 monospace attrs =
-    Mark.block "Monospace"
-        (\string model ->
-            Element.el
-                (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
-                    :: Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
-                    :: attrs
-                )
-                (Element.text (String.trimRight string))
+    Advanced.block
+        { name = "Monospace"
+        , view =
+            \_ string model ->
+                Element.el
+                    (Element.htmlAttribute (Html.Attributes.style "line-height" "1.4em")
+                        :: Element.htmlAttribute (Html.Attributes.style "white-space" "pre")
+                        :: attrs
+                    )
+                    (Element.text (String.trimRight string))
+        , error = viewError
+        }
+        (Advanced.multiline
+            { default = "monospaced text"
+            , view = \id str -> str
+            }
         )
-        Mark.multiline
 
 
 {-| Some default styling for `code` and `link` inline blocks.
@@ -201,8 +243,8 @@ These transformations also don't apply inside inline `code` or inside the `monos
 defaultTextStyle :
     { code : List (Element.Attribute msg1)
     , link : List (Element.Attribute msg)
-    , inlines : List (Mark.Inline (a -> Element msg))
-    , replacements : List Mark.Replacement
+    , inlines : List (Advanced.Inline (a -> Element msg))
+    , replacements : List Advanced.Replacement
     }
 defaultTextStyle =
     { code =
@@ -237,13 +279,13 @@ defaultTextStyle =
         ]
     , inlines = []
     , replacements =
-        [ Mark.replacement "..." "…"
-        , Mark.replacement "<>" "\u{00A0}"
-        , Mark.replacement "---" "—"
-        , Mark.replacement "--" "–"
-        , Mark.replacement "//" "/"
-        , Mark.replacement "'" "’"
-        , Mark.balanced
+        [ Advanced.replacement "..." "…"
+        , Advanced.replacement "<>" "\u{00A0}"
+        , Advanced.replacement "---" "—"
+        , Advanced.replacement "--" "–"
+        , Advanced.replacement "//" "/"
+        , Advanced.replacement "'" "’"
+        , Advanced.balanced
             { start = ( "\"", "“" )
             , end = ( "\"", "”" )
             }
@@ -253,25 +295,26 @@ defaultTextStyle =
 
 {-| Render text into `Element msg`.
 
-Includes `Mark.Default.link` and `Mark.Default.code` inline blocks, which can be styled as you'd like.
+Includes `Advanced.Default.link` and `Advanced.Default.code` inline blocks, which can be styled as you'd like.
 
-**Note** this is not a complicated function. If it doesn't meet your needs, don't be afraid to write your own using `Mark.text`!
+**Note** this is not a complicated function. If it doesn't meet your needs, don't be afraid to write your own using `Advanced.text`!
 
 -}
 textWith :
     { code : List (Element.Attribute msg)
     , link : List (Element.Attribute msg)
-    , inlines : List (Mark.Inline (model -> Element msg))
-    , replacements : List Mark.Replacement
+    , inlines : List (Advanced.Inline (model -> Element msg))
+    , replacements : List Advanced.Replacement
     }
-    -> Mark.Block (model -> List (Element msg))
+    -> Advanced.Block (model -> List (Element msg))
 textWith config =
-    Mark.map
+    Advanced.map
         (\els model ->
             List.map (\view -> view model) els
         )
-        (Mark.text
+        (Advanced.text
             { view = textFragment
+            , error = viewError
             , inlines =
                 [ link config.link
                 , code config.code
@@ -289,14 +332,14 @@ Though, style it however you'd like.
 `{Code| Here is my styled inline code block }`
 
 -}
-code : List (Element.Attribute msg) -> Mark.Inline (model -> Element msg)
+code : List (Element.Attribute msg) -> Advanced.Inline (model -> Element msg)
 code style =
-    Mark.inline "Code"
+    Advanced.inline "Code"
         (\txt model ->
             Element.row style
-                (List.map (\item -> textFragment item model) txt)
+                (List.map (\item -> inlineTextFragment item model) txt)
         )
-        |> Mark.inlineText
+        |> Advanced.inlineText
 
 
 {-| A custom inline block for links.
@@ -304,25 +347,34 @@ code style =
 `{Link|My link text|url=http://google.com}`
 
 -}
-link : List (Element.Attribute msg) -> Mark.Inline (model -> Element msg)
+link : List (Element.Attribute msg) -> Advanced.Inline (model -> Element msg)
 link style =
-    Mark.inline "Link"
+    Advanced.inline "Link"
         (\txt url model ->
             Element.link style
                 { url = url
                 , label =
                     Element.row [ Element.htmlAttribute (Html.Attributes.style "display" "inline-flex") ]
-                        (List.map (\item -> textFragment item model) txt)
+                        (List.map (\item -> inlineTextFragment item model) txt)
                 }
         )
-        |> Mark.inlineText
-        |> Mark.inlineString "url"
+        |> Advanced.inlineText
+        |> Advanced.inlineString "url"
 
 
 {-| Render a text fragment.
 -}
-textFragment : Mark.Description.Text -> model -> Element msg
-textFragment node model_ =
+inlineTextFragment node model_ =
+    case node of
+        Mark.Description.Text styles txt ->
+            Element.el (List.concatMap toStyles styles) (Element.text txt)
+
+
+
+-- textFragment : Mark.Description.Range -> Mark.Description.Text -> model -> Element msg
+
+
+textFragment _ node model_ =
     case node of
         Mark.Description.Text styles txt ->
             Element.el (List.concatMap toStyles styles) (Element.text txt)
@@ -372,25 +424,35 @@ list :
     { icon : List Int -> ListIcon -> Element msg
     , style : List Int -> List (Element.Attribute msg)
     }
-    -> Mark.Block (model -> List (Element msg))
-    -> Mark.Block (model -> Element msg)
+    -> Advanced.Block (model -> List (Element msg))
+    -> Advanced.Block (model -> Element msg)
 list config textParser =
-    Mark.block "List"
-        (\items model ->
-            Element.column
-                (config.style [])
-                (List.reverse (Tuple.second (List.foldl (renderListItem config model []) ( 0, [] ) items)))
-        )
-        (Mark.nested
+    Advanced.block
+        { name = "List"
+        , view =
+            \_ items model ->
+                Element.column
+                    (config.style [])
+                    (List.reverse (Tuple.second (List.foldl (renderListItem config model []) ( 0, [] ) items)))
+        , error = viewError
+        }
+        (Advanced.nested
             { item = textParser
             , start =
-                Mark.oneOf
-                    [ Mark.exactly "-> " Arrow
-                    , Mark.exactly "--> " Arrow
-                    , Mark.exactly "- " Bullet
-                    , Mark.exactly "-- " Bullet
+                Advanced.oneOf
+                    { view =
+                        \cursor icon ->
+                            icon
+                    , error =
+                        \cursor -> Arrow
+                    }
+                    [ Advanced.exactly "-> " Arrow
+                    , Advanced.exactly "--> " Arrow
+                    , Advanced.exactly "- " Bullet
+                    , Advanced.exactly "-- " Bullet
 
-                    -- , Mark.advanced
+                    --
+                    -- , Advanced.advanced
                     --     (Parser.loop ( [], [] ) numberIconParser)
                     ]
             }
@@ -450,7 +512,7 @@ resetIndex reset cursor stack =
 -- {-| -}
 -- numberIconParser :
 --     ( List (Maybe Int), List String )
---     -> Parser Mark.Context Mark.Problem (Parser.Step ( List (Maybe Int), List String ) ListIcon)
+--     -> Parser Advanced.Context Advanced.Problem (Parser.Step ( List (Maybe Int), List String ) ListIcon)
 -- numberIconParser ( cursorReset, decorations ) =
 --     Parser.oneOf
 --         [ Parser.succeed
@@ -471,10 +533,10 @@ resetIndex reset cursor stack =
 --                             _ ->
 --                                 Nothing
 --                     )
---                     |= Parser.getChompedString (Parser.chompIf Char.isDigit Mark.Integer)
+--                     |= Parser.getChompedString (Parser.chompIf Char.isDigit Advanced.Integer)
 --                     |= Parser.getChompedString (Parser.chompWhile Char.isDigit)
 --                 , Parser.succeed Nothing
---                     |. Parser.chompIf (\c -> c == '#') (Mark.Expecting "#")
+--                     |. Parser.chompIf (\c -> c == '#') (Advanced.Expecting "#")
 --                 ]
 --             |= Parser.getChompedString
 --                 (Parser.chompWhile
@@ -493,7 +555,7 @@ resetIndex reset cursor stack =
 --                     }
 --                 )
 --             )
---             |. Parser.chompIf (\c -> c == ' ') Mark.Space
+--             |. Parser.chompIf (\c -> c == ' ') Advanced.Space
 --         ]
 {- LIST -}
 
