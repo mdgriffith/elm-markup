@@ -113,16 +113,15 @@ parse doc source =
                     Ok result
 
                 Nothing ->
-                    -- This only happens if some other error happened
-                    -- So this branch shouldn't ever execute.
+                    -- This only happens if there was an error parsing or compiling
+                    -- Technically this branch should never execute (it would go to Almost or Failure)
                     Err []
 
         Advanced.Almost partial ->
             Err partial.errors
 
         Advanced.Failure failure ->
-            -- TODO: NO MATCH error message
-            Err []
+            Err [ failure ]
 
 
 {-| -}
@@ -174,14 +173,10 @@ Which will parse a document with many of either raw strings or`MyBlock` blocks. 
 document : (child -> result) -> Block child -> Document result
 document renderer child =
     Advanced.document
-        (\doc ->
-            case doc.found of
-                Description.Found _ (Just f) ->
-                    Just (renderer f)
-
-                _ ->
-                    Nothing
-        )
+        { view =
+            \_ doc -> Maybe.map renderer doc
+        , error = always Nothing
+        }
         child
 
 
@@ -217,15 +212,13 @@ Will parse the following and render it as `Html.text`
 -}
 block : String -> (child -> result) -> Block child -> Block result
 block name renderer child =
-    Advanced.block name
-        (\blockResult ->
-            case blockResult.found of
-                Description.Found _ (Just found) ->
-                    Just (renderer found)
-
-                _ ->
-                    Nothing
-        )
+    Advanced.block
+        { name = name
+        , view =
+            \_ blockResult ->
+                Maybe.map renderer blockResult
+        , error = always Nothing
+        }
         child
 
 
@@ -279,14 +272,16 @@ Which would parse the following doc:
 startWith : (start -> rest -> result) -> Block start -> Block rest -> Block result
 startWith fn start rest =
     Advanced.startWith
-        (\found ->
-            case found of
-                Description.Found _ ( Just one, Just two ) ->
-                    Just (fn one two)
+        { view =
+            \_ maybeOne maybeTwo ->
+                case ( maybeOne, maybeTwo ) of
+                    ( Just one, Just two ) ->
+                        Just (fn one two)
 
-                _ ->
-                    Nothing
-        )
+                    _ ->
+                        Nothing
+        , error = always Nothing
+        }
         start
         rest
 
@@ -409,7 +404,12 @@ manyOf : List (Block a) -> Block (List a)
 manyOf options =
     Advanced.map
         allPresent
-        (Advanced.manyOf (always Nothing) options)
+        (Advanced.manyOf
+            { view = \_ a -> a
+            , error = \_ _ -> Nothing
+            }
+            options
+        )
 
 
 {-| Parse an ISO-8601 date string.
@@ -423,13 +423,20 @@ Results in a `Posix` integer, which works well with [elm/time](https://package.e
 -}
 date : Block Time.Posix
 date =
-    Advanced.map Just Advanced.date
+    Advanced.date
+        { default = Time.millisToPosix 0
+        , view = \id_ str -> Just str
+        }
 
 
 {-| -}
 oneOf : List (Block a) -> Block a
 oneOf options =
-    Advanced.oneOf (always Nothing) options
+    Advanced.oneOf
+        { view = \_ a -> a
+        , error = always Nothing
+        }
+        options
 
 
 {-| Parse an exact string. This can be useful to parse custom types if you pair it with `Mark.oneOf`.
@@ -451,7 +458,12 @@ exactly key val =
 {-| -}
 int : Block Int
 int =
-    Advanced.map Just (Advanced.int 0)
+    Advanced.map Just
+        (Advanced.int
+            { default = 0
+            , view = \id_ i -> i
+            }
+        )
 
 
 {-| Parse an `Int` within an inclusive range.
@@ -468,6 +480,7 @@ intBetween bottom top =
             { min = bottom
             , max = top
             , default = min bottom top
+            , view = \id_ i -> i
             }
         )
 
@@ -475,7 +488,12 @@ intBetween bottom top =
 {-| -}
 float : Block Float
 float =
-    Advanced.map Just (Advanced.float 0)
+    Advanced.map Just
+        (Advanced.float
+            { default = 0
+            , view = \id_ i -> i
+            }
+        )
 
 
 {-| Parse a `Float` within an inclusive range.
@@ -492,6 +510,7 @@ floatBetween bottom top =
             { min = bottom
             , max = top
             , default = min bottom top
+            , view = \id_ f -> f
             }
         )
 
@@ -500,14 +519,24 @@ floatBetween bottom top =
 -}
 bool : Block Bool
 bool =
-    Advanced.map Just (Advanced.bool True)
+    Advanced.map Just
+        (Advanced.bool
+            { default = True
+            , view = \id_ b -> b
+            }
+        )
 
 
 {-| Parse a single line and return it as a string.
 -}
 string : Block String
 string =
-    Advanced.map Just (Advanced.string "A Default")
+    Advanced.map Just
+        (Advanced.string
+            { default = "A String"
+            , view = \id_ str -> str
+            }
+        )
 
 
 {-| Parse multiple lines at the current indentation level.
@@ -536,7 +565,12 @@ Where `str` in the above function will be
 -}
 multiline : Block String
 multiline =
-    Advanced.map Just (Advanced.multiline "A String")
+    Advanced.map Just
+        (Advanced.multiline
+            { default = "A String"
+            , view = \id_ str -> str
+            }
+        )
 
 
 {-| -}
@@ -556,16 +590,18 @@ record2 :
     -> Field two
     -> Block data
 record2 recordName renderer field1 field2 =
-    Advanced.record2 recordName
-        (\range one two ->
-            case ( one, two ) of
-                ( Just o, Just t ) ->
-                    Just <| renderer o t
+    Advanced.record2
+        { name = recordName
+        , view =
+            \range one two ->
+                case ( one, two ) of
+                    ( Just o, Just t ) ->
+                        Just <| renderer o t
 
-                _ ->
-                    Nothing
-        )
-        (always Nothing)
+                    _ ->
+                        Nothing
+        , error = always Nothing
+        }
         field1
         field2
 
