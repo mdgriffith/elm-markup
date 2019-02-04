@@ -7,7 +7,7 @@ module Mark.Advanced exposing
     , document
     , block, stub
     , oneOf, manyOf, startWith, nested
-    , record2, field, Field
+    , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
     , string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
     , text, replacement, balanced, Replacement
     , Inline, inline, inlineString, inlineText, mapInline
@@ -56,7 +56,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs oneOf, manyOf, startWith, nested
 
-@docs record2, field, Field
+@docs field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
 
 @docs string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
 
@@ -1262,7 +1262,10 @@ record2 :
 record2 record field1 field2 =
     let
         expectations =
-            ExpectRecord record.name [ fieldExpectation field1, fieldExpectation field2 ]
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                ]
     in
     Block record.name
         { expect = expectations
@@ -1287,7 +1290,518 @@ record2 record field1 field2 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name expectations [ fieldParser field1, fieldParser field2 ]
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                ]
+        }
+
+
+{-| -}
+record3 :
+    { name : String
+    , view : Range -> one -> two -> three -> data
+    , error : UnexpectedDetails -> data
+    }
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Block data
+record3 record field1 field2 field3 =
+    let
+        expectations =
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                , fieldExpectation field3
+                ]
+    in
+    Block record.name
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record details ->
+                        if details.name == record.name then
+                            case details.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (record.view pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
+                                        |> renderRecordResult record.error pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (record.error unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                , fieldParser field3
+                ]
+        }
+
+
+{-| -}
+record4 :
+    { name : String
+    , view : Range -> one -> two -> three -> four -> data
+    , error : UnexpectedDetails -> data
+    }
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Block data
+record4 record field1 field2 field3 field4 =
+    let
+        expectations =
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                , fieldExpectation field3
+                , fieldExpectation field4
+                ]
+    in
+    Block record.name
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record details ->
+                        if details.name == record.name then
+                            case details.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (record.view pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
+                                        |> renderRecordResult record.error pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (record.error unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                , fieldParser field3
+                , fieldParser field4
+                ]
+        }
+
+
+{-| -}
+record5 :
+    { name : String
+    , view : Range -> one -> two -> three -> four -> five -> data
+    , error : UnexpectedDetails -> data
+    }
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Block data
+record5 record field1 field2 field3 field4 field5 =
+    let
+        expectations =
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                , fieldExpectation field3
+                , fieldExpectation field4
+                ]
+    in
+    Block record.name
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record details ->
+                        if details.name == record.name then
+                            case details.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (record.view pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
+                                        |> renderRecordResult record.error pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (record.error unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                , fieldParser field3
+                , fieldParser field4
+                , fieldParser field5
+                ]
+        }
+
+
+{-| -}
+record6 :
+    { name : String
+    , view : Range -> one -> two -> three -> four -> five -> six -> data
+    , error : UnexpectedDetails -> data
+    }
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Block data
+record6 record field1 field2 field3 field4 field5 field6 =
+    let
+        expectations =
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                , fieldExpectation field3
+                , fieldExpectation field4
+                ]
+    in
+    Block record.name
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record details ->
+                        if details.name == record.name then
+                            case details.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (record.view pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
+                                        |> renderRecordResult record.error pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (record.error unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                , fieldParser field3
+                , fieldParser field4
+                , fieldParser field5
+                , fieldParser field6
+                ]
+        }
+
+
+{-| -}
+record7 :
+    { name : String
+    , view : Range -> one -> two -> three -> four -> five -> six -> seven -> data
+    , error : UnexpectedDetails -> data
+    }
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Block data
+record7 record field1 field2 field3 field4 field5 field6 field7 =
+    let
+        expectations =
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                , fieldExpectation field3
+                , fieldExpectation field4
+                ]
+    in
+    Block record.name
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record details ->
+                        if details.name == record.name then
+                            case details.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (record.view pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field7 fieldDescriptions)
+                                        |> renderRecordResult record.error pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (record.error unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                , fieldParser field3
+                , fieldParser field4
+                , fieldParser field5
+                , fieldParser field6
+                , fieldParser field7
+                ]
+        }
+
+
+{-| -}
+record8 :
+    { name : String
+    , view : Range -> one -> two -> three -> four -> five -> six -> seven -> eight -> data
+    , error : UnexpectedDetails -> data
+    }
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Field eight
+    -> Block data
+record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
+    let
+        expectations =
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                , fieldExpectation field3
+                , fieldExpectation field4
+                ]
+    in
+    Block record.name
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record details ->
+                        if details.name == record.name then
+                            case details.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (record.view pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field7 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field8 fieldDescriptions)
+                                        |> renderRecordResult record.error pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (record.error unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                , fieldParser field3
+                , fieldParser field4
+                , fieldParser field5
+                , fieldParser field6
+                , fieldParser field7
+                , fieldParser field8
+                ]
+        }
+
+
+{-| -}
+record9 :
+    { name : String
+    , view : Range -> one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> data
+    , error : UnexpectedDetails -> data
+    }
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Field eight
+    -> Field nine
+    -> Block data
+record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
+    let
+        expectations =
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                , fieldExpectation field3
+                , fieldExpectation field4
+                ]
+    in
+    Block record.name
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record details ->
+                        if details.name == record.name then
+                            case details.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (record.view pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field7 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field8 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field9 fieldDescriptions)
+                                        |> renderRecordResult record.error pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (record.error unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                , fieldParser field3
+                , fieldParser field4
+                , fieldParser field5
+                , fieldParser field6
+                , fieldParser field7
+                , fieldParser field8
+                , fieldParser field9
+                ]
+        }
+
+
+{-| -}
+record10 :
+    { name : String
+    , view : Range -> one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> ten -> data
+    , error : UnexpectedDetails -> data
+    }
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Field eight
+    -> Field nine
+    -> Field ten
+    -> Block data
+record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 field10 =
+    let
+        expectations =
+            ExpectRecord record.name
+                [ fieldExpectation field1
+                , fieldExpectation field2
+                , fieldExpectation field3
+                , fieldExpectation field4
+                ]
+    in
+    Block record.name
+        { expect = expectations
+        , converter =
+            \desc ->
+                case desc of
+                    Record details ->
+                        if details.name == record.name then
+                            case details.found of
+                                Found pos fieldDescriptions ->
+                                    Ok (Ok (record.view pos))
+                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field7 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field8 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field9 fieldDescriptions)
+                                        |> Result.map2 applyField (getField field10 fieldDescriptions)
+                                        |> renderRecordResult record.error pos
+
+                                Unexpected unexpected ->
+                                    Ok (Found unexpected.range (record.error unexpected))
+
+                        else
+                            Err NoMatch
+
+                    _ ->
+                        Err NoMatch
+        , parser =
+            parseRecord record.name
+                expectations
+                [ fieldParser field1
+                , fieldParser field2
+                , fieldParser field3
+                , fieldParser field4
+                , fieldParser field5
+                , fieldParser field6
+                , fieldParser field7
+                , fieldParser field8
+                , fieldParser field9
+                , fieldParser field10
+                ]
         }
 
 

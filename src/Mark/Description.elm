@@ -150,7 +150,10 @@ type Description
         , found : Found ( String, Float )
         , id : Id Float
         }
-    | DescribeText Range (List TextDescription)
+    | DescribeText
+        { id : Id Text
+        , text : List TextDescription
+        }
     | DescribeString (Id String) String
     | DescribeMultiline (Id String) String
     | DescribeStringExactly Range String
@@ -440,7 +443,7 @@ match description exp =
                 _ ->
                     False
 
-        DescribeText _ _ ->
+        DescribeText _ ->
             case exp of
                 ExpectText _ ->
                     True
@@ -808,8 +811,8 @@ makeEdit cursor desc =
         DescribeIntBetween details ->
             replacePrimitive cursor (foundStart details.found) desc
 
-        DescribeText rng textNodes ->
-            replacePrimitive cursor rng.start desc
+        DescribeText txt ->
+            replacePrimitive cursor (.start (getRange txt.id)) desc
 
         DescribeString id str ->
             replacePrimitive cursor (.start (getRange id)) desc
@@ -1763,7 +1766,7 @@ isPrimitive description =
         DescribeIntBetween _ ->
             True
 
-        DescribeText rng textNodes ->
+        DescribeText _ ->
             True
 
         DescribeString rng str ->
@@ -1867,8 +1870,8 @@ getContainingDescriptions description offset =
             else
                 []
 
-        DescribeText rng textNodes ->
-            if withinOffsetRange offset rng then
+        DescribeText txt ->
+            if withinOffsetRange offset (getRange txt.id) then
                 [ description ]
 
             else
@@ -2080,10 +2083,10 @@ writeDescription description cursor =
         DescribeIntBetween details ->
             writeFound (writeWith String.fromInt) details.found cursor
 
-        DescribeText range textNodes ->
+        DescribeText txt ->
             cursor
-                |> advanceTo range
-                |> (\c -> List.foldl writeTextDescription c textNodes)
+                |> advanceTo (getRange txt.id)
+                |> (\c -> List.foldl writeTextDescription c txt.text)
 
         DescribeString id str ->
             cursor

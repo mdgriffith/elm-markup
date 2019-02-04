@@ -606,350 +606,289 @@ record2 recordName renderer field1 field2 =
         field2
 
 
+applyToMaybe maybeThing maybeFn =
+    case ( maybeFn, maybeThing ) of
+        ( Just fn, Just thing ) ->
+            Just (fn thing)
 
--- {-| -}
--- record3 :
---     String
---     -> (one -> two -> three -> data)
---     -> Field one
---     -> Field two
---     -> Field three
---     -> Block data
--- record3 recordName renderer field1 field2 field3 =
---     let
---         recordParser =
---             Parser.succeed renderer
---                 |= fieldParser field1
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field2
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field3
---     in
---     masterRecordParser recordName [ fieldName field1, fieldName field2, fieldName field3 ] recordParser
--- {-| -}
--- record4 :
---     String
---     -> (one -> two -> three -> four -> data)
---     -> Field one
---     -> Field two
---     -> Field three
---     -> Field four
---     -> Block data
--- record4 recordName renderer field1 field2 field3 field4 =
---     let
---         recordParser =
---             Parser.succeed renderer
---                 |= fieldParser field1
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field2
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field3
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field4
---     in
---     masterRecordParser recordName [ fieldName field1, fieldName field2, fieldName field3, fieldName field4 ] recordParser
--- {-| -}
--- record5 :
---     String
---     -> (one -> two -> three -> four -> five -> data)
---     -> Field one
---     -> Field two
---     -> Field three
---     -> Field four
---     -> Field five
---     -> Block data
--- record5 recordName renderer field1 field2 field3 field4 field5 =
---     let
---         recordParser =
---             Parser.succeed renderer
---                 |= fieldParser field1
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field2
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field3
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field4
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field5
---     in
---     masterRecordParser recordName
---         [ fieldName field1
---         , fieldName field2
---         , fieldName field3
---         , fieldName field4
---         , fieldName field5
---         ]
---         recordParser
--- {-| -}
--- record6 :
---     String
---     ->
---         (one
---          -> two
---          -> three
---          -> four
---          -> five
---          -> six
---          -> data
---         )
---     -> Field one
---     -> Field two
---     -> Field three
---     -> Field four
---     -> Field five
---     -> Field six
---     -> Block data
--- record6 recordName renderer field1 field2 field3 field4 field5 field6 =
---     let
---         recordParser =
---             Parser.succeed renderer
---                 |= fieldParser field1
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field2
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field3
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field4
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field5
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field6
---     in
---     masterRecordParser recordName
---         [ fieldName field1
---         , fieldName field2
---         , fieldName field3
---         , fieldName field4
---         , fieldName field5
---         , fieldName field6
---         ]
---         recordParser
--- {-| -}
--- record7 :
---     String
---     ->
---         (one
---          -> two
---          -> three
---          -> four
---          -> five
---          -> six
---          -> seven
---          -> data
---         )
---     -> Field one
---     -> Field two
---     -> Field three
---     -> Field four
---     -> Field five
---     -> Field six
---     -> Field seven
---     -> Block data
--- record7 recordName renderer field1 field2 field3 field4 field5 field6 field7 =
---     let
---         recordParser =
---             Parser.succeed renderer
---                 |= fieldParser field1
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field2
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field3
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field4
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field5
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field6
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field7
---     in
---     masterRecordParser recordName
---         [ fieldName field1
---         , fieldName field2
---         , fieldName field3
---         , fieldName field4
---         , fieldName field5
---         , fieldName field6
---         , fieldName field7
---         ]
---         recordParser
--- {-| -}
--- record8 :
---     String
---     ->
---         (one
---          -> two
---          -> three
---          -> four
---          -> five
---          -> six
---          -> seven
---          -> eight
---          -> data
---         )
---     -> Field one
---     -> Field two
---     -> Field three
---     -> Field four
---     -> Field five
---     -> Field six
---     -> Field seven
---     -> Field eight
---     -> Block data
--- record8 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 =
---     let
---         recordParser =
---             Parser.succeed renderer
---                 |= fieldParser field1
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field2
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field3
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field4
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field5
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field6
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field7
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field8
---     in
---     masterRecordParser recordName
---         [ fieldName field1
---         , fieldName field2
---         , fieldName field3
---         , fieldName field4
---         , fieldName field5
---         , fieldName field6
---         , fieldName field7
---         , fieldName field8
---         ]
---         recordParser
--- {-| -}
--- record9 :
---     String
---     ->
---         (one
---          -> two
---          -> three
---          -> four
---          -> five
---          -> six
---          -> seven
---          -> eight
---          -> nine
---          -> data
---         )
---     -> Field one
---     -> Field two
---     -> Field three
---     -> Field four
---     -> Field five
---     -> Field six
---     -> Field seven
---     -> Field eight
---     -> Field nine
---     -> Block data
--- record9 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 field9 =
---     let
---         recordParser =
---             Parser.succeed renderer
---                 |= fieldParser field1
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field2
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field3
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field4
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field5
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field6
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field7
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field8
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field9
---     in
---     masterRecordParser recordName
---         [ fieldName field1
---         , fieldName field2
---         , fieldName field3
---         , fieldName field4
---         , fieldName field5
---         , fieldName field6
---         , fieldName field7
---         , fieldName field8
---         , fieldName field9
---         ]
---         recordParser
--- {-| -}
--- record10 :
---     String
---     ->
---         (one
---          -> two
---          -> three
---          -> four
---          -> five
---          -> six
---          -> seven
---          -> eight
---          -> nine
---          -> ten
---          -> data
---         )
---     -> Field one
---     -> Field two
---     -> Field three
---     -> Field four
---     -> Field five
---     -> Field six
---     -> Field seven
---     -> Field eight
---     -> Field nine
---     -> Field ten
---     -> Block data
--- record10 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 field9 field10 =
---     let
---         recordParser =
---             Parser.succeed renderer
---                 |= fieldParser field1
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field2
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field3
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field4
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field5
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field6
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field7
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field8
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field9
---                 |. Parser.chompIf (\c -> c == '\n') Newline
---                 |= fieldParser field10
---     in
---     masterRecordParser recordName
---         [ fieldName field1
---         , fieldName field2
---         , fieldName field3
---         , fieldName field4
---         , fieldName field5
---         , fieldName field6
---         , fieldName field7
---         , fieldName field8
---         , fieldName field9
---         , fieldName field10
---         ]
---         recordParser
+        _ ->
+            Nothing
+
+
+{-| -}
+record3 :
+    String
+    -> (one -> two -> three -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Block data
+record3 recordName renderer field1 field2 field3 =
+    Advanced.record3
+        { name = recordName
+        , view =
+            \range one two three ->
+                Just renderer
+                    |> applyToMaybe one
+                    |> applyToMaybe two
+                    |> applyToMaybe three
+        , error = always Nothing
+        }
+        field1
+        field2
+        field3
+
+
+{-| -}
+record4 :
+    String
+    -> (one -> two -> three -> four -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Block data
+record4 recordName renderer field1 field2 field3 field4 =
+    Advanced.record4
+        { name = recordName
+        , view =
+            \range one two three four ->
+                Just renderer
+                    |> applyToMaybe one
+                    |> applyToMaybe two
+                    |> applyToMaybe three
+                    |> applyToMaybe four
+        , error = always Nothing
+        }
+        field1
+        field2
+        field3
+        field4
+
+
+{-| -}
+record5 :
+    String
+    -> (one -> two -> three -> four -> five -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Block data
+record5 recordName renderer field1 field2 field3 field4 field5 =
+    Advanced.record5
+        { name = recordName
+        , view =
+            \range one two three four five ->
+                Just renderer
+                    |> applyToMaybe one
+                    |> applyToMaybe two
+                    |> applyToMaybe three
+                    |> applyToMaybe four
+                    |> applyToMaybe five
+        , error = always Nothing
+        }
+        field1
+        field2
+        field3
+        field4
+        field5
+
+
+{-| -}
+record6 :
+    String
+    -> (one -> two -> three -> four -> five -> six -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Block data
+record6 recordName renderer field1 field2 field3 field4 field5 field6 =
+    Advanced.record6
+        { name = recordName
+        , view =
+            \range one two three four five six ->
+                Just renderer
+                    |> applyToMaybe one
+                    |> applyToMaybe two
+                    |> applyToMaybe three
+                    |> applyToMaybe four
+                    |> applyToMaybe five
+                    |> applyToMaybe six
+        , error = always Nothing
+        }
+        field1
+        field2
+        field3
+        field4
+        field5
+        field6
+
+
+{-| -}
+record7 :
+    String
+    -> (one -> two -> three -> four -> five -> six -> seven -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Block data
+record7 recordName renderer field1 field2 field3 field4 field5 field6 field7 =
+    Advanced.record7
+        { name = recordName
+        , view =
+            \range one two three four five six seven ->
+                Just renderer
+                    |> applyToMaybe one
+                    |> applyToMaybe two
+                    |> applyToMaybe three
+                    |> applyToMaybe four
+                    |> applyToMaybe five
+                    |> applyToMaybe six
+                    |> applyToMaybe seven
+        , error = always Nothing
+        }
+        field1
+        field2
+        field3
+        field4
+        field5
+        field6
+        field7
+
+
+{-| -}
+record8 :
+    String
+    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Field eight
+    -> Block data
+record8 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 =
+    Advanced.record8
+        { name = recordName
+        , view =
+            \range one two three four five six seven eight ->
+                Just renderer
+                    |> applyToMaybe one
+                    |> applyToMaybe two
+                    |> applyToMaybe three
+                    |> applyToMaybe four
+                    |> applyToMaybe five
+                    |> applyToMaybe six
+                    |> applyToMaybe seven
+                    |> applyToMaybe eight
+        , error = always Nothing
+        }
+        field1
+        field2
+        field3
+        field4
+        field5
+        field6
+        field7
+        field8
+
+
+{-| -}
+record9 :
+    String
+    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Field eight
+    -> Field nine
+    -> Block data
+record9 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 field9 =
+    Advanced.record9
+        { name = recordName
+        , view =
+            \range one two three four five six seven eight nine ->
+                Just renderer
+                    |> applyToMaybe one
+                    |> applyToMaybe two
+                    |> applyToMaybe three
+                    |> applyToMaybe four
+                    |> applyToMaybe five
+                    |> applyToMaybe six
+                    |> applyToMaybe seven
+                    |> applyToMaybe eight
+                    |> applyToMaybe nine
+        , error = always Nothing
+        }
+        field1
+        field2
+        field3
+        field4
+        field5
+        field6
+        field7
+        field8
+        field9
+
+
+{-| -}
+record10 :
+    String
+    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> ten -> data)
+    -> Field one
+    -> Field two
+    -> Field three
+    -> Field four
+    -> Field five
+    -> Field six
+    -> Field seven
+    -> Field eight
+    -> Field nine
+    -> Field ten
+    -> Block data
+record10 recordName renderer field1 field2 field3 field4 field5 field6 field7 field8 field9 field10 =
+    Advanced.record10
+        { name = recordName
+        , view =
+            \range one two three four five six seven eight nine ten ->
+                Just renderer
+                    |> applyToMaybe one
+                    |> applyToMaybe two
+                    |> applyToMaybe three
+                    |> applyToMaybe four
+                    |> applyToMaybe five
+                    |> applyToMaybe six
+                    |> applyToMaybe seven
+                    |> applyToMaybe eight
+                    |> applyToMaybe nine
+                    |> applyToMaybe ten
+        , error = always Nothing
+        }
+        field1
+        field2
+        field3
+        field4
+        field5
+        field6
+        field7
+        field8
+        field9
+        field10
 
 
 {-| -}
