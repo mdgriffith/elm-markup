@@ -21,6 +21,7 @@ type Error
     | ParsingIssue (List (Parser.DeadEnd Context Problem))
     | UnknownBlock (List String)
     | UnknownInline (List String)
+    | FailMatchOneOf (List String)
     | MissingFields (List String)
     | NonMatchingFields
         { expecting : List String
@@ -184,6 +185,28 @@ render source current =
                     , [ Format.text "But I was expecting one of these instead:\n\n"
                       , expecting
                             |> List.sortBy (\exp -> 0 - similarity target exp)
+                            |> List.map (addIndent 4)
+                            |> String.join "\n"
+                            |> Format.text
+                            |> Format.yellow
+                      ]
+                    ]
+            }
+
+        FailMatchOneOf expecting ->
+            let
+                target =
+                    String.slice current.range.start.offset current.range.end.offset source
+            in
+            { title = "NO MATCH"
+            , region =
+                current.range
+            , message =
+                List.concat
+                    [ [ Format.text "I wasn't able to match this.\n\n" ]
+                    , highlight current.range source
+                    , [ Format.text "to one of the following:\n\n"
+                      , expecting
                             |> List.map (addIndent 4)
                             |> String.join "\n"
                             |> Format.text
