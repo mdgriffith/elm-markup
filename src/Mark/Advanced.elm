@@ -11,7 +11,7 @@ module Mark.Advanced exposing
     , string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
     , text, replacement, balanced, Replacement
     , Inline, inline, inlineString, inlineText, mapInline
-    , map
+    , map, idToRange
     , focus, parent
     , Range, Position, foldNested, foldNestedList, replaceNested
     , Error, errorToString, errorToHtml, Theme(..)
@@ -67,7 +67,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs Inline, inline, inlineString, inlineText, mapInline
 
-@docs map
+@docs map, idToRange
 
 @docs focus, parent
 
@@ -94,6 +94,10 @@ import Time
 {-| -}
 type alias Parsed =
     Mark.Description.Parsed
+
+
+idToRange =
+    getRange
 
 
 
@@ -439,7 +443,7 @@ getUnexpecteds description =
         DescribeIntBetween details ->
             unexpectedFromFound details.found
 
-        DescribeText rng textNodes ->
+        DescribeText details ->
             []
 
         DescribeString rng str ->
@@ -817,7 +821,12 @@ oneOf :
         }
         -> a
         -> b
-    , error : UnexpectedDetails -> b
+    , error :
+        { id : Id Options
+        , options : List (Choice (Id Options) Expectation)
+        }
+        -> UnexpectedDetails
+        -> b
     }
     -> List (Block a)
     -> Block b
@@ -900,10 +909,28 @@ oneOf oneOfDetails blocks =
                                                     )
 
                                             Unexpected unexpected ->
-                                                Ok (Found unexpected.range (oneOfDetails.error unexpected))
+                                                Ok
+                                                    (Found unexpected.range
+                                                        (oneOfDetails.error
+                                                            { id = details.id
+                                                            , options =
+                                                                List.map (Choice details.id) expectations
+                                                            }
+                                                            unexpected
+                                                        )
+                                                    )
 
                             Unexpected unexpected ->
-                                Ok (Found unexpected.range (oneOfDetails.error unexpected))
+                                Ok
+                                    (Found unexpected.range
+                                        (oneOfDetails.error
+                                            { id = details.id
+                                            , options =
+                                                List.map (Choice details.id) expectations
+                                            }
+                                            unexpected
+                                        )
+                                    )
 
                     _ ->
                         Err NoMatch
@@ -931,11 +958,79 @@ oneOf oneOfDetails blocks =
                 )
                 |= withRange
                     (Parser.oneOf
-                        (blockParser :: List.reverse childValues
-                         -- TODO :: What sort of error would occur if this point was reached?
-                        )
+                        (blockParser :: List.reverse (unexpectedInOneOf expectations :: childValues))
                     )
         }
+
+
+unexpectedInOneOf expectations =
+    Parser.getIndent
+        |> Parser.andThen
+            (\indentation ->
+                Parser.succeed
+                    (\( pos, foundWord ) ->
+                        Err ( pos, Error.FailMatchOneOf (List.map humanReadableExpectations expectations) )
+                    )
+                    |= withRange word
+            )
+
+
+humanReadableExpectations expect =
+    case expect of
+        ExpectBlock blockName exp ->
+            "| " ++ blockName
+
+        ExpectStub stubName ->
+            "| " ++ stubName
+
+        ExpectRecord name fields ->
+            "| " ++ name
+
+        ExpectOneOf expectations ->
+            "One of: " ++ String.join ", " (List.map humanReadableExpectations expectations)
+
+        ExpectManyOf expectations ->
+            "Many of: " ++ String.join ", " (List.map humanReadableExpectations expectations)
+
+        ExpectStartsWith start remain ->
+            humanReadableExpectations start ++ " and then " ++ humanReadableExpectations remain
+
+        ExpectBoolean _ ->
+            "A Boolean"
+
+        ExpectInteger _ ->
+            "An Int"
+
+        ExpectFloat _ ->
+            "A Float"
+
+        ExpectFloatBetween bounds ->
+            "A Float between " ++ String.fromFloat bounds.min ++ " and " ++ String.fromFloat bounds.max
+
+        ExpectIntBetween bounds ->
+            "An Int between " ++ String.fromInt bounds.min ++ " and " ++ String.fromInt bounds.max
+
+        ExpectText inlines ->
+            "Styled Text"
+
+        ExpectString _ ->
+            "A String"
+
+        ExpectMultiline _ ->
+            "A Multiline String"
+
+        ExpectStringExactly exact ->
+            exact
+
+        ExpectDate _ ->
+            "A DateTime"
+
+        ExpectTree icon content ->
+            "A tree starting with "
+                ++ humanReadableExpectations icon
+                ++ " and with "
+                ++ humanReadableExpectations content
+                ++ " content"
 
 
 {-| Many blocks that are all at the same indentation level.
@@ -1860,9 +1955,9 @@ renderText :
     -> Result AstError (Found (List rendered))
 renderText options description =
     case description of
-        DescribeText range textNodes ->
-            List.foldl (renderTextComponent options) [] textNodes
-                |> (Found range << List.reverse)
+        DescribeText details ->
+            List.foldl (renderTextComponent options) [] details.text
+                |> (Found (getRange details.id) << List.reverse)
                 |> Ok
 
         _ ->
@@ -3807,7 +3902,10 @@ styledTextParser options startingPos inheritedStyles until =
           --     )
           Parser.map
             (\( pos, textNodes ) ->
-                DescribeText pos textNodes
+                DescribeText
+                    { id = Id pos
+                    , text = textNodes
+                    }
             )
             (withRange
                 (Parser.loop vacantText

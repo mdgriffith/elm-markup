@@ -5,7 +5,7 @@ module Mark.Description exposing
     , Edit(..), update
     , Parsed(..)
     , toString, getDescription
-    , updateInt, updateString, replaceOneOf, deleteBlock, insertAt, updateFloat, move
+    , updateInt, updateString, replaceWith, deleteBlock, insertAt, updateFloat, move
     )
 
 {-|
@@ -22,7 +22,7 @@ module Mark.Description exposing
 
 @docs toString, getDescription
 
-@docs updateInt, updateString, replaceOneOf, deleteBlock, insertAt, updateFloat, move
+@docs updateInt, updateString, replaceWith, deleteBlock, insertAt, updateFloat, move
 
 -}
 
@@ -247,8 +247,8 @@ updateString =
 
 
 {-| -}
-replaceOneOf : Choice (Id Options) Expectation -> Edit
-replaceOneOf =
+replaceWith : Choice (Id Options) Expectation -> Edit
+replaceWith =
     ReplaceOneOf
 
 
@@ -300,7 +300,7 @@ type Edit
         }
       -- Create an element in a ManyOf
       -- Indexes overflow, so if it's too large, it just puts it at the end.
-      -- Indexes taht are below 0 and clamped to 0
+      -- Indexes that are below 0 and clamped to 0
     | InsertAt Int (Choice (Id ManyOptions) Expectation)
     | DeleteBlock (Id ManyOptions) Int
 
@@ -782,8 +782,9 @@ makeEdit cursor desc =
         StartsWith range fst snd ->
             -- if id is within range
             if within cursor.targetRange range then
-                -- TODO
-                desc
+                StartsWith range
+                    { fst | found = makeEdit cursor fst.found }
+                    { snd | found = makeEdit cursor snd.found }
 
             else
                 desc
@@ -1195,8 +1196,6 @@ create currentIndent base expectation =
                 }
             )
 
-        -- ExpectText textNodes ->
-        --     True
         ExpectString str ->
             let
                 end =
@@ -1398,7 +1397,7 @@ replaceOption id new desc =
                         Just (OneOf { one | child = Found range new })
 
                     Unexpected unexpected ->
-                        Nothing
+                        Just (OneOf { one | child = Found unexpected.range new })
 
             else
                 Nothing
