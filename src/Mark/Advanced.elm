@@ -1050,9 +1050,15 @@ manyOf :
         }
         -> UnexpectedDetails
         -> b
+    , merge :
+        { parent : Id ManyOptions
+        , options : List (Choice (Id ManyOptions) Expectation)
+        }
+        -> List b
+        -> final
     }
     -> List (Block a)
-    -> Block (List b)
+    -> Block final
 manyOf manyOfDetails blocks =
     let
         gatherParsers myBlock ( names, blks, vals ) =
@@ -1174,7 +1180,16 @@ manyOf manyOfDetails blocks =
                     ManyOf many ->
                         List.foldl (getRendered many.id many.choices) ( Ok [], 0 ) many.children
                             |> Tuple.first
-                            |> Result.map (\items -> Found (getRange many.id) (List.reverse items))
+                            |> Result.map
+                                (\items ->
+                                    Found (getRange many.id)
+                                        (manyOfDetails.merge
+                                            { parent = many.id
+                                            , options = many.choices
+                                            }
+                                            (List.reverse items)
+                                        )
+                                )
 
                     _ ->
                         Err NoMatch
@@ -2643,7 +2658,7 @@ blocksOrNewlines myParser indentation ( parsedSomething, existing ) =
                     Parser.Done (List.reverse existing)
                 )
         , Parser.succeed (Parser.Loop ( True, existing ))
-            |. newline
+            |. newlineWith "empty newline"
         , if not parsedSomething then
             -- First thing already has indentation accounted for.
             myParser
@@ -2672,7 +2687,7 @@ blocksOrNewlines myParser indentation ( parsedSomething, existing ) =
         -- Whitespace Line
         , Parser.succeed (Parser.Loop ( True, existing ))
             |. Parser.chompWhile (\c -> c == ' ')
-            |. newline
+            |. newlineWith "ws-line"
         ]
 
 
@@ -3050,6 +3065,10 @@ type Indented thing
         -> Is improperly indented
 
 -}
+indentOrSkip :
+    Int
+    -> Parser Context Problem (Parser.Step RecordFields a)
+    -> Parser Context Problem (Indented (Parser.Step RecordFields a))
 indentOrSkip indentation successParser =
     Parser.oneOf
         [ Parser.succeed identity
@@ -3067,10 +3086,11 @@ indentOrSkip indentation successParser =
                     |. Parser.chompIf (\c -> c == ' ') Space
                     |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
                     |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
-                    |. newline
+                    |. newlineWith "indentOrSkip one"
                 , Parser.succeed Indented
                     |= successParser
-                    |. newline
+
+                -- |. newlineWith "indentOrSkip two"
                 ]
         , Parser.succeed
             (\foundIndent hasContent ->
@@ -3088,6 +3108,10 @@ indentOrSkip indentation successParser =
                     |. newline
                 ]
         ]
+
+
+newlineWith x =
+    Parser.token (Parser.Token "\n" (Expecting x))
 
 
 newline =
@@ -3111,6 +3135,10 @@ parseFields recordName fieldNames fields =
                     Parser.getIndent
                         |> Parser.andThen
                             (\indentation ->
+                                -- Parser.map (Debug.log "outside") <|
+                                -- Parser.inContext
+                                --     (InInline ("parsing Fields,pls" ++ recordName ++ String.join ":" fieldNames))
+                                -- <|
                                 Parser.oneOf
                                     [ indentOrSkip indentation (captureField found recordName fields fieldNames)
                                         |> Parser.map
@@ -3157,6 +3185,12 @@ parseFields recordName fieldNames fields =
                             )
 
 
+captureField :
+    List ( String, Found Description )
+    -> String
+    -> RecordFields
+    -> List String
+    -> Parser Context Problem (Parser.Step RecordFields a)
 captureField found recordName fields fieldNames =
     Parser.map
         (\maybeField ->

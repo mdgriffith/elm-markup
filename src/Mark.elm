@@ -407,6 +407,7 @@ manyOf options =
         (Advanced.manyOf
             { view = \_ a -> a
             , error = \_ _ -> Nothing
+            , merge = \_ x -> x
             }
             options
         )
@@ -434,7 +435,7 @@ oneOf : List (Block a) -> Block a
 oneOf options =
     Advanced.oneOf
         { view = \_ a -> a
-        , error = always Nothing
+        , error = \_ _ -> Nothing
         }
         options
 

@@ -2,10 +2,11 @@ module Mark.Description exposing
     ( Found(..), Nested(..), UnexpectedDetails
     , Description(..), TextDescription(..), InlineDescription(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), InlineValueExpectation(..)
-    , Edit(..), update
+    , Edit, update
     , Parsed(..)
-    , toString, getDescription
+    , toString, getDescription, make
     , updateInt, updateString, replaceWith, deleteBlock, insertAt, updateFloat, move
+    , writeDescription, writeFound, descriptionToString, startingPoint, create
     )
 
 {-|
@@ -20,9 +21,13 @@ module Mark.Description exposing
 
 @docs Parsed
 
-@docs toString, getDescription
+@docs toString, getDescription, make
 
 @docs updateInt, updateString, replaceWith, deleteBlock, insertAt, updateFloat, move
+
+-- REMOVE
+
+@docs writeDescription, writeFound, descriptionToString, startingPoint, create
 
 -}
 
@@ -650,12 +655,22 @@ update edit (Parsed original) =
                         makeFoundEdit
                             { targetRange = getRange id
                             , makeEdit =
-                                \i pos desc ->
-                                    let
-                                        ( newPos, newDesc ) =
-                                            create i pos expectation
-                                    in
-                                    insertAtIndex id index newDesc desc
+                                \indentation pos desc ->
+                                    case desc of
+                                        ManyOf many ->
+                                            if id == many.id then
+                                                Just
+                                                    (ManyOf
+                                                        { many
+                                                            | children = makeInsertAt index many expectation
+                                                        }
+                                                    )
+
+                                            else
+                                                Nothing
+
+                                        _ ->
+                                            Nothing
                             , indentation = 0
                             }
                             original.found
@@ -706,6 +721,10 @@ makeFoundEdit cursor foundDesc =
             foundDesc
 
 
+increaseIndent x =
+    { x | indentation = x.indentation + 1 }
+
+
 {-| -}
 makeEdit : EditCursor -> Description -> Description
 makeEdit cursor desc =
@@ -722,14 +741,14 @@ makeEdit cursor desc =
                         Found rng child ->
                             DescribeBlock
                                 { details
-                                    | found = Found rng (makeEdit cursor child)
+                                    | found = Found rng (makeEdit (increaseIndent cursor) child)
                                 }
 
                         Unexpected unexpected ->
                             desc
 
         Record details ->
-            case cursor.makeEdit cursor.indentation (foundStart details.found) desc of
+            case cursor.makeEdit (cursor.indentation + 1) (foundStart details.found) desc of
                 Just newDesc ->
                     newDesc
 
@@ -741,7 +760,12 @@ makeEdit cursor desc =
                                     { details
                                         | found =
                                             Found rng
-                                                (List.map (Tuple.mapSecond (makeFoundEdit cursor)) fields)
+                                                (List.map
+                                                    (Tuple.mapSecond
+                                                        (makeFoundEdit (increaseIndent (increaseIndent cursor)))
+                                                    )
+                                                    fields
+                                                )
                                     }
 
                             else
@@ -921,17 +945,24 @@ withinOffsetRange offset range =
 createField : Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
 createField currentIndent ( name, exp ) ( base, existingFields ) =
     let
+        -- _ =
+        --     Debug.log "create field" base
+        -- indented
         ( end, childField ) =
             create (currentIndent + 1)
                 (base
-                    |> moveColumn ((currentIndent + 1) * 4)
+                    |> moveColumn (currentIndent * 4)
                 )
                 exp
+
+        -- _ =
+        --     Debug.log "child field" childField
     in
     ( moveNewline end
     , ( name
       , Found
-            { start = base
+            { start =
+                moveColumn (currentIndent * 4) base
             , end = end
             }
             childField
@@ -940,11 +971,27 @@ createField currentIndent ( name, exp ) ( base, existingFields ) =
     )
 
 
+{-| Given an expectation and a list of choices, verify that the expectation is a valid choice.
+-}
+make : Expectation -> List (Choice id Expectation) -> Maybe (Choice id Expectation)
+make expected options =
+    List.filterMap
+        (\(Choice id exp) ->
+            if matchExpected expected exp then
+                Just (Choice id expected)
+
+            else
+                Nothing
+        )
+        options
+        |> List.head
+
+
 {-|
 
     `Position` is the starting position for a block.
 
-    The same rules for indentaition as they apply everywhere.
+    The same rules for indentation as they apply everywhere.
 
         - Primitives do not handle their indentation.
         - Block, Record, and Tree elements handle the indentation of their children.
@@ -963,7 +1010,7 @@ create currentIndent base expectation =
                         )
                         childExpectation
             in
-            ( moveNewline end
+            ( end
             , DescribeBlock
                 { name = name
                 , found =
@@ -981,7 +1028,7 @@ create currentIndent base expectation =
                 end =
                     moveColumn (String.length name) base
             in
-            ( moveNewline end
+            ( end
             , DescribeStub name
                 (Found
                     { start = base
@@ -995,6 +1042,9 @@ create currentIndent base expectation =
             let
                 ( end, renderedFields ) =
                     List.foldl (createField (currentIndent + 1)) ( moveNewline base, [] ) fields
+
+                -- _ =
+                --     Debug.log "fields" renderedFields
             in
             ( moveNewline end
             , Record
@@ -1002,7 +1052,7 @@ create currentIndent base expectation =
                 , found =
                     Found
                         { start = base
-                        , end = end
+                        , end = moveNewline end
                         }
                         renderedFields
                 , expected = expectation
@@ -1036,12 +1086,12 @@ create currentIndent base expectation =
                 ( end, childDescription ) =
                     create (currentIndent + 1)
                         (base
-                            |> moveNewline
-                            |> moveColumn ((currentIndent + 1) * 4)
+                         -- |> moveNewline
+                         -- |> moveColumn ((currentIndent + 1) * 4)
                         )
                         (Maybe.withDefault (ExpectStub "Unknown") (List.head choices))
             in
-            ( moveNewline base
+            ( base
             , OneOf
                 { id = id
                 , choices = List.map (Choice id) choices
@@ -1059,7 +1109,29 @@ create currentIndent base expectation =
             , ManyOf
                 { id = id
                 , choices = List.map (Choice id) choices
-                , children = []
+                , children =
+                    List.foldl
+                        (\choice ( newBase, result ) ->
+                            let
+                                ( endOfCreated, created ) =
+                                    create currentIndent newBase choice
+                            in
+                            ( endOfCreated
+                                |> moveNewline
+                                |> moveNewline
+                                |> moveColumn (currentIndent * 4)
+                            , Found
+                                { start = newBase
+                                , end = endOfCreated
+                                }
+                                created
+                                :: result
+                            )
+                        )
+                        ( base, [] )
+                        choices
+                        |> Tuple.second
+                        |> List.reverse
                 }
             )
 
@@ -1075,7 +1147,7 @@ create currentIndent base expectation =
                         (moveNewline startEnd)
                         remaining
             in
-            ( moveNewline remainingEnd
+            ( remainingEnd
             , StartsWith
                 { start = base
                 , end = remainingEnd
@@ -1102,7 +1174,7 @@ create currentIndent base expectation =
                     , end = end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeBoolean
                 { id = Id range
                 , found =
@@ -1124,7 +1196,7 @@ create currentIndent base expectation =
                     , end = end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeInteger
                 { id = Id pos
                 , found = Found pos i
@@ -1144,7 +1216,7 @@ create currentIndent base expectation =
                         end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeFloat
                 { id = Id pos
                 , found = Found pos ( String.fromFloat f, f )
@@ -1164,7 +1236,7 @@ create currentIndent base expectation =
                         end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeFloatBetween
                 { id = Id pos
                 , min = details.min
@@ -1187,7 +1259,7 @@ create currentIndent base expectation =
                     , end = end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeIntBetween
                 { id = Id pos
                 , min = details.min
@@ -1206,7 +1278,7 @@ create currentIndent base expectation =
                     , end = end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeString
                 (Id pos)
                 str
@@ -1224,7 +1296,7 @@ create currentIndent base expectation =
                     , end = end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeMultiline (Id pos) str
             )
 
@@ -1238,7 +1310,7 @@ create currentIndent base expectation =
                     , end = end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeStringExactly pos str
             )
 
@@ -1253,7 +1325,7 @@ create currentIndent base expectation =
                     , end = end
                     }
             in
-            ( moveNewline end
+            ( end
             , DescribeBoolean
                 { id = Id range
                 , found =
@@ -1304,51 +1376,20 @@ removeByIndex index list =
         |> List.reverse
 
 
-{-| TODO: return coordinate adjustment
--}
-makeInsertAt index new list =
-    List.foldl
-        (\item found ->
-            if found.index == index then
-                { index = found.index + 1
-                , inserted = True
-                , list = item :: Found startDocRange new :: found.list
-                }
-
-            else
-                { index = found.index + 1
-                , inserted = found.inserted
-                , list = item :: found.list
-                }
-        )
-        { index = 0
-        , inserted = False
-        , list = []
-        }
-        list
-        |> (\found ->
-                if found.inserted then
-                    found.list
-
-                else
-                    Found startDocRange new :: found.list
-           )
-        |> List.reverse
+startingPoint =
+    { offset = 0
+    , line = 1
+    , column = 1
+    }
 
 
 {-| -}
 startDocRange : Range
 startDocRange =
     { start =
-        { offset = 0
-        , line = 0
-        , column = 0
-        }
+        startingPoint
     , end =
-        { offset = 0
-        , line = 0
-        , column = 0
-        }
+        startingPoint
     }
 
 
@@ -1370,22 +1411,165 @@ makeDeleteBlock id index desc =
             Nothing
 
 
-insertAtIndex id index new desc =
-    case desc of
-        ManyOf many ->
-            if id == many.id then
-                Just
-                    (ManyOf
-                        { many
-                            | children = makeInsertAt index new many.children
-                        }
-                    )
+push maybePush found =
+    case maybePush of
+        Nothing ->
+            found
+
+        Just to ->
+            case found of
+                Found range item ->
+                    Found (pushRange to range) item
+
+                Unexpected unexpected ->
+                    Unexpected { unexpected | range = pushRange to unexpected.range }
+
+
+pushRange to range =
+    { start = addPositions to range.start
+    , end = addPositions to range.end
+    }
+
+
+addPositions to pos =
+    { offset = pos.offset + to.offset
+    , line = pos.line + to.line
+    , column = pos.column + to.column
+    }
+
+
+pushFromRange { start, end } =
+    { offset = end.offset - start.offset
+    , line = end.line - start.line
+    , column = end.column - start.column
+    }
+
+
+minusPosition end start =
+    { offset = end.offset - start.offset
+    , line = end.line - start.line
+    , column = end.column - start.column
+    }
+
+
+sizeToRange start delta =
+    { start = start
+    , end =
+        addPositions start delta
+    }
+
+
+
+-- ( newPos, newDesc ) =
+--     -- create indentation (moveNewline (moveNewline pos)) expectation
+--     create indentation startingPoint expectation
+
+
+{-| TODO: return coordinate adjustment
+-}
+makeInsertAt index many expectation =
+    List.foldl
+        (\item found ->
+            if found.index == index then
+                let
+                    newStart =
+                        if index == 0 then
+                            { offset = found.position.offset
+                            , line = found.position.line
+                            , column = 0
+                            }
+
+                        else
+                            { offset = found.position.offset + 2
+                            , line = found.position.line + 2
+                            , column = 0
+                            }
+
+                    ( createdEnd, new ) =
+                        create 0 newStart expectation
+
+                    newDescSize =
+                        minusPosition createdEnd found.position
+
+                    newFound =
+                        Found
+                            { start = newStart
+                            , end = createdEnd
+                            }
+                            new
+
+                    -- This is minus one because we're going from the 1 based indices to a delta
+                    pushAmount =
+                        Just
+                            { offset = newDescSize.offset - 1
+                            , line = newDescSize.line - 1
+                            , column = 0
+                            }
+
+                    pushed =
+                        push pushAmount item
+                in
+                { index = found.index + 1
+                , inserted = True
+                , list = pushed :: newFound :: found.list
+                , push = pushAmount
+                , position = .end (getFoundRange pushed)
+                }
 
             else
-                Nothing
+                let
+                    pushed =
+                        push found.push item
+                in
+                { index = found.index + 1
+                , inserted = found.inserted
+                , list = pushed :: found.list
+                , push = found.push
+                , position = .end (getFoundRange pushed)
+                }
+        )
+        { index = 0
+        , position = .start (getRange many.id)
+        , inserted = False
+        , list = []
+        , push = Nothing
+        }
+        many.children
+        |> (\found ->
+                if found.inserted then
+                    found.list
 
-        _ ->
-            Nothing
+                else
+                    let
+                        newStart =
+                            { offset = found.position.offset + 2
+                            , line = found.position.line + 2
+                            , column = 0
+                            }
+
+                        ( createdEnd, new ) =
+                            create 0 newStart expectation
+
+                        newDescSize =
+                            minusPosition createdEnd found.position
+                    in
+                    Found
+                        { start = newStart
+                        , end = createdEnd
+                        }
+                        new
+                        :: found.list
+           )
+        |> List.reverse
+
+
+getFoundRange found =
+    case found of
+        Found rng _ ->
+            rng
+
+        Unexpected unexp ->
+            unexp.range
 
 
 replaceOption id new desc =
@@ -1930,6 +2114,31 @@ toString (Parsed parsed) =
         , printed = ""
         }
         |> .printed
+
+
+descriptionToString desc =
+    writeDescription
+        desc
+        { indent = 0
+        , position = { line = 1, column = 1, offset = 0 }
+        , printed = ""
+        }
+        |> .printed
+
+
+getSize desc =
+    writeDescription desc
+        { indent = 0
+        , position = { line = 1, column = 1, offset = 0 }
+        , printed = ""
+        }
+        |> .position
+        |> (\pos ->
+                { column = pos.column - 1
+                , line = pos.line - 1
+                , offset = pos.offset
+                }
+           )
 
 
 type alias PrintCursor =
