@@ -662,7 +662,7 @@ update edit (Parsed original) =
                                                 Just
                                                     (ManyOf
                                                         { many
-                                                            | children = makeInsertAt index many expectation
+                                                            | children = makeInsertAt index indentation many expectation
                                                         }
                                                     )
 
@@ -795,10 +795,17 @@ makeEdit cursor desc =
 
         ManyOf many ->
             if within cursor.targetRange (getRange many.id) then
-                ManyOf
-                    { many
-                        | children = List.map (makeFoundEdit cursor) many.children
-                    }
+                case cursor.makeEdit cursor.indentation (.start (getRange many.id)) desc of
+                    Just newDesc ->
+                        -- replace current description
+                        newDesc
+
+                    Nothing ->
+                        -- dive further
+                        ManyOf
+                            { many
+                                | children = List.map (makeFoundEdit cursor) many.children
+                            }
 
             else
                 desc
@@ -945,30 +952,73 @@ withinOffsetRange offset range =
 createField : Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
 createField currentIndent ( name, exp ) ( base, existingFields ) =
     let
-        -- _ =
-        --     Debug.log "create field" base
-        -- indented
+        -- This is the beginning of the field
+        --    field = x
+        --   ^ right there
+        fieldValueStart =
+            base
+                |> moveColumn (currentIndent * 4)
+
+        -- If the field value is more than a line
         ( end, childField ) =
             create (currentIndent + 1)
-                (base
-                    |> moveColumn (currentIndent * 4)
+                (fieldValueStart
+                    -- Add a few characters to account for `field = `.
+                    |> moveColumn (String.length name + 3)
                 )
                 exp
 
-        -- _ =
-        --     Debug.log "child field" childField
+        height =
+            end.line
+                - base.line
+
+        fieldEnd =
+            moveNewline end
     in
-    ( moveNewline end
-    , ( name
-      , Found
-            { start =
-                moveColumn (currentIndent * 4) base
-            , end = end
-            }
-            childField
-      )
-        :: existingFields
-    )
+    if height == 0 then
+        ( fieldEnd
+        , ( name
+          , Found
+                { start =
+                    fieldValueStart
+                , end =
+                    fieldEnd
+                }
+                childField
+          )
+            :: existingFields
+        )
+
+    else
+        let
+            -- If the field value is more than a line
+            ( newEnd, newChildField ) =
+                create (currentIndent + 1)
+                    (fieldValueStart
+                        -- account for just `fieldname =`
+                        |> moveColumn (String.length name + 2)
+                        |> moveNewline
+                        -- Indent one level further
+                        |> moveColumn (1 * 4)
+                    )
+                    exp
+
+            finalEnd =
+                newEnd
+                    |> moveNewline
+        in
+        ( finalEnd
+        , ( name
+          , Found
+                { start =
+                    fieldValueStart
+                , end =
+                    finalEnd
+                }
+                newChildField
+          )
+            :: existingFields
+        )
 
 
 {-| Given an expectation and a list of choices, verify that the expectation is a valid choice.
@@ -1042,11 +1092,8 @@ create currentIndent base expectation =
             let
                 ( end, renderedFields ) =
                     List.foldl (createField (currentIndent + 1)) ( moveNewline base, [] ) fields
-
-                -- _ =
-                --     Debug.log "fields" renderedFields
             in
-            ( moveNewline end
+            ( end
             , Record
                 { name = name
                 , found =
@@ -1419,10 +1466,23 @@ push maybePush found =
         Just to ->
             case found of
                 Found range item ->
-                    Found (pushRange to range) item
+                    Found (pushRange to range) (pushDescription to item)
 
                 Unexpected unexpected ->
                     Unexpected { unexpected | range = pushRange to unexpected.range }
+
+
+pushDescription to desc =
+    case desc of
+        DescribeString id str ->
+            DescribeString (pushId to id) str
+
+        _ ->
+            desc
+
+
+pushId to (Id range) =
+    Id (pushRange to range)
 
 
 pushRange to range =
@@ -1459,15 +1519,9 @@ sizeToRange start delta =
     }
 
 
-
--- ( newPos, newDesc ) =
---     -- create indentation (moveNewline (moveNewline pos)) expectation
---     create indentation startingPoint expectation
-
-
 {-| TODO: return coordinate adjustment
 -}
-makeInsertAt index many expectation =
+makeInsertAt index indentation many expectation =
     List.foldl
         (\item found ->
             if found.index == index then
@@ -1476,17 +1530,17 @@ makeInsertAt index many expectation =
                         if index == 0 then
                             { offset = found.position.offset
                             , line = found.position.line
-                            , column = 0
+                            , column = (indentation * 4) + 1
                             }
 
                         else
                             { offset = found.position.offset + 2
                             , line = found.position.line + 2
-                            , column = 0
+                            , column = (indentation * 4) + 1
                             }
 
                     ( createdEnd, new ) =
-                        create 0 newStart expectation
+                        create indentation newStart expectation
 
                     newDescSize =
                         minusPosition createdEnd found.position
@@ -1498,20 +1552,29 @@ makeInsertAt index many expectation =
                             }
                             new
 
-                    -- This is minus one because we're going from the 1 based indices to a delta
                     pushAmount =
-                        Just
-                            { offset = newDescSize.offset - 1
-                            , line = newDescSize.line - 1
-                            , column = 0
-                            }
+                        Just <|
+                            if index == 0 then
+                                { offset = newDescSize.offset + 2
+                                , line = newDescSize.line + 2
+                                , column = 0
+                                }
+
+                            else
+                                { offset = newDescSize.offset
+                                , line = newDescSize.line
+                                , column = 0
+                                }
 
                     pushed =
                         push pushAmount item
                 in
                 { index = found.index + 1
                 , inserted = True
-                , list = pushed :: newFound :: found.list
+                , list =
+                    pushed
+                        :: newFound
+                        :: found.list
                 , push = pushAmount
                 , position = .end (getFoundRange pushed)
                 }
@@ -1544,14 +1607,11 @@ makeInsertAt index many expectation =
                         newStart =
                             { offset = found.position.offset + 2
                             , line = found.position.line + 2
-                            , column = 0
+                            , column = (indentation * 4) + 1
                             }
 
                         ( createdEnd, new ) =
-                            create 0 newStart expectation
-
-                        newDescSize =
-                            minusPosition createdEnd found.position
+                            create indentation newStart expectation
                     in
                     Found
                         { start = newStart
@@ -2253,11 +2313,17 @@ writeDescription description cursor =
                 |> writeFound (writeWith identity) found
 
         Record details ->
-            writeIndent cursor
-                |> write ("| " ++ details.name)
-                |> indent
+            cursor
                 |> writeFound
-                    (\fields curs -> List.foldr writeField curs fields)
+                    (\fields curs ->
+                        curs
+                            |> writeIndent
+                            |> write ("| " ++ details.name)
+                            |> indent
+                            |> (\c ->
+                                    List.foldr writeField c fields
+                               )
+                    )
                     details.found
                 |> dedent
 
@@ -2407,6 +2473,7 @@ writeFound fn found cursor =
 
         Unexpected unexpected ->
             cursor
+                |> advanceTo unexpected.range
 
 
 writeField : ( String, Found Description ) -> PrintCursor -> PrintCursor
@@ -2415,8 +2482,9 @@ writeField ( name, foundVal ) cursor =
         Found rng fnd ->
             cursor
                 |> advanceTo rng
-                |> write (name ++ " = ")
+                |> write (name ++ " =")
                 |> writeDescription fnd
 
         Unexpected unexpected ->
             cursor
+                |> advanceTo unexpected.range

@@ -59,6 +59,25 @@ record =
         ]
 
 
+recordOfRecord =
+    Description.ExpectRecord "Record"
+        [ ( "record"
+          , Description.ExpectRecord "Record"
+                [ ( "value"
+                  , Description.ExpectInteger 5
+                  )
+                ]
+          )
+        ]
+
+
+recordOfRecordString =
+    """| Record
+    record =
+        | Record
+            value = 5"""
+
+
 recordString =
     """| Circle
     x = 5
@@ -75,13 +94,24 @@ indentedRecordString =
         color = Red"""
 
 
-manyHellos =
+manyHellos () =
     create
         (Description.ExpectManyOf
             [ Description.ExpectString "hello"
             , Description.ExpectString "hello"
             , Description.ExpectString "hello"
             ]
+        )
+
+
+manyIndentedHellos () =
+    create
+        (Description.ExpectBlock "Indented" <|
+            Description.ExpectManyOf
+                [ Description.ExpectString "hello"
+                , Description.ExpectString "hello"
+                , Description.ExpectString "hello"
+                ]
         )
 
 
@@ -117,13 +147,32 @@ suite =
                             (create record)
                         )
                         recordString
+            , test "RecordOfRecord" <|
+                \_ ->
+                    Expect.equal
+                        (Description.descriptionToString
+                            (create recordOfRecord)
+                        )
+                        recordOfRecordString
             , test "Many Strings" <|
                 \_ ->
                     Expect.equal
                         (Description.descriptionToString
-                            manyHellos
+                            (manyHellos ())
                         )
                         "hello\n\nhello\n\nhello"
+            , test "Many Indented Strings" <|
+                \_ ->
+                    Expect.equal
+                        (Description.descriptionToString
+                            (manyIndentedHellos ())
+                        )
+                        """| Indented
+    hello
+
+    hello
+
+    hello"""
             ]
         , describe "Indented - toString"
             [ test "Integer" <|
@@ -158,9 +207,58 @@ suite =
         ]
 
 
+manyIndentedHellosId =
+    Id.Id
+        { end = { column = 5, line = 2, offset = 5 }
+        , start = { column = 5, line = 2, offset = 5 }
+        }
+
+
 edits =
     describe "Edit"
-        [ test "Insert at 2" <|
+        [ test "Indented - Insert at 2" <|
+            \_ ->
+                let
+                    new =
+                        Description.update
+                            (Description.insertAt 2
+                                (Id.Choice
+                                    manyIndentedHellosId
+                                    (Description.ExpectString "world")
+                                )
+                            )
+                            (Description.Parsed
+                                { errors = []
+                                , found =
+                                    Description.Found
+                                        { start = Description.startingPoint
+                                        , end =
+                                            { column = 1, line = 50, offset = 200 }
+                                        }
+                                        (manyIndentedHellos ())
+                                , expected =
+                                    Description.ExpectBlock "Indented" <|
+                                        Description.ExpectManyOf
+                                            [ Description.ExpectString "hello"
+                                            , Description.ExpectString "hello"
+                                            , Description.ExpectString "hello"
+                                            ]
+                                , focus = Nothing
+                                }
+                            )
+                in
+                Expect.equal (Description.toString new)
+                    """| Indented
+    hello
+
+    hello
+
+    world
+
+    hello"""
+        , test
+            "Insert at 2"
+          <|
             \_ ->
                 let
                     new =
@@ -182,7 +280,7 @@ edits =
                                         { start = Description.startingPoint
                                         , end = Description.startingPoint
                                         }
-                                        manyHellos
+                                        (manyHellos ())
                                 , expected =
                                     Description.ExpectManyOf
                                         [ Description.ExpectString "hello"
@@ -216,7 +314,7 @@ edits =
                                         { start = Description.startingPoint
                                         , end = Description.startingPoint
                                         }
-                                        manyHellos
+                                        (manyHellos ())
                                 , expected =
                                     Description.ExpectManyOf
                                         [ Description.ExpectString "hello"
@@ -250,7 +348,7 @@ edits =
                                         { start = Description.startingPoint
                                         , end = Description.startingPoint
                                         }
-                                        manyHellos
+                                        (manyHellos ())
                                 , expected =
                                     Description.ExpectManyOf
                                         [ Description.ExpectString "hello"
@@ -284,7 +382,7 @@ edits =
                                         { start = Description.startingPoint
                                         , end = Description.startingPoint
                                         }
-                                        manyHellos
+                                        (manyHellos ())
                                 , expected =
                                     Description.ExpectManyOf
                                         [ Description.ExpectString "hello"
