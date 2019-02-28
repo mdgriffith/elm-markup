@@ -5,7 +5,8 @@ module ToString exposing (edits, suite)
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, int, list, string)
 import Mark
-import Mark.Description as Description
+import Mark.Edit
+import Mark.Internal.Description as Description
 import Mark.Internal.Id as Id
 import Test exposing (..)
 
@@ -219,8 +220,8 @@ edits =
             \_ ->
                 let
                     new =
-                        Description.update
-                            (Description.insertAt 2
+                        Mark.Edit.update
+                            (Mark.Edit.insertAt 2
                                 (Id.Choice
                                     manyIndentedHellosId
                                     (Description.ExpectString "world")
@@ -261,8 +262,8 @@ edits =
             \_ ->
                 let
                     new =
-                        Description.update
-                            (Description.insertAt 2
+                        Mark.Edit.update
+                            (Mark.Edit.insertAt 2
                                 (Id.Choice
                                     (Id.Id
                                         { start = Description.startingPoint
@@ -295,8 +296,8 @@ edits =
             \_ ->
                 let
                     new =
-                        Description.update
-                            (Description.insertAt 1
+                        Mark.Edit.update
+                            (Mark.Edit.insertAt 1
                                 (Id.Choice
                                     (Id.Id
                                         { start = Description.startingPoint
@@ -329,8 +330,8 @@ edits =
             \_ ->
                 let
                     new =
-                        Description.update
-                            (Description.insertAt 0
+                        Mark.Edit.update
+                            (Mark.Edit.insertAt 0
                                 (Id.Choice
                                     (Id.Id
                                         { start = Description.startingPoint
@@ -363,8 +364,8 @@ edits =
             \_ ->
                 let
                     new =
-                        Description.update
-                            (Description.insertAt 3
+                        Mark.Edit.update
+                            (Mark.Edit.insertAt 3
                                 (Id.Choice
                                     (Id.Id
                                         { start = Description.startingPoint

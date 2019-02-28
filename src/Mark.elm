@@ -79,8 +79,8 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 import Html
 import Html.Attributes
 import Iso8601
-import Mark.Description exposing (..)
 import Mark.Format as Format
+import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
 import Mark.Internal.Id exposing (..)
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
@@ -89,7 +89,7 @@ import Time
 
 {-| -}
 type alias Parsed =
-    Mark.Description.Parsed
+    Mark.Internal.Description.Parsed
 
 
 idToRange =
@@ -3364,15 +3364,6 @@ createMakerField foundField possiblyMakerFn =
 
                 Unexpected unexpected ->
                     Err unexpected
-
-
-
--- {-| -}
--- type Field value
--- = Field String (Block value)
--- makeField : Field value -> value -> Expectation
--- makeField (Field name bl) val =
---     (name, makeBlock
 
 
 {-| -}
