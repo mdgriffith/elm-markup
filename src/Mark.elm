@@ -1,20 +1,19 @@
 module Mark exposing
     ( Document
     , Outcome(..), Partial
-    , parse, Parsed
+    , parse, Parsed, toString
     , compile, convert
-    , Block
     , document
+    , Block, map
+    , string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
     , block, stub
     , oneOf, manyOf, startWith, nested
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
-    , string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
     , text, replacement, balanced, Replacement
     , Inline, inline, inlineString, inlineText, mapInline
-    , map, idToRange
-    , focus, parent
-    , Range, Position, foldNested, foldNestedList, replaceNested
+    , Range, Position
     , Error, errorToString, errorToHtml, Theme(..)
+    , foldNested, foldNestedList, replaceNested
     )
 
 {-| `elm-markup` is about defining what you're expecting in a markup document.
@@ -37,24 +36,30 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs Outcome, Partial
 
-@docs parse, Parsed
+@docs parse, Parsed, toString
 
 @docs compile, convert
 
 
 ## Building Documents
 
-@docs Block
-
 @docs document
+
+@docs Block, map
+
+
+## Primitives
+
+@docs string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
 
 @docs block, stub
 
 @docs oneOf, manyOf, startWith, nested
 
-@docs field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
 
-@docs string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
+## Records
+
+@docs field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
 
 
 ## Handling Text and Inline
@@ -63,11 +68,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs Inline, inline, inlineString, inlineText, mapInline
 
-@docs map, idToRange
-
-@docs focus, parent
-
-@docs Range, Position, foldNested, foldNestedList, replaceNested
+@docs Range, Position
 
 
 ## Displaying Errors
@@ -92,10 +93,6 @@ type alias Parsed =
     Mark.Internal.Description.Parsed
 
 
-idToRange =
-    getRange
-
-
 
 {- INTERFACE -}
 
@@ -105,6 +102,12 @@ type Outcome failure almost success
     = Success success
     | Almost almost
     | Failure failure
+
+
+{-| -}
+toString : Parsed -> String
+toString =
+    Mark.Internal.Description.toString
 
 
 {-| -}
@@ -172,13 +175,13 @@ startDocRange : Range
 startDocRange =
     { start =
         { offset = 0
-        , line = 0
-        , column = 0
+        , line = 1
+        , column = 1
         }
     , end =
         { offset = 0
-        , line = 0
-        , column = 0
+        , line = 1
+        , column = 1
         }
     }
 
@@ -292,16 +295,18 @@ type Document data
         }
 
 
-{-| A `Block data` is just a parser that results in `data`.
+{-| -}
+type
+    Block data
+    {-
+        A `Block data` is just a parser that results in `data`.
 
-You'll be building up your `Document` in terms of the `Blocks`.
+       You'll be building up your `Document` in terms of the `Blocks`.
 
-A block starts with `|` and has a name(already built into the parser)
+       A block starts with `|` and has a name(already built into the parser)
 
-A value is just a raw parser.
-
--}
-type Block data
+       A value is just a raw parser.
+    -}
     = Block
         String
         { converter : Description -> Result AstError (Found data)
@@ -369,19 +374,6 @@ type AstError
 
 
 -}
-
-
-{-| -}
-focus : Position -> Parsed -> Parsed
-focus pos (Parsed parsed) =
-    Parsed { parsed | focus = Just pos }
-
-
-{-| -}
-parent : Parsed -> Parsed
-parent parsed =
-    -- TODO: implement
-    Debug.todo "implement!"
 
 
 within rangeOne rangeTwo =
@@ -485,7 +477,7 @@ unexpectedFromFound found =
 {-| -}
 type alias Error =
     { message : List Format.Text
-    , region : { start : Position, end : Position }
+    , region : Range
     , title : String
     }
 
