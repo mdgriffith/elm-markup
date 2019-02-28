@@ -5,7 +5,6 @@ module ToString exposing (edits, suite)
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, int, list, string)
 import Mark
-import Mark.Advanced
 import Mark.Description as Description
 import Mark.Internal.Id as Id
 import Test exposing (..)
@@ -144,7 +143,7 @@ suite =
                 \_ ->
                     Expect.equal
                         (Description.descriptionToString
-                            (create record)
+                            (Debug.log "record" (create record))
                         )
                         recordString
             , test "RecordOfRecord" <|
