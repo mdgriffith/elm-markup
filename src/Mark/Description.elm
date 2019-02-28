@@ -5,7 +5,8 @@ module Mark.Description exposing
     , Edit, update
     , Parsed(..)
     , toString, getDescription, make
-    , updateInt, updateString, replaceWith, deleteBlock, insertAt, updateFloat, move
+    , updateInt, updateString, replaceWith, delete, insertAt, updateFloat, move
+    , setInt, setString, setFloat, setBool, setField, withinBlock
     , writeDescription, writeFound, descriptionToString, startingPoint, create
     )
 
@@ -23,7 +24,12 @@ module Mark.Description exposing
 
 @docs toString, getDescription, make
 
-@docs updateInt, updateString, replaceWith, deleteBlock, insertAt, updateFloat, move
+@docs updateInt, updateString, replaceWith, delete, insertAt, updateFloat, move
+
+
+# Creating Values
+
+@docs setInt, setString, setFloat, setBool, setField, withinBlock
 
 -- REMOVE
 
@@ -258,9 +264,9 @@ replaceWith =
 
 
 {-| -}
-deleteBlock : Id ManyOptions -> Int -> Edit
-deleteBlock =
-    DeleteBlock
+delete : Id ManyOptions -> Int -> Edit
+delete =
+    Delete
 
 
 {-| -}
@@ -300,14 +306,12 @@ type Edit
 
         -- Can we make is so the payload is proved to be valid ?
         , payload : Proved
-
-        -- List (Found Description)
         }
       -- Create an element in a ManyOf
       -- Indexes overflow, so if it's too large, it just puts it at the end.
       -- Indexes that are below 0 and clamped to 0
     | InsertAt Int (Choice (Id ManyOptions) Expectation)
-    | DeleteBlock (Id ManyOptions) Int
+    | Delete (Id ManyOptions) Int
 
 
 {-| -}
@@ -676,7 +680,7 @@ update edit (Parsed original) =
                             original.found
                 }
 
-        DeleteBlock id index ->
+        Delete id index ->
             Parsed
                 { original
                     | found =
@@ -1132,10 +1136,7 @@ create currentIndent base expectation =
                 -- TODO: handle case of empty OneOf
                 ( end, childDescription ) =
                     create (currentIndent + 1)
-                        (base
-                         -- |> moveNewline
-                         -- |> moveColumn ((currentIndent + 1) * 4)
-                        )
+                        base
                         (Maybe.withDefault (ExpectStub "Unknown") (List.head choices))
             in
             ( base
@@ -2317,7 +2318,10 @@ writeDescription description cursor =
                 |> writeFound
                     (\fields curs ->
                         curs
-                            |> writeIndent
+                            -- TODO: This seems to be necessary for the recordOfRecord test, but
+                            -- makes things parsed normally fail...sooo
+                            -- |> writeIndent
+                            |> Debug.log ("record: " ++ details.name)
                             |> write ("| " ++ details.name)
                             |> indent
                             |> (\c ->
@@ -2488,3 +2492,209 @@ writeField ( name, foundVal ) cursor =
         Unexpected unexpected ->
             cursor
                 |> advanceTo unexpected.range
+
+
+
+--- Setting Expectations
+-- type Expectation
+--     = ExpectBlock String Expectation
+--     | ExpectStub String
+--     | ExpectRecord String (List ( String, Expectation ))
+--     | ExpectOneOf (List Expectation)
+--     | ExpectManyOf (List Expectation)
+--     | ExpectStartsWith Expectation Expectation
+--     | ExpectBoolean Bool
+--     | ExpectInteger Int
+--     | ExpectFloat Float
+--     | ExpectFloatBetween
+--         { min : Float
+--         , max : Float
+--         , default : Float
+--         }
+--     | ExpectIntBetween
+--         { min : Int
+--         , max : Int
+--         , default : Int
+--         }
+--     | ExpectText (List InlineExpectation)
+--     | ExpectString String
+--     | ExpectMultiline String
+--     | ExpectStringExactly String
+--     | ExpectDate Time.Posix
+--     | ExpectTree Expectation Expectation
+{-
+   General Use of Setters.
+
+
+   makeCircle default =
+       startingWith default
+           |> setField "label" (setString "Heres my circle!")
+           |> setField "x" (setInt 10)
+
+
+
+-}
+
+
+type ExpError
+    = ExpError
+
+
+{-| -}
+startingWith : Expectation -> Result ExpError Expectation
+startingWith exp =
+    Ok exp
+
+
+{-| -}
+withinBlock :
+    (Result ExpError Expectation -> Result ExpError Expectation)
+    -> Result ExpError Expectation
+    -> Result ExpError Expectation
+withinBlock setter resExp =
+    resExp
+
+
+{-| -}
+setInt : Int -> Result ExpError Expectation -> Result ExpError Expectation
+setInt i resExp =
+    case resExp of
+        Err _ ->
+            resExp
+
+        Ok exp ->
+            case exp of
+                ExpectInteger _ ->
+                    Ok (ExpectInteger i)
+
+                ExpectIntBetween details ->
+                    if i >= details.min && i <= details.max then
+                        Ok (ExpectIntBetween { details | default = i })
+
+                    else
+                        Err ExpError
+
+                _ ->
+                    Err ExpError
+
+
+{-| -}
+setString : String -> Result ExpError Expectation -> Result ExpError Expectation
+setString str resExp =
+    case resExp of
+        Err _ ->
+            resExp
+
+        Ok exp ->
+            case exp of
+                ExpectString _ ->
+                    Ok (ExpectString str)
+
+                ExpectMultiline _ ->
+                    Ok (ExpectMultiline str)
+
+                _ ->
+                    Err ExpError
+
+
+{-| -}
+setFloat : Float -> Result ExpError Expectation -> Result ExpError Expectation
+setFloat f resExp =
+    case resExp of
+        Err _ ->
+            resExp
+
+        Ok exp ->
+            case exp of
+                ExpectFloat _ ->
+                    Ok (ExpectFloat f)
+
+                ExpectFloatBetween details ->
+                    if f >= details.min && f <= details.max then
+                        Ok (ExpectFloatBetween { details | default = f })
+
+                    else
+                        Err ExpError
+
+                _ ->
+                    Err ExpError
+
+
+{-| -}
+setBool : Bool -> Result ExpError Expectation -> Result ExpError Expectation
+setBool b resExp =
+    case resExp of
+        Err _ ->
+            resExp
+
+        Ok exp ->
+            case exp of
+                ExpectBoolean _ ->
+                    Ok (ExpectBoolean b)
+
+                _ ->
+                    Err ExpError
+
+
+setField :
+    String
+    -> (Result ExpError Expectation -> Result ExpError Expectation)
+    -> Result ExpError Expectation
+    -> Result ExpError Expectation
+setField fieldName fieldSetter resExp =
+    case resExp of
+        Err _ ->
+            resExp
+
+        Ok exp ->
+            case exp of
+                ExpectRecord recordName fields ->
+                    case List.foldl (setRecordField fieldName fieldSetter) (NotYet []) fields of
+                        Failed err ->
+                            Err err
+
+                        NotYet _ ->
+                            Err ExpError
+
+                        UpdateMade updatedFields ->
+                            Ok
+                                (ExpectRecord recordName (List.reverse updatedFields))
+
+                _ ->
+                    Err ExpError
+
+
+type Updated x
+    = UpdateMade x
+    | NotYet x
+    | Failed ExpError
+
+
+setRecordField :
+    String
+    ->
+        (Result ExpError Expectation
+         -> Result ExpError Expectation
+        )
+    -> ( String, Expectation )
+    -> Updated (List ( String, Expectation ))
+    -> Updated (List ( String, Expectation ))
+setRecordField targetFieldName fieldSetter ( fieldName, fieldExp ) gathered =
+    case gathered of
+        Failed x ->
+            gathered
+
+        UpdateMade fields ->
+            UpdateMade (( fieldName, fieldExp ) :: fields)
+
+        NotYet fields ->
+            if fieldName == targetFieldName then
+                case fieldSetter (Ok fieldExp) of
+                    Err err ->
+                        Failed err
+
+                    Ok updated ->
+                        UpdateMade (( fieldName, updated ) :: fields)
+
+            else
+                NotYet (( fieldName, fieldExp ) :: fields)
