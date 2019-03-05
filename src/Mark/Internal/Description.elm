@@ -1,7 +1,7 @@
 module Mark.Internal.Description exposing
     ( Found(..), Nested(..), UnexpectedDetails
-    , Description(..), TextDescription(..), InlineDescription(..), Text(..), Style(..)
-    , Expectation(..), InlineExpectation(..), InlineValueExpectation(..)
+    , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
+    , Expectation(..), InlineExpectation(..), AttrExpectation(..)
     , Parsed(..), startingPoint, create, descriptionToString, toString
     )
 
@@ -9,9 +9,9 @@ module Mark.Internal.Description exposing
 
 @docs Found, Nested, UnexpectedDetails
 
-@docs Description, TextDescription, InlineDescription, Text, Style
+@docs Description, TextDescription, InlineAttribute, Text, Style
 
-@docs Expectation, InlineExpectation, InlineValueExpectation
+@docs Expectation, InlineExpectation, AttrExpectation
 
 @docs Parsed, startingPoint, create, descriptionToString, toString
 
@@ -162,14 +162,30 @@ type Proved
 {-| -}
 type TextDescription
     = Styled Range Text
-    | DescribeInline String Range (List InlineDescription)
+    | InlineAnnotation
+        { range : Range
+        , text : List Text
+        , attributes : List InlineAttribute
+        }
+    | InlineToken
+        { name : String
+        , range : Range
+        , attributes : List InlineAttribute
+        }
     | UnexpectedInline UnexpectedDetails
 
 
 {-| -}
-type InlineDescription
-    = DescribeInlineString String Range String
-    | DescribeInlineText Range (List Text)
+type InlineAttribute
+    = AttrString
+        { name : String
+        , range : Range
+        , value : String
+        }
+
+
+
+-- | DescribeInlineText Range (List Text)
 
 
 {-| -}
@@ -216,13 +232,18 @@ type Expectation
 
 {-| -}
 type InlineExpectation
-    = InlineExpectation String (List InlineValueExpectation)
+    = ExpectAnnotation (List AttrExpectation)
+    | ExpectToken String (List AttrExpectation)
 
 
 {-| -}
-type InlineValueExpectation
-    = ExpectInlineString String
-    | ExpectInlineText
+type AttrExpectation
+    = ExpectAttrString String
+
+
+
+-- | ExpectAttr
+-- | ExpectInlineText
 
 
 choiceExpectation (Choice id exp) =
@@ -1529,21 +1550,39 @@ textDescriptionToString txt =
         Styled range t ->
             textToString t
 
-        DescribeInline name range inlineDesc ->
-            "{" ++ name ++ String.join "" (List.map inlineDescToString inlineDesc) ++ "}"
+        InlineToken details ->
+            case details.attributes of
+                [] ->
+                    "{" ++ details.name ++ "}"
+
+                _ ->
+                    "{"
+                        ++ details.name
+                        ++ " |"
+                        ++ String.join ", " (List.map inlineDescToString details.attributes)
+                        ++ "}"
+
+        InlineAnnotation details ->
+            "["
+                ++ String.join "" (List.map textToString details.text)
+                ++ "]{"
+                ++ String.join ", " (List.map inlineDescToString details.attributes)
+                ++ "}"
 
         UnexpectedInline unexpected ->
             ""
 
 
-inlineDescToString : InlineDescription -> String
+inlineDescToString : InlineAttribute -> String
 inlineDescToString inlineDesc =
     case inlineDesc of
-        DescribeInlineString name range value ->
+        AttrString { name, range, value } ->
             name ++ " = " ++ value
 
-        DescribeInlineText range txts ->
-            String.join "" (List.map textToString txts)
+
+
+-- DescribeInlineText range txts ->
+--     String.join "" (List.map textToString txts)
 
 
 writeTextDescription desc curs =
