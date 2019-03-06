@@ -46,6 +46,19 @@ type TextCursor
         }
 
 
+type SimpleTextCursor
+    = SimpleTextCursor
+        { current : Text
+        , start : Position
+        , text : List Text
+        , balancedReplacements : List String
+        }
+
+
+mapTextCursor fn (TextCursor curs) =
+    TextCursor (fn curs)
+
+
 {-| -}
 type Replacement
     = Replacement String String
@@ -60,6 +73,15 @@ empty =
     Text [] ""
 
 
+textCursor inheritedStyles startingPos =
+    TextCursor
+        { current = Text inheritedStyles ""
+        , found = []
+        , start = startingPos
+        , balancedReplacements = []
+        }
+
+
 styledText :
     { inlines : List InlineExpectation
     , replacements : List Replacement
@@ -71,12 +93,7 @@ styledText :
 styledText options startingPos inheritedStyles until =
     let
         vacantText =
-            TextCursor
-                { current = Text inheritedStyles ""
-                , found = []
-                , start = startingPos
-                , balancedReplacements = []
-                }
+            textCursor inheritedStyles startingPos
 
         untilStrings =
             List.map String.fromChar until
@@ -128,7 +145,7 @@ styledTextLoop options meaningful untilStrings found =
 
         -- Capture style command characters
         , Parser.succeed
-            (Parser.Loop << changeStyle options found)
+            (Parser.Loop << changeStyle found)
             |= Parser.oneOf
                 [ Parser.map (always (Just Italic)) (Parser.token (Parser.Token "/" (Expecting "/")))
                 , Parser.map (always (Just Strike)) (Parser.token (Parser.Token "~" (Expecting "~")))
@@ -137,6 +154,7 @@ styledTextLoop options meaningful untilStrings found =
 
         -- Custom inline block
         , inlineToken options found
+        , inlineAnnotation options found
         , -- chomp until a meaningful character
           Parser.chompWhile
             (\c ->
@@ -146,7 +164,7 @@ styledTextLoop options meaningful untilStrings found =
             |> Parser.andThen
                 (\new ->
                     if new == "" || new == "\n" then
-                        case changeStyle options found Nothing of
+                        case changeStyle found Nothing of
                             TextCursor txt ->
                                 let
                                     styling =
@@ -192,12 +210,166 @@ almostReplacement replacements existing =
     List.map captureChar allFirstChars
 
 
+inlineAnnotation options found =
+    (Parser.succeed identity
+        |= getPosition
+        |. Parser.token (Parser.Token "[" InlineStart)
+    )
+        |> Parser.andThen
+            (\startPos ->
+                Parser.succeed
+                    (\( end, new, maybeTextCursor ) ->
+                        let
+                            current =
+                                case changeStyle found Nothing of
+                                    TextCursor accum ->
+                                        accum
+                        in
+                        case maybeTextCursor of
+                            Nothing ->
+                                Parser.Loop
+                                    (TextCursor
+                                        { found = new :: current.found
+                                        , start = end
+                                        , current = empty
+                                        , balancedReplacements = current.balancedReplacements
+                                        }
+                                    )
+
+                            Just (TextCursor curs) ->
+                                Parser.Loop
+                                    (TextCursor
+                                        { found = new :: current.found
+                                        , start = end
+                                        , current =
+                                            case curs.current of
+                                                Text styles _ ->
+                                                    Text styles ""
+                                        , balancedReplacements = curs.balancedReplacements
+                                        }
+                                    )
+                    )
+                    |= Parser.oneOf
+                        [ Parser.succeed
+                            (\( text, cursor ) hasEnd attrs end ->
+                                if hasEnd then
+                                    ( end
+                                    , InlineAnnotation
+                                        { text = text
+                                        , range =
+                                            { start = startPos
+                                            , end = end
+                                            }
+                                        , attributes = attrs
+                                        }
+                                    , Just cursor
+                                    )
+
+                                else
+                                    ( end
+                                    , UnexpectedInline
+                                        { range =
+                                            { start = startPos
+                                            , end = end
+                                            }
+                                        , problem =
+                                            -- TODO: This is the wrong error
+                                            -- It could be:
+                                            --   unexpected attributes
+                                            --   missing control characters
+                                            Error.UnknownInline []
+                                        }
+                                    , Nothing
+                                    )
+                            )
+                            |= Parser.loop
+                                (textCursor [] startPos)
+                                (simpleStyledTextTill [ '\n', ']' ] options.replacements)
+                            |= Parser.oneOf
+                                [ Parser.map (always True) (Parser.token (Parser.Token "]" InlineEnd))
+                                , Parser.succeed False
+                                    |. parseTillEnd
+                                ]
+                            |= parseAndMatchAttributes (List.filterMap onlyAnnotations options.inlines)
+                            |= getPosition
+                        ]
+            )
+
+
+simpleStyledTextTill :
+    List Char
+    -> List Replacement
+    -> TextCursor
+    -> Parser Context Problem (Parser.Step TextCursor ( List Text, TextCursor ))
+simpleStyledTextTill until replacements cursor =
+    -- options meaningful untilStrings found =
+    Parser.oneOf
+        [ Parser.oneOf (replace replacements cursor)
+            |> Parser.map Parser.Loop
+
+        -- If a char matches the first character of a replacement,
+        -- but didn't match the full replacement captured above,
+        -- then stash that char.
+        , Parser.oneOf (almostReplacement replacements cursor)
+            |> Parser.map Parser.Loop
+
+        -- Capture style command characters
+        , Parser.succeed
+            (Parser.Loop << changeStyle cursor)
+            |= Parser.oneOf
+                [ Parser.map (always (Just Italic)) (Parser.token (Parser.Token "/" (Expecting "/")))
+                , Parser.map (always (Just Strike)) (Parser.token (Parser.Token "~" (Expecting "~")))
+                , Parser.map (always (Just Bold)) (Parser.token (Parser.Token "*" (Expecting "*")))
+                ]
+        , -- chomp until a meaningful character
+          Parser.chompWhile
+            (\c ->
+                not (List.member c ('\\' :: '\n' :: until ++ stylingChars ++ replacementStartingChars replacements))
+            )
+            |> Parser.getChompedString
+            |> Parser.andThen
+                (\new ->
+                    if new == "" || new == "\n" then
+                        case changeStyle cursor Nothing of
+                            TextCursor txt ->
+                                let
+                                    styling =
+                                        case txt.current of
+                                            Text s _ ->
+                                                s
+                                in
+                                Parser.succeed
+                                    (Parser.Done
+                                        ( List.reverse <| List.filterMap toText txt.found
+                                        , TextCursor txt
+                                        )
+                                    )
+
+                    else
+                        Parser.succeed (Parser.Loop (addText new cursor))
+                )
+        ]
+
+
+toText textDesc =
+    case textDesc of
+        Styled _ txt ->
+            Just txt
+
+        _ ->
+            Nothing
+
+
+parseAndMatchAttributes attrSets =
+    Parser.succeed []
+
+
 inlineToken options found =
     Parser.succeed
         (\start maybeRendered end ->
             let
                 current =
-                    case changeStyle options found Nothing of
+                    case changeStyle found Nothing of
                         TextCursor accum ->
                             accum
             in
@@ -333,88 +505,6 @@ attributeList ( attrExpectations, found ) =
                 )
 
 
-
--- -- Returning `Nothing` will return an Error describing what this inline should look like.
--- -- When `Nothing` is returned, the parser needs to consume everything until either `}` or `\n`
--- case current of
---     -- if Keyword fails -> Nothing
---     -- if `=` fails -> Nothing
---     ExpectAttrString inlineName ->
---         Parser.oneOf
---             [ (Parser.succeed
---                 (\start hasName hasEquals ->
---                     if hasName && hasEquals then
---                         -- Parser.Loop
---                         --     ( remaining
---                         --     , DescribeInlineString
---                         --         inlineName
---                         --         { start = start
---                         --         , end = end
---                         --         }
---                         --         str
---                         --         :: found
---                         --     )
---                         ( True, start )
---                     else
---                         ( False, start )
---                 )
---                 |= getPosition
---                 |= Parser.oneOf
---                     [ Parser.map (always True)
---                         (Parser.keyword
---                             (Parser.Token
---                                 inlineName
---                                 (ExpectingFieldName inlineName)
---                             )
---                         )
---                     , Parser.succeed False
---                     ]
---                 |. Parser.chompWhile (\c -> c == ' ')
---                 |= Parser.oneOf
---                     [ Parser.map (always True) (Parser.chompIf (\c -> c == '=') (Expecting "="))
---                     , Parser.succeed False
---                     ]
---               )
---                 |> Parser.andThen
---                     (\( continue, start ) ->
---                         if continue then
---                             Parser.succeed
---                                 (\str end ->
---                                     Parser.Loop
---                                         ( remaining
---                                         , AttrString
---                                             { name = inlineName
---                                             , range =
---                                                 { start = start
---                                                 , end = end
---                                                 }
---                                             , value = str
---                                             }
---                                             :: found
---                                         )
---                                 )
---                                 |. Parser.chompWhile (\c -> c == ' ')
---                                 |= Parser.getChompedString
---                                     (Parser.chompWhile (\c -> c /= '|' && c /= '}' && c /= '\n'))
---                                 |= getPosition
---                         else
---                             Parser.succeed
---                                 (\end ->
---                                     Parser.Done Nothing
---                                 )
---                                 |. parseTillEnd
---                                 |= getPosition
---                     )
--- , Parser.succeed
---     (\start end ->
---         Parser.Done Nothing
---     )
---     |= getPosition
---     |. parseTillEnd
---     |= getPosition
---             ]
-
-
 attribute : AttrExpectation -> Parser Context Problem InlineAttribute
 attribute attr =
     case attr of
@@ -450,7 +540,7 @@ attribute attr =
 {- Style Helpers -}
 
 
-changeStyle options (TextCursor cursor) maybeStyleToken =
+changeStyle (TextCursor cursor) maybeStyleToken =
     let
         cursorText =
             case cursor.current of
@@ -546,8 +636,7 @@ replace replacements existing =
         escaped =
             Parser.succeed
                 (\esc ->
-                    existing
-                        |> addText esc
+                    addText esc existing
                 )
                 |. Parser.token
                     (Parser.Token "\\" Escape)
@@ -631,14 +720,11 @@ addText newTxt (TextCursor cursor) =
 
 stylingChars =
     [ '~'
-
-    -- , '_'
+    , '['
     , '/'
     , '*'
     , '\n'
     , '{'
-
-    -- , '`'
     ]
 
 
