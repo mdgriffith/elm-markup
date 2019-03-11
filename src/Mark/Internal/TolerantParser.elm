@@ -1,18 +1,17 @@
 module Mark.Internal.TolerantParser exposing
     ( Parser, try
-    , Token, token, keyword, symbol
+    , Token, token, keyword, symbol, OnError(..), skip, fastForwardTo
     , succeed, ignore, keep
     , oneOf
     , chompWhile
     , map
-    , fastForwardTo, skip
     )
 
 {-|
 
 @docs Parser, try
 
-@docs Token, token, keyword, symbol
+@docs Token, token, keyword, symbol, OnError, skip, fastForwardTo
 
 @docs succeed, ignore, keep
 
@@ -41,7 +40,10 @@ map =
 {- ONEOF -}
 
 
-{-| A tolerant `oneOf` means
+{-| A tolerant `oneOf` means it has to succeed.
+
+So, you provide an error to return if everything else fails.
+
 -}
 oneOf : problem -> List (Parser context problem data) -> Parser context problem data
 oneOf prob options =

@@ -148,87 +148,19 @@ styledTextLoop options meaningful untilStrings found =
         , Parser.succeed
             (Parser.Loop << changeStyle found)
             |= Parser.oneOf
-                [ Parser.map (always (Just Italic)) (Parser.token (Parser.Token "/" (Expecting "/")))
-                , Parser.map (always (Just Strike)) (Parser.token (Parser.Token "~" (Expecting "~")))
-                , Parser.map (always (Just Bold)) (Parser.token (Parser.Token "*" (Expecting "*")))
+                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
+                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
+                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
                 ]
 
         -- {token| withAttributes = True}
         , Parser.succeed
             (\start maybeToken end ->
                 case maybeToken of
-                    Nothing ->
-                        Parser.Loop <|
-                            addToTextCursor
-                                (UnexpectedInline
-                                    { range =
-                                        { start = start
-                                        , end = end
-                                        }
-                                    , problem =
-                                        Error.UnknownInline []
-
-                                    -- TODO: FIX THIS
-                                    --(List.map getInlineName options.inlines)
-                                    }
-                                )
-                                found
-
-                    Just ( name, attrs ) ->
-                        Parser.Loop <|
-                            addToTextCursor
-                                (InlineToken
-                                    { name = name
-                                    , range =
-                                        { start = start
-                                        , end = end
-                                        }
-                                    , attributes = attrs
-                                    }
-                                )
-                                found
-            )
-            |= getPosition
-            |= matchAttrContainer (List.filterMap onlyTokens options.inlines)
-            |= getPosition
-
-        -- [Some styled /text/]{token| withAttribtues = True}
-        , Parser.succeed
-            (\start almostNote end ->
-                case almostNote of
-                    Ok ( noteText, cursor, ( name, attrs ) ) ->
+                    Err errors ->
                         let
-                            note =
-                                InlineAnnotation
-                                    { text = noteText
-                                    , range =
-                                        { start = start
-                                        , end = end
-                                        }
-                                    , attributes = attrs
-                                    }
-                        in
-                        found
-                            |> addToTextCursor note
-                            -- |> resetBalancedReplacements cursor.balancedReplacements
-                            -- |> resetStylesTo cursor.current
-                            |> Parser.Loop
-
-                    -- Parser.Loop
-                    --     (TextCursor
-                    --         { found = note :: found.found
-                    --         , start = end
-                    --         , current =
-                    --             case cursor.current of
-                    --                 Text styles _ ->
-                    --                     Text styles ""
-                    --         , balancedReplacements = cursor.balancedReplacements
-                    --         }
-                    --     )
-                    Err errs ->
-                        Parser.Loop <|
-                            addToTextCursor
-                                (UnexpectedInline
+                            er =
+                                UnexpectedInline
                                     { range =
                                         { start = start
                                         , end = end
@@ -243,8 +175,86 @@ styledTextLoop options meaningful untilStrings found =
                                     --   unexpected attributes
                                     --   missing control characters
                                     }
-                                )
-                                found
+                        in
+                        found
+                            |> commitText
+                            |> addToTextCursor er
+                            |> advanceTo end
+                            |> Parser.Loop
+
+                    Ok ( name, attrs ) ->
+                        let
+                            note =
+                                InlineToken
+                                    { name = name
+                                    , range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , attributes = attrs
+                                    }
+                        in
+                        found
+                            |> commitText
+                            |> addToTextCursor note
+                            |> advanceTo end
+                            |> Parser.Loop
+            )
+            |= getPosition
+            |= attrContainer
+                { attributes = List.filterMap onlyTokens options.inlines
+                , onError = Tolerant.skip
+                }
+            |= getPosition
+
+        -- [Some styled /text/]{token| withAttribtues = True}
+        , Parser.succeed
+            (\start almostNote end ->
+                case almostNote of
+                    Ok ( noteText, TextCursor childCursor, ( name, attrs ) ) ->
+                        let
+                            note =
+                                InlineAnnotation
+                                    { text = noteText
+                                    , range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , attributes = attrs
+                                    }
+                        in
+                        found
+                            |> commitText
+                            |> addToTextCursor note
+                            |> resetBalancedReplacements childCursor.balancedReplacements
+                            |> resetTextWith childCursor.current
+                            |> advanceTo end
+                            |> Parser.Loop
+
+                    Err errs ->
+                        let
+                            er =
+                                UnexpectedInline
+                                    { range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , problem =
+                                        Error.UnknownInline []
+
+                                    -- TODO: FIX THIS
+                                    --(List.map getInlineName options.inlines)
+                                    -- TODO: This is the wrong error
+                                    -- It could be:
+                                    --   unexpected attributes
+                                    --   missing control characters
+                                    }
+                        in
+                        found
+                            |> commitText
+                            |> addToTextCursor er
+                            |> advanceTo end
+                            |> Parser.Loop
             )
             |= getPosition
             |= inlineAnnotation options found
@@ -258,7 +268,7 @@ styledTextLoop options meaningful untilStrings found =
             |> Parser.andThen
                 (\new ->
                     if new == "" || new == "\n" then
-                        case changeStyle found Nothing of
+                        case commitText found of
                             TextCursor txt ->
                                 let
                                     styling =
@@ -305,89 +315,6 @@ almostReplacement replacements existing =
 
 
 
--- inlineAnnotation options found =
---     (Parser.succeed identity
---         |= getPosition
---         |. Parser.token (Parser.Token "[" InlineStart)
---     )
---         |> Parser.andThen
---             (\startPos ->
---                 Parser.succeed
---                     (\( end, new, maybeTextCursor ) ->
---                         let
---                             current =
---                                 case changeStyle found Nothing of
---                                     TextCursor accum ->
---                                         accum
---                         in
---                         case maybeTextCursor of
---                             Nothing ->
---                                 Parser.Loop
---                                     (TextCursor
---                                         { found = new :: current.found
---                                         , start = end
---                                         , current = empty
---                                         , balancedReplacements = current.balancedReplacements
---                                         }
---                                     )
---                             Just (TextCursor curs) ->
--- Parser.Loop
---     (TextCursor
---         { found = new :: current.found
---         , start = end
---         , current =
---             case curs.current of
---                 Text styles _ ->
---                     Text styles ""
---         , balancedReplacements = curs.balancedReplacements
---         }
---     )
---                     )
---                     |= Parser.oneOf
---                         [ Parser.succeed
---                             (\( text, cursor ) hasEnd maybeNameAndAttrs end ->
---                                 case ( hasEnd, maybeNameAndAttrs ) of
---                                     ( True, Just ( name, attrs ) ) ->
---                                         ( end
--- , InlineAnnotation
---     { text = text
---     , range =
---         { start = startPos
---         , end = end
---         }
---     , attributes = attrs
---     }
---                                         , Just cursor
---                                         )
---                                     _ ->
---                                         ( end
---                                         , UnexpectedInline
---                                             { range =
---                                                 { start = startPos
---                                                 , end = end
---                                                 }
---                                             , problem =
---                                                 -- TODO: This is the wrong error
---                                                 -- It could be:
---                                                 --   unexpected attributes
---                                                 --   missing control characters
---                                                 Error.UnknownInline []
---                                             }
---                                         , Nothing
---                                         )
---                             )
---                             |= Parser.loop
---                                 (textCursor [] startPos)
---                                 (simpleStyledTextTill [ '\n', ']' ] options.replacements)
---                             |= Parser.oneOf
---                                 [ Parser.map (always True) (Parser.token (Parser.Token "]" InlineEnd))
---                                 , Parser.succeed False
---                                     |. parseTillEnd
---                                 ]
---                             |= matchAttrContainer (List.filterMap onlyAnnotations options.inlines)
---                             |= getPosition
---                         ]
---             )
 -- inlineAnnotation : () -> () -> Tolerant.Parser Context Problem ( List Text, TextCursor, ( String, List InlineAttribute ) )
 
 
@@ -423,7 +350,11 @@ inlineAnnotation options found =
                 }
             )
         |> Tolerant.keep
-            (matchAttrContainerTolerant (List.filterMap onlyAnnotations options.inlines))
+            (attrContainer
+                { attributes = List.filterMap onlyAnnotations options.inlines
+                , onError = Tolerant.fastForwardTo [ '}', '\n' ]
+                }
+            )
 
 
 simpleStyledTextTill :
@@ -447,9 +378,9 @@ simpleStyledTextTill until replacements cursor =
         , Parser.succeed
             (Parser.Loop << changeStyle cursor)
             |= Parser.oneOf
-                [ Parser.map (always (Just Italic)) (Parser.token (Parser.Token "/" (Expecting "/")))
-                , Parser.map (always (Just Strike)) (Parser.token (Parser.Token "~" (Expecting "~")))
-                , Parser.map (always (Just Bold)) (Parser.token (Parser.Token "*" (Expecting "*")))
+                [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
+                , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
+                , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
                 ]
         , -- chomp until a meaningful character
           Parser.chompWhile
@@ -460,7 +391,7 @@ simpleStyledTextTill until replacements cursor =
             |> Parser.andThen
                 (\new ->
                     if new == "" || new == "\n" then
-                        case changeStyle cursor Nothing of
+                        case commitText cursor of
                             TextCursor txt ->
                                 let
                                     styling =
@@ -490,7 +421,7 @@ toText textDesc =
             Nothing
 
 
-{-| Match one of the attr tokens
+{-| Match one of the attribute containers
 
     {mytoken| attributeList }
     ^                       ^
@@ -500,53 +431,33 @@ Because there is no styled text here, we know the following can't happen:
     1. Change in text styles
     2. Any Replacements
 
+This parser is configureable so that it will either
+
+    fastForward or skip.
+
+If the attributes aren't required (i.e. in a oneOf), then we want to skip to allow testing of other possibilities.
+
+If they are required, then
+
 -}
-matchAttrContainer :
-    List ( String, List AttrExpectation )
-    -> Parser Context Problem (Maybe ( String, List InlineAttribute ))
-matchAttrContainer inlineAttributes =
-    Parser.succeed identity
-        |. Parser.token
-            (Parser.Token "{" InlineStart)
-        |. Parser.chompWhile (\c -> c == ' ')
-        |= Parser.oneOf
-            [ Parser.succeed
-                (\maybeInlineResult hasEnd ->
-                    if hasEnd then
-                        maybeInlineResult
-
-                    else
-                        Nothing
-                )
-                |= Parser.oneOf
-                    (List.map tokenBody inlineAttributes)
-                |. Parser.chompWhile (\c -> c == ' ')
-                |= Parser.oneOf
-                    [ Parser.map (always True) (Parser.token (Parser.Token "}" InlineEnd))
-                    , Parser.succeed False
-                        |. parseTillEnd
-                    ]
-            , Parser.succeed Nothing
-                |. parseTillEnd
-            ]
-
-
-matchAttrContainerTolerant :
-    List ( String, List AttrExpectation )
+attrContainer :
+    { attributes : List ( String, List AttrExpectation )
+    , onError : Tolerant.OnError
+    }
     -> Tolerant.Parser Context Problem ( String, List InlineAttribute )
-matchAttrContainerTolerant inlineAttributes =
+attrContainer config =
     Tolerant.succeed identity
         |> Tolerant.ignore
             (Tolerant.token
                 { match = "{"
                 , problem = InlineStart
-                , onError = Tolerant.skip
+                , onError = config.onError
                 }
             )
         |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
         |> Tolerant.keep
             (Tolerant.oneOf InlineStart
-                (List.map tokenBodyTolerant inlineAttributes)
+                (List.map tokenBody config.attributes)
             )
         |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
         |> Tolerant.ignore
@@ -558,37 +469,8 @@ matchAttrContainerTolerant inlineAttributes =
             )
 
 
-tokenBody : ( String, List AttrExpectation ) -> Parser Context Problem (Maybe ( String, List InlineAttribute ))
+tokenBody : ( String, List AttrExpectation ) -> Tolerant.Parser Context Problem ( String, List InlineAttribute )
 tokenBody ( name, attrs ) =
-    case attrs of
-        [] ->
-            Parser.oneOf
-                [ Parser.map (always (Just ( name, [] ))) (Parser.keyword (Parser.Token name (ExpectingInlineName name)))
-                , Parser.succeed Nothing
-                ]
-
-        _ ->
-            Parser.succeed
-                (\maybeAttrs ->
-                    case maybeAttrs of
-                        Err _ ->
-                            Nothing
-
-                        Ok attributes ->
-                            Just
-                                ( name, attributes )
-                )
-                |= (Parser.succeed identity
-                        |. Parser.keyword (Parser.Token name (ExpectingInlineName name))
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |. Parser.chompIf (\c -> c == '|') (Expecting "|")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= Parser.loop ( attrs, [] ) attributeList
-                   )
-
-
-tokenBodyTolerant : ( String, List AttrExpectation ) -> Tolerant.Parser Context Problem ( String, List InlineAttribute )
-tokenBodyTolerant ( name, attrs ) =
     case attrs of
         [] ->
             Tolerant.map (always ( name, [] )) <|
@@ -596,8 +478,6 @@ tokenBodyTolerant ( name, attrs ) =
                     { match = name
                     , problem = ExpectingInlineName name
                     , onError = Tolerant.skip
-
-                    -- [ '}', '\n' ]
                     }
 
         _ ->
@@ -610,7 +490,6 @@ tokenBodyTolerant ( name, attrs ) =
                         }
                     )
                 |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
-                -- |. Parser.chompIf (\c -> c == '|') (Expecting "|")
                 |> Tolerant.ignore
                     (Tolerant.symbol
                         { match = "|"
@@ -699,7 +578,7 @@ attribute attr =
 {- Style Helpers -}
 
 
-changeStyle (TextCursor cursor) maybeStyleToken =
+changeStyle (TextCursor cursor) styleToken =
     let
         cursorText =
             case cursor.current of
@@ -707,20 +586,7 @@ changeStyle (TextCursor cursor) maybeStyleToken =
                     txt
 
         newText =
-            case maybeStyleToken of
-                Nothing ->
-                    cursor.current
-
-                Just sty ->
-                    case sty of
-                        Bold ->
-                            flipStyle Bold cursor.current
-
-                        Italic ->
-                            flipStyle Italic cursor.current
-
-                        Strike ->
-                            flipStyle Strike cursor.current
+            flipStyle styleToken cursor.current
     in
     if cursorText == "" then
         TextCursor
@@ -759,6 +625,15 @@ flipStyle newStyle textStyle =
                 Text (newStyle :: styles) ""
 
 
+advanceTo target (TextCursor cursor) =
+    TextCursor
+        { found = cursor.found
+        , current = cursor.current
+        , start = target
+        , balancedReplacements = cursor.balancedReplacements
+        }
+
+
 measure start textStr =
     let
         len =
@@ -770,11 +645,45 @@ measure start textStr =
     }
 
 
+commitText ((TextCursor cursor) as existingTextCursor) =
+    case cursor.current of
+        Text _ "" ->
+            -- nothing to commit
+            existingTextCursor
+
+        Text styles cursorText ->
+            let
+                end =
+                    measure cursor.start cursorText
+            in
+            TextCursor
+                { found =
+                    Styled
+                        { start = cursor.start
+                        , end = end
+                        }
+                        cursor.current
+                        :: cursor.found
+                , start = end
+                , current = Text styles ""
+                , balancedReplacements = cursor.balancedReplacements
+                }
+
+
 addToTextCursor new (TextCursor cursor) =
     TextCursor { cursor | found = new :: cursor.found }
 
 
+resetBalancedReplacements newBalance (TextCursor cursor) =
+    TextCursor { cursor | balancedReplacements = newBalance }
 
+
+resetTextWith (Text styles _) (TextCursor cursor) =
+    TextCursor { cursor | current = Text styles "" }
+
+
+
+-- |> resetStylesTo cursor.current
 {- REPLACEMENT HELPERS -}
 
 

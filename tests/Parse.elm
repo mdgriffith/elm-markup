@@ -45,7 +45,7 @@ suite =
                         "attr1 = My String variable"
                     )
                     (Ok <|
-                        Just <|
+                        Ok <|
                             [ Description.AttrString
                                 { name = "attr1"
                                 , range =
@@ -71,7 +71,7 @@ suite =
                         "attr1 = My String variable, attr2 = My Second variable"
                     )
                     (Ok
-                        (Just
+                        (Ok
                             [ Description.AttrString
                                 { name = "attr1"
                                 , range =
@@ -188,8 +188,8 @@ text =
                                     { attributes = []
                                     , name = "test"
                                     , range =
-                                        { end = { column = 41, line = 1, offset = 40 }
-                                        , start = { column = 37, line = 1, offset = 36 }
+                                        { end = { column = 42, line = 1, offset = 41 }
+                                        , start = { column = 36, line = 1, offset = 35 }
                                         }
                                     }
                                 , Description.Styled
@@ -269,7 +269,9 @@ text =
                                         ]
                                     , name = "test"
                                     , range =
-                                        { end = { column = 58, line = 1, offset = 57 }, start = { column = 37, line = 1, offset = 36 } }
+                                        { end = { column = 59, line = 1, offset = 58 }
+                                        , start = { column = 36, line = 1, offset = 35 }
+                                        }
                                     }
                                 , Description.Styled
                                     { end = { column = 60, line = 1, offset = 59 }
@@ -286,7 +288,7 @@ text =
                     (Parser.run
                         (Mark.Internal.Parser.styledText
                             { inlines =
-                                [ Description.ExpectAnnotation
+                                [ Description.ExpectAnnotation "test"
                                     [ Description.ExpectAttrString "attr"
                                     ]
                                 ]
@@ -296,13 +298,13 @@ text =
                             []
                             []
                         )
-                        "Here is my /styled/ *text*.  And a [some text]{attr = my string}."
+                        "Here is my /styled/ *text*.  And a [some text]{test|attr = my string}."
                     )
                     (Ok
                         (Description.DescribeText
                             { id =
                                 Id.Id
-                                    { end = { column = 60, line = 1, offset = 59 }
+                                    { end = { column = 71, line = 1, offset = 70 }
                                     , start = { column = 1, line = 1, offset = 0 }
                                     }
                             , text =
@@ -331,28 +333,26 @@ text =
                                     , start = { column = 23, line = 1, offset = 22 }
                                     }
                                     (Description.Text [] ".  And a ")
-                                , Description.InlineToken
+                                , Description.InlineAnnotation
                                     { attributes =
                                         [ Description.AttrString
                                             { name = "attr"
                                             , range =
-                                                { end =
-                                                    { column = 58
-                                                    , line = 1
-                                                    , offset = 57
-                                                    }
-                                                , start = { column = 42, line = 1, offset = 41 }
+                                                { end = { column = 69, line = 1, offset = 68 }
+                                                , start = { column = 53, line = 1, offset = 52 }
                                                 }
                                             , value = " my string"
                                             }
                                         ]
-                                    , name = "test"
                                     , range =
-                                        { end = { column = 58, line = 1, offset = 57 }, start = { column = 37, line = 1, offset = 36 } }
+                                        { end = { column = 70, line = 1, offset = 69 }
+                                        , start = { column = 36, line = 1, offset = 35 }
+                                        }
+                                    , text = [ Description.Text [] "some text" ]
                                     }
                                 , Description.Styled
-                                    { end = { column = 60, line = 1, offset = 59 }
-                                    , start = { column = 59, line = 1, offset = 58 }
+                                    { end = { column = 71, line = 1, offset = 70 }
+                                    , start = { column = 70, line = 1, offset = 69 }
                                     }
                                     (Description.Text [] ".")
                                 ]
