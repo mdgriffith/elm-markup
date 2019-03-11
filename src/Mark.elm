@@ -2220,8 +2220,8 @@ attrString name newInline =
                         ExpectToken tokenName attrs ->
                             ExpectToken tokenName (ExpectAttrString name :: attrs)
 
-                        ExpectAnnotation attrs ->
-                            ExpectAnnotation (ExpectAttrString name :: attrs)
+                        ExpectAnnotation noteName attrs ->
+                            ExpectAnnotation noteName (ExpectAttrString name :: attrs)
                 }
 
 

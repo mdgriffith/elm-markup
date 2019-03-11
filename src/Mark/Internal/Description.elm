@@ -232,7 +232,7 @@ type Expectation
 
 {-| -}
 type InlineExpectation
-    = ExpectAnnotation (List AttrExpectation)
+    = ExpectAnnotation String (List AttrExpectation)
     | ExpectToken String (List AttrExpectation)
 
 
