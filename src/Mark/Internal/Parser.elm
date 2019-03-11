@@ -14,6 +14,7 @@ module Mark.Internal.Parser exposing
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
 import Mark.Internal.Id exposing (..)
+import Mark.Internal.TolerantParser as Tolerant
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
@@ -152,9 +153,102 @@ styledTextLoop options meaningful untilStrings found =
                 , Parser.map (always (Just Bold)) (Parser.token (Parser.Token "*" (Expecting "*")))
                 ]
 
-        -- Custom inline block
-        , inlineToken options found
-        , inlineAnnotation options found
+        -- {token| withAttributes = True}
+        , Parser.succeed
+            (\start maybeToken end ->
+                case maybeToken of
+                    Nothing ->
+                        Parser.Loop <|
+                            addToTextCursor
+                                (UnexpectedInline
+                                    { range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , problem =
+                                        Error.UnknownInline []
+
+                                    -- TODO: FIX THIS
+                                    --(List.map getInlineName options.inlines)
+                                    }
+                                )
+                                found
+
+                    Just ( name, attrs ) ->
+                        Parser.Loop <|
+                            addToTextCursor
+                                (InlineToken
+                                    { name = name
+                                    , range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , attributes = attrs
+                                    }
+                                )
+                                found
+            )
+            |= getPosition
+            |= matchAttrContainer (List.filterMap onlyTokens options.inlines)
+            |= getPosition
+
+        -- [Some styled /text/]{token| withAttribtues = True}
+        , Parser.succeed
+            (\start almostNote end ->
+                case almostNote of
+                    Ok ( noteText, cursor, ( name, attrs ) ) ->
+                        let
+                            note =
+                                InlineAnnotation
+                                    { text = noteText
+                                    , range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , attributes = attrs
+                                    }
+                        in
+                        found
+                            |> addToTextCursor note
+                            -- |> resetBalancedReplacements cursor.balancedReplacements
+                            -- |> resetStylesTo cursor.current
+                            |> Parser.Loop
+
+                    -- Parser.Loop
+                    --     (TextCursor
+                    --         { found = note :: found.found
+                    --         , start = end
+                    --         , current =
+                    --             case cursor.current of
+                    --                 Text styles _ ->
+                    --                     Text styles ""
+                    --         , balancedReplacements = cursor.balancedReplacements
+                    --         }
+                    --     )
+                    Err errs ->
+                        Parser.Loop <|
+                            addToTextCursor
+                                (UnexpectedInline
+                                    { range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , problem =
+                                        Error.UnknownInline []
+
+                                    -- TODO: FIX THIS
+                                    --(List.map getInlineName options.inlines)
+                                    -- TODO: This is the wrong error
+                                    -- It could be:
+                                    --   unexpected attributes
+                                    --   missing control characters
+                                    }
+                                )
+                                found
+            )
+            |= getPosition
+            |= inlineAnnotation options found
+            |= getPosition
         , -- chomp until a meaningful character
           Parser.chompWhile
             (\c ->
@@ -210,90 +304,126 @@ almostReplacement replacements existing =
     List.map captureChar allFirstChars
 
 
+
+-- inlineAnnotation options found =
+--     (Parser.succeed identity
+--         |= getPosition
+--         |. Parser.token (Parser.Token "[" InlineStart)
+--     )
+--         |> Parser.andThen
+--             (\startPos ->
+--                 Parser.succeed
+--                     (\( end, new, maybeTextCursor ) ->
+--                         let
+--                             current =
+--                                 case changeStyle found Nothing of
+--                                     TextCursor accum ->
+--                                         accum
+--                         in
+--                         case maybeTextCursor of
+--                             Nothing ->
+--                                 Parser.Loop
+--                                     (TextCursor
+--                                         { found = new :: current.found
+--                                         , start = end
+--                                         , current = empty
+--                                         , balancedReplacements = current.balancedReplacements
+--                                         }
+--                                     )
+--                             Just (TextCursor curs) ->
+-- Parser.Loop
+--     (TextCursor
+--         { found = new :: current.found
+--         , start = end
+--         , current =
+--             case curs.current of
+--                 Text styles _ ->
+--                     Text styles ""
+--         , balancedReplacements = curs.balancedReplacements
+--         }
+--     )
+--                     )
+--                     |= Parser.oneOf
+--                         [ Parser.succeed
+--                             (\( text, cursor ) hasEnd maybeNameAndAttrs end ->
+--                                 case ( hasEnd, maybeNameAndAttrs ) of
+--                                     ( True, Just ( name, attrs ) ) ->
+--                                         ( end
+-- , InlineAnnotation
+--     { text = text
+--     , range =
+--         { start = startPos
+--         , end = end
+--         }
+--     , attributes = attrs
+--     }
+--                                         , Just cursor
+--                                         )
+--                                     _ ->
+--                                         ( end
+--                                         , UnexpectedInline
+--                                             { range =
+--                                                 { start = startPos
+--                                                 , end = end
+--                                                 }
+--                                             , problem =
+--                                                 -- TODO: This is the wrong error
+--                                                 -- It could be:
+--                                                 --   unexpected attributes
+--                                                 --   missing control characters
+--                                                 Error.UnknownInline []
+--                                             }
+--                                         , Nothing
+--                                         )
+--                             )
+--                             |= Parser.loop
+--                                 (textCursor [] startPos)
+--                                 (simpleStyledTextTill [ '\n', ']' ] options.replacements)
+--                             |= Parser.oneOf
+--                                 [ Parser.map (always True) (Parser.token (Parser.Token "]" InlineEnd))
+--                                 , Parser.succeed False
+--                                     |. parseTillEnd
+--                                 ]
+--                             |= matchAttrContainer (List.filterMap onlyAnnotations options.inlines)
+--                             |= getPosition
+--                         ]
+--             )
+-- inlineAnnotation : () -> () -> Tolerant.Parser Context Problem ( List Text, TextCursor, ( String, List InlineAttribute ) )
+
+
 inlineAnnotation options found =
-    (Parser.succeed identity
-        |= getPosition
-        |. Parser.token (Parser.Token "[" InlineStart)
-    )
-        |> Parser.andThen
-            (\startPos ->
-                Parser.succeed
-                    (\( end, new, maybeTextCursor ) ->
-                        let
-                            current =
-                                case changeStyle found Nothing of
-                                    TextCursor accum ->
-                                        accum
-                        in
-                        case maybeTextCursor of
-                            Nothing ->
-                                Parser.Loop
-                                    (TextCursor
-                                        { found = new :: current.found
-                                        , start = end
-                                        , current = empty
-                                        , balancedReplacements = current.balancedReplacements
-                                        }
-                                    )
-
-                            Just (TextCursor curs) ->
-                                Parser.Loop
-                                    (TextCursor
-                                        { found = new :: current.found
-                                        , start = end
-                                        , current =
-                                            case curs.current of
-                                                Text styles _ ->
-                                                    Text styles ""
-                                        , balancedReplacements = curs.balancedReplacements
-                                        }
-                                    )
-                    )
-                    |= Parser.oneOf
-                        [ Parser.succeed
-                            (\( text, cursor ) hasEnd attrs end ->
-                                if hasEnd then
-                                    ( end
-                                    , InlineAnnotation
-                                        { text = text
-                                        , range =
-                                            { start = startPos
-                                            , end = end
-                                            }
-                                        , attributes = attrs
-                                        }
-                                    , Just cursor
-                                    )
-
-                                else
-                                    ( end
-                                    , UnexpectedInline
-                                        { range =
-                                            { start = startPos
-                                            , end = end
-                                            }
-                                        , problem =
-                                            -- TODO: This is the wrong error
-                                            -- It could be:
-                                            --   unexpected attributes
-                                            --   missing control characters
-                                            Error.UnknownInline []
-                                        }
-                                    , Nothing
-                                    )
-                            )
-                            |= Parser.loop
-                                (textCursor [] startPos)
-                                (simpleStyledTextTill [ '\n', ']' ] options.replacements)
-                            |= Parser.oneOf
-                                [ Parser.map (always True) (Parser.token (Parser.Token "]" InlineEnd))
-                                , Parser.succeed False
-                                    |. parseTillEnd
-                                ]
-                            |= parseAndMatchAttributes (List.filterMap onlyAnnotations options.inlines)
-                            |= getPosition
-                        ]
+    Tolerant.succeed
+        (\( text, cursor ) maybeNameAndAttrs ->
+            ( text, cursor, maybeNameAndAttrs )
+        )
+        |> Tolerant.ignore
+            (Tolerant.token
+                { match = "["
+                , problem = InlineStart
+                , onError = Tolerant.skip
+                }
             )
+        |> Tolerant.keep
+            (Tolerant.try
+                (Parser.loop
+                    (textCursor []
+                        { offset = 0
+                        , line = 1
+                        , column = 1
+                        }
+                    )
+                    (simpleStyledTextTill [ '\n', ']' ] options.replacements)
+                )
+            )
+        |> Tolerant.ignore
+            (Tolerant.token
+                { match = "]"
+                , problem = InlineEnd
+                , onError = Tolerant.fastForwardTo [ '}', '\n' ]
+                }
+            )
+        |> Tolerant.keep
+            (matchAttrContainerTolerant (List.filterMap onlyAnnotations options.inlines))
 
 
 simpleStyledTextTill :
@@ -360,48 +490,22 @@ toText textDesc =
             Nothing
 
 
-parseAndMatchAttributes attrSets =
-    Parser.succeed []
+{-| Match one of the attr tokens
 
+    {mytoken| attributeList }
+    ^                       ^
 
-inlineToken options found =
-    Parser.succeed
-        (\start maybeRendered end ->
-            let
-                current =
-                    case changeStyle found Nothing of
-                        TextCursor accum ->
-                            accum
-            in
-            Parser.Loop
-                (TextCursor
-                    { found =
-                        case maybeRendered of
-                            Nothing ->
-                                UnexpectedInline
-                                    { range =
-                                        { start = start
-                                        , end = end
-                                        }
-                                    , problem =
-                                        Error.UnknownInline []
+Because there is no styled text here, we know the following can't happen:
 
-                                    -- TODO: FIX THIS
-                                    --(List.map getInlineName options.inlines)
-                                    }
-                                    :: current.found
+    1. Change in text styles
+    2. Any Replacements
 
-                            Just rendered ->
-                                rendered :: current.found
-                    , start = end
-
-                    -- TODO: This should inherit formatting from the inline parser
-                    , current = empty
-                    , balancedReplacements = current.balancedReplacements
-                    }
-                )
-        )
-        |= getPosition
+-}
+matchAttrContainer :
+    List ( String, List AttrExpectation )
+    -> Parser Context Problem (Maybe ( String, List InlineAttribute ))
+matchAttrContainer inlineAttributes =
+    Parser.succeed identity
         |. Parser.token
             (Parser.Token "{" InlineStart)
         |. Parser.chompWhile (\c -> c == ' ')
@@ -415,10 +519,7 @@ inlineToken options found =
                         Nothing
                 )
                 |= Parser.oneOf
-                    (List.map
-                        parseTokenBody
-                        (List.filterMap onlyTokens options.inlines)
-                    )
+                    (List.map tokenBody inlineAttributes)
                 |. Parser.chompWhile (\c -> c == ' ')
                 |= Parser.oneOf
                     [ Parser.map (always True) (Parser.token (Parser.Token "}" InlineEnd))
@@ -428,42 +529,99 @@ inlineToken options found =
             , Parser.succeed Nothing
                 |. parseTillEnd
             ]
-        |= getPosition
 
 
-parseTokenBody ( name, attrs ) =
+matchAttrContainerTolerant :
+    List ( String, List AttrExpectation )
+    -> Tolerant.Parser Context Problem ( String, List InlineAttribute )
+matchAttrContainerTolerant inlineAttributes =
+    Tolerant.succeed identity
+        |> Tolerant.ignore
+            (Tolerant.token
+                { match = "{"
+                , problem = InlineStart
+                , onError = Tolerant.skip
+                }
+            )
+        |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
+        |> Tolerant.keep
+            (Tolerant.oneOf InlineStart
+                (List.map tokenBodyTolerant inlineAttributes)
+            )
+        |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
+        |> Tolerant.ignore
+            (Tolerant.token
+                { match = "}"
+                , problem = InlineEnd
+                , onError = Tolerant.fastForwardTo [ '}', '\n' ]
+                }
+            )
+
+
+tokenBody : ( String, List AttrExpectation ) -> Parser Context Problem (Maybe ( String, List InlineAttribute ))
+tokenBody ( name, attrs ) =
     case attrs of
         [] ->
-            Parser.succeed
-                (\( range, _ ) ->
-                    Just (InlineToken { name = name, range = range, attributes = [] })
-                )
-                |= withRange (Parser.keyword (Parser.Token name (ExpectingInlineName name)))
+            Parser.oneOf
+                [ Parser.map (always (Just ( name, [] ))) (Parser.keyword (Parser.Token name (ExpectingInlineName name)))
+                , Parser.succeed Nothing
+                ]
 
         _ ->
             Parser.succeed
-                (\( range, maybeFoundComponents ) ->
-                    case maybeFoundComponents of
-                        Nothing ->
+                (\maybeAttrs ->
+                    case maybeAttrs of
+                        Err _ ->
                             Nothing
 
-                        Just attributes ->
+                        Ok attributes ->
                             Just
-                                (InlineToken
-                                    { name = name
-                                    , range = range
-                                    , attributes = attributes
-                                    }
-                                )
+                                ( name, attributes )
                 )
-                |= withRange
-                    (Parser.succeed identity
+                |= (Parser.succeed identity
                         |. Parser.keyword (Parser.Token name (ExpectingInlineName name))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |. Parser.chompIf (\c -> c == '|') (Expecting "|")
                         |. Parser.chompWhile (\c -> c == ' ')
                         |= Parser.loop ( attrs, [] ) attributeList
+                   )
+
+
+tokenBodyTolerant : ( String, List AttrExpectation ) -> Tolerant.Parser Context Problem ( String, List InlineAttribute )
+tokenBodyTolerant ( name, attrs ) =
+    case attrs of
+        [] ->
+            Tolerant.map (always ( name, [] )) <|
+                Tolerant.keyword
+                    { match = name
+                    , problem = ExpectingInlineName name
+                    , onError = Tolerant.skip
+
+                    -- [ '}', '\n' ]
+                    }
+
+        _ ->
+            Tolerant.succeed (\attributes -> ( name, attributes ))
+                |> Tolerant.ignore
+                    (Tolerant.keyword
+                        { match = name
+                        , problem = ExpectingInlineName name
+                        , onError = Tolerant.skip
+                        }
                     )
+                |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
+                -- |. Parser.chompIf (\c -> c == '|') (Expecting "|")
+                |> Tolerant.ignore
+                    (Tolerant.symbol
+                        { match = "|"
+                        , problem = Expecting "|"
+                        , onError = Tolerant.fastForwardTo [ '}', '\n' ]
+                        }
+                    )
+                |> Tolerant.ignore
+                    (Tolerant.chompWhile (\c -> c == ' '))
+                |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
+                |> Tolerant.keep (Parser.loop ( attrs, [] ) attributeList)
 
 
 {-| Parse a set of attributes.
@@ -473,11 +631,11 @@ They can be parsed in any order.
 -}
 attributeList :
     ( List AttrExpectation, List InlineAttribute )
-    -> Parser Context Problem (Parser.Step ( List AttrExpectation, List InlineAttribute ) (Maybe (List InlineAttribute)))
+    -> Parser Context Problem (Parser.Step ( List AttrExpectation, List InlineAttribute ) (Result (List Problem) (List InlineAttribute)))
 attributeList ( attrExpectations, found ) =
     case attrExpectations of
         [] ->
-            Parser.succeed (Parser.Done (Just (List.reverse found)))
+            Parser.succeed (Parser.Done (Ok (List.reverse found)))
 
         _ ->
             let
@@ -501,7 +659,8 @@ attributeList ( attrExpectations, found ) =
             in
             Parser.oneOf
                 (List.indexedMap parseAttr attrExpectations
-                    ++ [ Parser.map (always (Parser.Done Nothing)) parseTillEnd ]
+                    -- TODO: ADD MISSING ATTRIBUTES HERE!!
+                    ++ [ Parser.map (always (Parser.Done (Err []))) parseTillEnd ]
                 )
 
 
@@ -609,6 +768,10 @@ measure start textStr =
         | offset = start.offset + len
         , column = start.column + len
     }
+
+
+addToTextCursor new (TextCursor cursor) =
+    TextCursor { cursor | found = new :: cursor.found }
 
 
 
@@ -834,7 +997,7 @@ parseTillEnd =
 
 onlyTokens inline =
     case inline of
-        ExpectAnnotation attrs ->
+        ExpectAnnotation name attrs ->
             Nothing
 
         ExpectToken name attrs ->
@@ -843,8 +1006,8 @@ onlyTokens inline =
 
 onlyAnnotations inline =
     case inline of
-        ExpectAnnotation attrs ->
-            Just attrs
+        ExpectAnnotation name attrs ->
+            Just ( name, attrs )
 
         ExpectToken name attrs ->
             Nothing
