@@ -359,4 +359,90 @@ text =
                             }
                         )
                     )
+        , test "basic w/ inline annotation, style transfer" <|
+            \_ ->
+                Expect.equal
+                    (Parser.run
+                        (Mark.Internal.Parser.styledText
+                            { inlines =
+                                [ Description.ExpectAnnotation "test"
+                                    [ Description.ExpectAttrString "attr"
+                                    ]
+                                ]
+                            , replacements = []
+                            }
+                            { column = 1, line = 1, offset = 0 }
+                            []
+                            []
+                        )
+                        "Here is my /styled/ *text*.  /And a [some text/]{test|attr = my string}."
+                    )
+                    (Ok
+                        (Description.DescribeText
+                            { id =
+                                Id.Id
+                                    { end =
+                                        { column = 73
+                                        , line = 1
+                                        , offset = 72
+                                        }
+                                    , start = { column = 1, line = 1, offset = 0 }
+                                    }
+                            , text =
+                                [ Description.Styled
+                                    { end = { column = 12, line = 1, offset = 11 }
+                                    , start = { column = 1, line = 1, offset = 0 }
+                                    }
+                                    (Description.Text [] "Here is my ")
+                                , Description.Styled
+                                    { end = { column = 18, line = 1, offset = 17 }
+                                    , start = { column = 12, line = 1, offset = 11 }
+                                    }
+                                    (Description.Text [ Description.Italic ] "styled")
+                                , Description.Styled
+                                    { end = { column = 19, line = 1, offset = 18 }
+                                    , start = { column = 18, line = 1, offset = 17 }
+                                    }
+                                    (Description.Text [] " ")
+                                , Description.Styled
+                                    { end = { column = 23, line = 1, offset = 22 }
+                                    , start = { column = 19, line = 1, offset = 18 }
+                                    }
+                                    (Description.Text [ Description.Bold ] "text")
+                                , Description.Styled
+                                    { end = { column = 26, line = 1, offset = 25 }
+                                    , start = { column = 23, line = 1, offset = 22 }
+                                    }
+                                    (Description.Text [] ".  ")
+                                , Description.Styled
+                                    { end = { column = 32, line = 1, offset = 31 }
+                                    , start = { column = 26, line = 1, offset = 25 }
+                                    }
+                                    (Description.Text [ Description.Italic ] "And a ")
+                                , Description.InlineAnnotation
+                                    { attributes =
+                                        [ Description.AttrString
+                                            { name = "attr"
+                                            , range =
+                                                { end = { column = 71, line = 1, offset = 70 }
+                                                , start = { column = 55, line = 1, offset = 54 }
+                                                }
+                                            , value = " my string"
+                                            }
+                                        ]
+                                    , range =
+                                        { end = { column = 72, line = 1, offset = 71 }
+                                        , start = { column = 37, line = 1, offset = 36 }
+                                        }
+                                    , text = [ Description.Text [ Description.Italic ] "some text" ]
+                                    }
+                                , Description.Styled
+                                    { end = { column = 73, line = 1, offset = 72 }
+                                    , start = { column = 72, line = 1, offset = 71 }
+                                    }
+                                    (Description.Text [] ".")
+                                ]
+                            }
+                        )
+                    )
         ]

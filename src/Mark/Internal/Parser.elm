@@ -333,7 +333,7 @@ inlineAnnotation options found =
         |> Tolerant.keep
             (Tolerant.try
                 (Parser.loop
-                    (textCursor []
+                    (textCursor (getCurrentStyles found)
                         { offset = 0
                         , line = 1
                         , column = 1
@@ -632,6 +632,14 @@ advanceTo target (TextCursor cursor) =
         , start = target
         , balancedReplacements = cursor.balancedReplacements
         }
+
+
+getCurrentStyles (TextCursor cursor) =
+    getStyles cursor.current
+
+
+getStyles (Text styles _) =
+    styles
 
 
 measure start textStr =
