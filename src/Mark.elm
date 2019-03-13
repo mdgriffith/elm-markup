@@ -81,9 +81,10 @@ import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
-import Mark.Internal.Id exposing (..)
+import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Parser as Parse
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+import Random
 import Time
 
 
@@ -289,6 +290,8 @@ convert (Document blocks) ((Parsed parsedDetails) as parsed) =
 type Document data
     = Document
         { converter : Parsed -> Result AstError data
+        , initialSeed : Random.Seed
+        , currentSeed : Random.Seed
         , expect : Expectation
         , parser : Parser Context Problem Parsed
         }
@@ -310,26 +313,42 @@ type
         String
         { converter : Description -> Result AstError (Found data)
         , expect : Expectation
-        , parser : Parser Context Problem Description
+        , parser : Random.Seed -> ( Random.Seed, Parser Context Problem Description )
         }
     | Value
         { converter : Description -> Result AstError (Found data)
         , expect : Expectation
-        , parser : Parser Context Problem Description
+        , parser : Random.Seed -> ( Random.Seed, Parser Context Problem Description )
         }
 
 
-getParser : Block data -> Parser Context Problem Description
-getParser fromBlock =
+getParser : Random.Seed -> Block data -> ( Random.Seed, Parser Context Problem Description )
+getParser seed fromBlock =
     case fromBlock of
         Block name { parser } ->
-            Parser.succeed identity
+            let
+                ( newSeed, blockParser ) =
+                    parser seed
+            in
+            ( newSeed
+            , Parser.succeed identity
                 |. Parser.token (Parser.Token "|" (ExpectingBlockName name))
                 |. Parser.chompIf (\c -> c == ' ') Space
-                |= parser
+                |= blockParser
+            )
 
         Value { parser } ->
-            parser
+            parser seed
+
+
+blockName : Block data -> Maybe String
+blockName fromBlock =
+    case fromBlock of
+        Block name _ ->
+            Just name
+
+        Value _ ->
+            Nothing
 
 
 renderBlock : Block data -> Description -> Result AstError (Found data)
@@ -515,9 +534,18 @@ document doc child =
     let
         expectation =
             getBlockExpectation child
+
+        seed =
+            -- Hmm, a cosmological constant appears again.
+            Random.initialSeed 11056
+
+        ( currentSeed, blockParser ) =
+            getParser seed child
     in
     Document
         { expect = expectation
+        , initialSeed = seed
+        , currentSeed = currentSeed
         , converter =
             \(Parsed parsed) ->
                 case parsed.found of
@@ -546,7 +574,7 @@ document doc child =
                 )
                 |= Parser.getSource
                 |= Parse.withRange
-                    (Parser.withIndent 0 (getParser child))
+                    (Parser.withIndent 0 blockParser)
         }
 
 
@@ -604,17 +632,22 @@ stub name renderer =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.map
-                (\( range, _ ) ->
-                    DescribeStub name (Found range name)
-                )
-                (Parse.withRange
-                    (Parser.succeed ()
-                        |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
-                        |. Parser.chompWhile (\c -> c == ' ')
+            skipSeed <|
+                Parser.map
+                    (\( range, _ ) ->
+                        DescribeStub name (Found range name)
                     )
-                )
+                    (Parse.withRange
+                        (Parser.succeed ()
+                            |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
+                            |. Parser.chompWhile (\c -> c == ' ')
+                        )
+                    )
         }
+
+
+skipSeed parser seed =
+    ( seed, parser )
 
 
 
@@ -673,73 +706,89 @@ block blockDetails child =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.map
-                (\( range, valueResult ) ->
-                    case valueResult of
-                        Ok value ->
-                            DescribeBlock
-                                { found = Found range value
-                                , name = blockDetails.name
-                                , expected = ExpectBlock blockDetails.name (getBlockExpectation child)
-                                }
+            \seed ->
+                let
+                    ( newSeed, childParser ) =
+                        getParser seed child
+                in
+                ( newSeed
+                , Parser.map
+                    (\( range, valueResult ) ->
+                        case valueResult of
+                            Ok value ->
+                                DescribeBlock
+                                    { found = Found range value
+                                    , name = blockDetails.name
+                                    , expected = ExpectBlock blockDetails.name (getBlockExpectation child)
+                                    }
 
-                        Err ( pos, errorMessage ) ->
-                            DescribeBlock
-                                { name = blockDetails.name
-                                , found =
-                                    Unexpected
-                                        { range = pos
-                                        , problem = errorMessage
-                                        }
-                                , expected = ExpectBlock blockDetails.name (getBlockExpectation child)
-                                }
-                )
-            <|
-                Parse.withRange
-                    (Parser.getIndent
-                        |> Parser.andThen
-                            (\indentation ->
-                                Parser.succeed identity
-                                    |. Parser.keyword (Parser.Token blockDetails.name (ExpectingBlockName blockDetails.name))
-                                    |. Parser.chompWhile (\c -> c == ' ')
-                                    |. skipBlankLineWith ()
-                                    |= Parser.oneOf
-                                        [ (Parser.succeed identity
-                                            |= Parse.getPosition
-                                            |. Parser.token (Parser.Token (String.repeat (indentation + 4) " ") (ExpectingIndentation (indentation + 4)))
-                                          )
-                                            |> Parser.andThen
-                                                (\start ->
-                                                    Parser.oneOf
-                                                        -- If there's st
-                                                        [ Parser.succeed
-                                                            (\end ->
-                                                                Err
-                                                                    ( { start = start, end = end }
-                                                                    , Error.ExpectingIndent (indentation + 4)
-                                                                    )
-                                                            )
-                                                            |. Parser.chompIf (\c -> c == ' ') Space
-                                                            |. Parser.chompWhile (\c -> c == ' ')
-                                                            |= Parse.getPosition
-                                                            |. Parser.loop "" (raggedIndentedStringAbove indentation)
-                                                        , Parser.map Ok <|
-                                                            Parser.withIndent (indentation + 4) (Parser.inContext (InBlock blockDetails.name) (getParser child))
-                                                        ]
-                                                )
-
-                                        -- If we're here, it's because the indentation failed.
-                                        -- If the child parser failed in some way, it would
-                                        -- take care of that itself by returning Unexpected
-                                        , Parser.succeed
-                                            (\( pos, foundIndent ) ->
-                                                Err ( pos, Error.ExpectingIndent (indentation + 4) )
-                                            )
-                                            |= Parse.withRange (Parser.chompWhile (\c -> c == ' '))
-                                            |. Parser.loop "" (raggedIndentedStringAbove indentation)
-                                        ]
-                            )
+                            Err ( pos, errorMessage ) ->
+                                DescribeBlock
+                                    { name = blockDetails.name
+                                    , found =
+                                        Unexpected
+                                            { range = pos
+                                            , problem = errorMessage
+                                            }
+                                    , expected = ExpectBlock blockDetails.name (getBlockExpectation child)
+                                    }
                     )
+                  <|
+                    Parse.withRange
+                        (Parser.getIndent
+                            |> Parser.andThen
+                                (\indentation ->
+                                    Parser.succeed identity
+                                        |. Parser.keyword
+                                            (Parser.Token blockDetails.name
+                                                (ExpectingBlockName blockDetails.name)
+                                            )
+                                        |. Parser.chompWhile (\c -> c == ' ')
+                                        |. skipBlankLineWith ()
+                                        |= Parser.oneOf
+                                            [ (Parser.succeed identity
+                                                |= Parse.getPosition
+                                                |. Parser.token
+                                                    (Parser.Token
+                                                        (String.repeat (indentation + 4) " ")
+                                                        (ExpectingIndentation (indentation + 4))
+                                                    )
+                                              )
+                                                |> Parser.andThen
+                                                    (\start ->
+                                                        Parser.oneOf
+                                                            -- If there's st
+                                                            [ Parser.succeed
+                                                                (\end ->
+                                                                    Err
+                                                                        ( { start = start, end = end }
+                                                                        , Error.ExpectingIndent (indentation + 4)
+                                                                        )
+                                                                )
+                                                                |. Parser.chompIf (\c -> c == ' ') Space
+                                                                |. Parser.chompWhile (\c -> c == ' ')
+                                                                |= Parse.getPosition
+                                                                |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                                            , Parser.map Ok <|
+                                                                Parser.withIndent
+                                                                    (indentation + 4)
+                                                                    (Parser.inContext (InBlock blockDetails.name) childParser)
+                                                            ]
+                                                    )
+
+                                            -- If we're here, it's because the indentation failed.
+                                            -- If the child parser failed in some way, it would
+                                            -- take care of that itself by returning Unexpected
+                                            , Parser.succeed
+                                                (\( pos, foundIndent ) ->
+                                                    Err ( pos, Error.ExpectingIndent (indentation + 4) )
+                                                )
+                                                |= Parse.withRange (Parser.chompWhile (\c -> c == ' '))
+                                                |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                            ]
+                                )
+                        )
+                )
         }
 
 
@@ -788,22 +837,32 @@ startWith fn startBlock endBlock =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.succeed
-                (\( range, ( begin, end ) ) ->
-                    StartsWith range
-                        { found = begin
-                        , expected = getBlockExpectation startBlock
-                        }
-                        { found = end
-                        , expected = getBlockExpectation endBlock
-                        }
-                )
-                |= Parse.withRange
-                    (Parser.succeed Tuple.pair
-                        |= getParser startBlock
-                        |. Parser.loop 0 manyBlankLines
-                        |= getParser endBlock
+            \seed ->
+                let
+                    ( startSeed, startParser ) =
+                        getParser seed startBlock
+
+                    ( remainSeed, endParser ) =
+                        getParser startSeed endBlock
+                in
+                ( remainSeed
+                , Parser.succeed
+                    (\( range, ( begin, end ) ) ->
+                        StartsWith range
+                            { found = begin
+                            , expected = getBlockExpectation startBlock
+                            }
+                            { found = end
+                            , expected = getBlockExpectation endBlock
+                            }
                     )
+                    |= Parse.withRange
+                        (Parser.succeed Tuple.pair
+                            |= startParser
+                            |. Parser.loop 0 manyBlankLines
+                            |= endParser
+                        )
+                )
         }
 
 
@@ -836,40 +895,6 @@ oneOf :
     -> Block b
 oneOf oneOfDetails blocks =
     let
-        gatherParsers myBlock ( names, blks, vals ) =
-            case myBlock of
-                Block name { parser } ->
-                    ( name :: names, Parser.map Ok parser :: blks, vals )
-
-                Value { parser } ->
-                    ( names, blks, Parser.map Ok parser :: vals )
-
-        ( blockNames, childBlocks, childValues ) =
-            List.foldl gatherParsers ( [], [], [] ) blocks
-
-        blockParser =
-            Parser.succeed identity
-                |. Parser.token (Parser.Token "|" BlockStart)
-                |. Parser.oneOf
-                    [ Parser.chompIf (\c -> c == ' ') Space
-                    , Parser.succeed ()
-                    ]
-                |= Parser.oneOf
-                    (List.reverse childBlocks
-                        ++ [ Parser.getIndent
-                                |> Parser.andThen
-                                    (\indentation ->
-                                        Parser.succeed
-                                            (\( pos, foundWord ) ->
-                                                Err ( pos, Error.UnknownBlock blockNames )
-                                            )
-                                            |= Parse.withRange Parse.word
-                                            |. newline
-                                            |. Parser.loop "" (raggedIndentedStringAbove indentation)
-                                    )
-                           ]
-                    )
-
         applyDesc description blck found =
             case found of
                 Nothing ->
@@ -941,31 +966,90 @@ oneOf oneOfDetails blocks =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.succeed
-                (\( range, result ) ->
-                    case result of
-                        Ok found ->
-                            OneOf
-                                { choices = List.map (Choice (optionId range)) expectations
-                                , child = Found range found
-                                , id = optionId range
+            \seed ->
+                let
+                    gatherParsers myBlock details =
+                        let
+                            ( currentSeed, parser ) =
+                                getParser details.seed myBlock
+                        in
+                        case blockName myBlock of
+                            Just name ->
+                                { blockNames = name :: details.blockNames
+                                , childBlocks = Parser.map Ok parser :: details.childBlocks
+                                , childValues = details.childValues
+                                , seed = currentSeed
                                 }
 
-                        Err ( pos, unexpected ) ->
-                            OneOf
-                                { choices = List.map (Choice (optionId range)) expectations
-                                , child =
-                                    Unexpected
-                                        { range = pos
-                                        , problem = unexpected
-                                        }
-                                , id = optionId range
+                            Nothing ->
+                                { blockNames = details.blockNames
+                                , childBlocks = details.childBlocks
+                                , childValues = Parser.map Ok parser :: details.childValues
+                                , seed = currentSeed
                                 }
-                )
-                |= Parse.withRange
-                    (Parser.oneOf
-                        (blockParser :: List.reverse (unexpectedInOneOf expectations :: childValues))
+
+                    children =
+                        List.foldl gatherParsers
+                            { blockNames = []
+                            , childBlocks = []
+                            , childValues = []
+                            , seed = newSeed
+                            }
+                            blocks
+
+                    blockParser =
+                        Parser.succeed identity
+                            |. Parser.token (Parser.Token "|" BlockStart)
+                            |. Parser.oneOf
+                                [ Parser.chompIf (\c -> c == ' ') Space
+                                , Parser.succeed ()
+                                ]
+                            |= Parser.oneOf
+                                (List.reverse children.childBlocks
+                                    ++ [ Parser.getIndent
+                                            |> Parser.andThen
+                                                (\indentation ->
+                                                    Parser.succeed
+                                                        (\( pos, foundWord ) ->
+                                                            Err ( pos, Error.UnknownBlock children.blockNames )
+                                                        )
+                                                        |= Parse.withRange Parse.word
+                                                        |. newline
+                                                        |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                                )
+                                       ]
+                                )
+
+                    ( parentId, newSeed ) =
+                        Id.step seed
+                in
+                ( children.seed
+                , Parser.succeed
+                    (\( range, result ) ->
+                        case result of
+                            Ok found ->
+                                OneOf
+                                    { choices = List.map (Choice parentId) expectations
+                                    , child = Found range found
+                                    , id = parentId
+                                    }
+
+                            Err ( pos, unexpected ) ->
+                                OneOf
+                                    { choices = List.map (Choice parentId) expectations
+                                    , child =
+                                        Unexpected
+                                            { range = pos
+                                            , problem = unexpected
+                                            }
+                                    , id = parentId
+                                    }
                     )
+                    |= Parse.withRange
+                        (Parser.oneOf
+                            (blockParser :: List.reverse (unexpectedInOneOf expectations :: children.childValues))
+                        )
+                )
         }
 
 
@@ -983,8 +1067,8 @@ unexpectedInOneOf expectations =
 
 humanReadableExpectations expect =
     case expect of
-        ExpectBlock blockName exp ->
-            "| " ++ blockName
+        ExpectBlock name exp ->
+            "| " ++ name
 
         ExpectStub stubName ->
             "| " ++ stubName
@@ -1068,48 +1152,6 @@ manyOf :
     -> Block final
 manyOf manyOfDetails blocks =
     let
-        gatherParsers myBlock ( names, blks, vals ) =
-            case myBlock of
-                Block name { parser } ->
-                    ( name :: names, Parser.map Ok parser :: blks, vals )
-
-                Value { parser } ->
-                    ( names, blks, Parser.map Ok (Parse.withRange parser) :: vals )
-
-        ( blockNames, childBlocks, childValues ) =
-            List.foldl gatherParsers ( [], [], [] ) blocks
-
-        blockParser =
-            Parser.map
-                (\( pos, result ) ->
-                    result
-                        |> Result.map (\desc -> ( pos, desc ))
-                )
-                (Parse.withRange
-                    (Parser.succeed identity
-                        |. Parser.token (Parser.Token "|" BlockStart)
-                        |. Parser.oneOf
-                            [ Parser.chompIf (\c -> c == ' ') Space
-                            , Parser.succeed ()
-                            ]
-                        |= Parser.oneOf
-                            (List.reverse childBlocks
-                                ++ [ Parser.getIndent
-                                        |> Parser.andThen
-                                            (\indentation ->
-                                                Parser.succeed
-                                                    (\( pos, foundWord ) ->
-                                                        Err ( pos, Error.UnknownBlock blockNames )
-                                                    )
-                                                    |= Parse.withRange Parse.word
-                                                    |. newline
-                                                    |. Parser.loop "" (raggedIndentedStringAbove indentation)
-                                            )
-                                   ]
-                            )
-                    )
-                )
-
         expectations =
             List.map getBlockExpectation blocks
     in
@@ -1203,23 +1245,107 @@ manyOf manyOfDetails blocks =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.succeed
-                (\( range, results ) ->
-                    ManyOf
-                        { choices = List.map (Choice (manyOptionId range)) expectations
-                        , id = manyOptionId range
-                        , children = List.map resultToFound results
-                        }
+            \seed ->
+                let
+                    ( parentId, newSeed ) =
+                        Id.step seed
+
+                    reseeded =
+                        Id.reseed newSeed
+                in
+                ( newSeed
+                , Parser.succeed
+                    (\( range, results ) ->
+                        ManyOf
+                            { choices = List.map (Choice parentId) expectations
+                            , id = parentId
+                            , children = List.map resultToFound results
+                            }
+                    )
+                    |= Parse.withRange
+                        (Parser.getIndent
+                            |> Parser.andThen
+                                (\indentation ->
+                                    Parser.loop
+                                        { parsedSomething = False
+                                        , found = []
+                                        , seed = reseeded
+                                        }
+                                        (blocksOrNewlines
+                                            indentation
+                                            blocks
+                                        )
+                                )
+                        )
                 )
-                |= Parse.withRange
-                    (Parser.getIndent
-                        |> Parser.andThen
-                            (\indentation ->
-                                Parser.loop ( False, [] )
-                                    (blocksOrNewlines (Parser.oneOf (blockParser :: List.reverse childValues)) indentation)
+        }
+
+
+makeBlocksParser blocks seed =
+    let
+        gatherParsers myBlock details =
+            let
+                ( currentSeed, parser ) =
+                    getParser details.seed myBlock
+            in
+            case blockName myBlock of
+                Just name ->
+                    { blockNames = name :: details.blockNames
+                    , childBlocks = Parser.map Ok parser :: details.childBlocks
+                    , childValues = details.childValues
+                    , seed = currentSeed
+                    }
+
+                Nothing ->
+                    { blockNames = details.blockNames
+                    , childBlocks = details.childBlocks
+                    , childValues = Parser.map Ok (Parse.withRange parser) :: details.childValues
+                    , seed = currentSeed
+                    }
+
+        children =
+            List.foldl gatherParsers
+                { blockNames = []
+                , childBlocks = []
+                , childValues = []
+                , seed = seed
+                }
+                blocks
+
+        blockParser =
+            Parser.map
+                (\( pos, result ) ->
+                    Result.map (\desc -> ( pos, desc )) result
+                )
+                (Parse.withRange
+                    (Parser.succeed identity
+                        |. Parser.token (Parser.Token "|" BlockStart)
+                        |. Parser.oneOf
+                            [ Parser.chompIf (\c -> c == ' ') Space
+                            , Parser.succeed ()
+                            ]
+                        |= Parser.oneOf
+                            (List.reverse children.childBlocks
+                                ++ [ Parser.getIndent
+                                        |> Parser.andThen
+                                            (\indentation ->
+                                                Parser.succeed
+                                                    (\( pos, foundWord ) ->
+                                                        Err ( pos, Error.UnknownBlock children.blockNames )
+                                                    )
+                                                    |= Parse.withRange Parse.word
+                                                    |. newline
+                                                    |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                            )
+                                   ]
                             )
                     )
-        }
+                )
+    in
+    Parser.oneOf
+        (blockParser
+            :: List.reverse children.childValues
+        )
 
 
 {-| It can be useful to parse a tree structure. For example, here's a nested list.
@@ -1276,27 +1402,31 @@ nested config =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.getIndent
-                |> Parser.andThen
-                    (\baseIndent ->
-                        Parser.map
-                            (\( pos, result ) ->
-                                DescribeTree
-                                    { found = ( pos, buildTree baseIndent result )
-                                    , expected = expectation
-                                    }
-                            )
-                            (Parse.withRange
-                                (Parser.loop
-                                    ( { base = baseIndent
-                                      , prev = baseIndent
-                                      }
-                                    , []
-                                    )
-                                    (indentedBlocksOrNewlines config.start config.item)
+            \seed ->
+                -- TODO: AHHHH, A NEW SEED NEEDS TO GET CREATED
+                ( seed
+                , Parser.getIndent
+                    |> Parser.andThen
+                        (\baseIndent ->
+                            Parser.map
+                                (\( pos, result ) ->
+                                    DescribeTree
+                                        { found = ( pos, buildTree baseIndent result )
+                                        , expected = expectation
+                                        }
                                 )
-                            )
-                    )
+                                (Parse.withRange
+                                    (Parser.loop
+                                        ( { base = baseIndent
+                                          , prev = baseIndent
+                                          }
+                                        , []
+                                        )
+                                        (indentedBlocksOrNewlines seed config.start config.item)
+                                    )
+                                )
+                        )
+                )
         }
 
 
@@ -1422,11 +1552,19 @@ record2 record field1 field2 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -1477,12 +1615,20 @@ record3 record field1 field2 field3 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                , fieldParser field3
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            , fieldParser field3
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -1536,13 +1682,21 @@ record4 record field1 field2 field3 field4 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                , fieldParser field3
-                , fieldParser field4
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            , fieldParser field3
+                            , fieldParser field4
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -1599,14 +1753,22 @@ record5 record field1 field2 field3 field4 field5 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                , fieldParser field3
-                , fieldParser field4
-                , fieldParser field5
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            , fieldParser field3
+                            , fieldParser field4
+                            , fieldParser field5
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -1666,15 +1828,23 @@ record6 record field1 field2 field3 field4 field5 field6 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                , fieldParser field3
-                , fieldParser field4
-                , fieldParser field5
-                , fieldParser field6
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            , fieldParser field3
+                            , fieldParser field4
+                            , fieldParser field5
+                            , fieldParser field6
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -1737,16 +1907,24 @@ record7 record field1 field2 field3 field4 field5 field6 field7 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                , fieldParser field3
-                , fieldParser field4
-                , fieldParser field5
-                , fieldParser field6
-                , fieldParser field7
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            , fieldParser field3
+                            , fieldParser field4
+                            , fieldParser field5
+                            , fieldParser field6
+                            , fieldParser field7
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -1812,17 +1990,25 @@ record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                , fieldParser field3
-                , fieldParser field4
-                , fieldParser field5
-                , fieldParser field6
-                , fieldParser field7
-                , fieldParser field8
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            , fieldParser field3
+                            , fieldParser field4
+                            , fieldParser field5
+                            , fieldParser field6
+                            , fieldParser field7
+                            , fieldParser field8
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -1891,18 +2077,26 @@ record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                , fieldParser field3
-                , fieldParser field4
-                , fieldParser field5
-                , fieldParser field6
-                , fieldParser field7
-                , fieldParser field8
-                , fieldParser field9
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            , fieldParser field3
+                            , fieldParser field4
+                            , fieldParser field5
+                            , fieldParser field6
+                            , fieldParser field7
+                            , fieldParser field8
+                            , fieldParser field9
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -1974,19 +2168,27 @@ record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 f
                     _ ->
                         Err NoMatch
         , parser =
-            parseRecord record.name
-                expectations
-                [ fieldParser field1
-                , fieldParser field2
-                , fieldParser field3
-                , fieldParser field4
-                , fieldParser field5
-                , fieldParser field6
-                , fieldParser field7
-                , fieldParser field8
-                , fieldParser field9
-                , fieldParser field10
-                ]
+            \seed ->
+                let
+                    ( newSeed, fields ) =
+                        Id.thread seed
+                            [ fieldParser field1
+                            , fieldParser field2
+                            , fieldParser field3
+                            , fieldParser field4
+                            , fieldParser field5
+                            , fieldParser field6
+                            , fieldParser field7
+                            , fieldParser field8
+                            , fieldParser field9
+                            , fieldParser field10
+                            ]
+                in
+                ( newSeed
+                , parseRecord record.name
+                    expectations
+                    fields
+                )
         }
 
 
@@ -2025,17 +2227,21 @@ text options =
         { expect = ExpectText (List.map getInlineExpectation options.inlines)
         , converter = renderText options
         , parser =
-            Parse.getPosition
-                |> Parser.andThen
-                    (\pos ->
-                        Parse.styledText
-                            { inlines = List.map getInlineExpectation options.inlines
-                            , replacements = options.replacements
-                            }
-                            pos
-                            []
-                            []
-                    )
+            \seed ->
+                -- TODO:  probably need a seed for text editing.
+                ( seed
+                , Parse.getPosition
+                    |> Parser.andThen
+                        (\pos ->
+                            Parse.styledText
+                                { inlines = List.map getInlineExpectation options.inlines
+                                , replacements = options.replacements
+                                }
+                                pos
+                                []
+                                []
+                        )
+                )
         }
 
 
@@ -2332,16 +2538,23 @@ multiline details =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.map
-                (\( pos, str ) ->
-                    DescribeMultiline (Id pos) str
-                )
-                (Parse.withRange
-                    (Parser.getIndent
-                        |> Parser.andThen
-                            (\indentation ->
-                                Parser.loop "" (indentedString indentation)
-                            )
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\( pos, str ) ->
+                        DescribeMultiline id str
+                    )
+                    (Parse.withRange
+                        (Parser.getIndent
+                            |> Parser.andThen
+                                (\indentation ->
+                                    Parser.loop "" (indentedString indentation)
+                                )
+                        )
                     )
                 )
         }
@@ -2368,16 +2581,23 @@ string details =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.succeed
-                (\start val end ->
-                    DescribeString (Id { start = start, end = end }) val
-                )
-                |= Parse.getPosition
-                |= Parser.getChompedString
-                    (Parser.chompWhile
-                        (\c -> c /= '\n')
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.succeed
+                    (\start val end ->
+                        DescribeString id val
                     )
-                |= Parse.getPosition
+                    |= Parse.getPosition
+                    |= Parser.getChompedString
+                        (Parser.chompWhile
+                            (\c -> c /= '\n')
+                        )
+                    |= Parse.getPosition
+                )
         }
 
 
@@ -2407,39 +2627,46 @@ date details =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.map
-                (\( pos, parsedPosix ) ->
-                    case parsedPosix of
-                        Err str ->
-                            DescribeDate
-                                { id = Id pos
-                                , found =
-                                    Unexpected
-                                        { range = pos
-                                        , problem = Error.BadDate str
-                                        }
-                                }
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\( pos, parsedPosix ) ->
+                        case parsedPosix of
+                            Err str ->
+                                DescribeDate
+                                    { id = id
+                                    , found =
+                                        Unexpected
+                                            { range = pos
+                                            , problem = Error.BadDate str
+                                            }
+                                    }
 
-                        Ok ( str, posix ) ->
-                            DescribeDate
-                                { id = Id pos
-                                , found = Found pos ( str, posix )
-                                }
-                )
-                (Parse.withRange
-                    (Parser.getChompedString
-                        (Parser.chompWhile
-                            (\c -> c /= '\n')
-                        )
-                        |> Parser.andThen
-                            (\str ->
-                                case Iso8601.toTime str of
-                                    Err err ->
-                                        Parser.succeed (Err str)
-
-                                    Ok parsedPosix ->
-                                        Parser.succeed (Ok ( str, parsedPosix ))
+                            Ok ( str, posix ) ->
+                                DescribeDate
+                                    { id = id
+                                    , found = Found pos ( str, posix )
+                                    }
+                    )
+                    (Parse.withRange
+                        (Parser.getChompedString
+                            (Parser.chompWhile
+                                (\c -> c /= '\n')
                             )
+                            |> Parser.andThen
+                                (\str ->
+                                    case Iso8601.toTime str of
+                                        Err err ->
+                                            Parser.succeed (Err str)
+
+                                        Ok parsedPosix ->
+                                            Parser.succeed (Ok ( str, parsedPosix ))
+                                )
+                        )
                     )
                 )
         }
@@ -2472,13 +2699,15 @@ exactly key value =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.succeed
-                (\start _ end ->
-                    DescribeStringExactly { start = start, end = end } key
+            skipSeed
+                (Parser.succeed
+                    (\start _ end ->
+                        DescribeStringExactly { start = start, end = end } key
+                    )
+                    |= Parse.getPosition
+                    |= Parser.token (Parser.Token key (Expecting key))
+                    |= Parse.getPosition
                 )
-                |= Parse.getPosition
-                |= Parser.token (Parser.Token key (Expecting key))
-                |= Parse.getPosition
         }
 
 
@@ -2501,31 +2730,38 @@ bool { default, view } =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.map
-                (\( range, boolResult ) ->
-                    DescribeBoolean
-                        { id = Id range
-                        , found =
-                            case boolResult of
-                                Err err ->
-                                    Unexpected
-                                        { range = range
-                                        , problem = Error.BadBool err
-                                        }
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\( range, boolResult ) ->
+                        DescribeBoolean
+                            { id = id
+                            , found =
+                                case boolResult of
+                                    Err err ->
+                                        Unexpected
+                                            { range = range
+                                            , problem = Error.BadBool err
+                                            }
 
-                                Ok b ->
-                                    Found range
-                                        b
-                        }
-                )
-                (Parse.withRange
-                    (Parser.oneOf
-                        [ Parser.token (Parser.Token "True" (Expecting "True"))
-                            |> Parser.map (always (Ok True))
-                        , Parser.token (Parser.Token "False" (Expecting "False"))
-                            |> Parser.map (always (Ok False))
-                        , Parser.map Err Parse.word
-                        ]
+                                    Ok b ->
+                                        Found range
+                                            b
+                            }
+                    )
+                    (Parse.withRange
+                        (Parser.oneOf
+                            [ Parser.token (Parser.Token "True" (Expecting "True"))
+                                |> Parser.map (always (Ok True))
+                            , Parser.token (Parser.Token "False" (Expecting "False"))
+                                |> Parser.map (always (Ok False))
+                            , Parser.map Err Parse.word
+                            ]
+                        )
                     )
                 )
         }
@@ -2553,14 +2789,21 @@ int { default, view } =
                         Err NoMatch
         , expect = ExpectInteger default
         , parser =
-            Parser.map
-                (\( id, foundInt ) ->
-                    DescribeInteger
-                        { id = id
-                        , found = foundInt
-                        }
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\foundInt ->
+                        DescribeInteger
+                            { id = id
+                            , found = foundInt
+                            }
+                    )
+                    integer
                 )
-                integer
         }
 
 
@@ -2577,18 +2820,31 @@ float { default, view } =
             \desc ->
                 case desc of
                     DescribeFloat details ->
-                        Ok (mapFound (\( str_, fl ) -> view details.id fl) details.found)
+                        Ok
+                            (mapFound
+                                (\( str_, fl ) ->
+                                    view details.id fl
+                                )
+                                details.found
+                            )
 
                     _ ->
                         Err NoMatch
         , expect = ExpectFloat default
         , parser =
-            Parser.map
-                (\( id, fl ) ->
-                    DescribeFloat
-                        { id = id, found = fl }
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\fl ->
+                        DescribeFloat
+                            { id = id, found = fl }
+                    )
+                    floating
                 )
-                floating
         }
 
 
@@ -2624,34 +2880,41 @@ intBetween bounds =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.map
-                (\( id, found ) ->
-                    DescribeIntBetween
-                        { min = bottom
-                        , max = top
-                        , id = id
-                        , found =
-                            case found of
-                                Found rng i ->
-                                    if i >= bottom && i <= top then
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\found ->
+                        DescribeIntBetween
+                            { min = bottom
+                            , max = top
+                            , id = id
+                            , found =
+                                case found of
+                                    Found rng i ->
+                                        if i >= bottom && i <= top then
+                                            found
+
+                                        else
+                                            Unexpected
+                                                { range = rng
+                                                , problem =
+                                                    Error.IntOutOfRange
+                                                        { found = i
+                                                        , min = bottom
+                                                        , max = top
+                                                        }
+                                                }
+
+                                    _ ->
                                         found
-
-                                    else
-                                        Unexpected
-                                            { range = rng
-                                            , problem =
-                                                Error.IntOutOfRange
-                                                    { found = i
-                                                    , min = bottom
-                                                    , max = top
-                                                    }
-                                            }
-
-                                _ ->
-                                    found
-                        }
+                            }
+                    )
+                    integer
                 )
-                integer
         }
 
 
@@ -2687,34 +2950,41 @@ floatBetween bounds =
                     _ ->
                         Err NoMatch
         , parser =
-            Parser.map
-                (\( id, found ) ->
-                    DescribeFloatBetween
-                        { min = bottom
-                        , max = top
-                        , id = id
-                        , found =
-                            case found of
-                                Found rng ( str, i ) ->
-                                    if i >= bottom && i <= top then
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\found ->
+                        DescribeFloatBetween
+                            { min = bottom
+                            , max = top
+                            , id = id
+                            , found =
+                                case found of
+                                    Found rng ( str, i ) ->
+                                        if i >= bottom && i <= top then
+                                            found
+
+                                        else
+                                            Unexpected
+                                                { range = rng
+                                                , problem =
+                                                    Error.FloatOutOfRange
+                                                        { found = i
+                                                        , min = bottom
+                                                        , max = top
+                                                        }
+                                                }
+
+                                    _ ->
                                         found
-
-                                    else
-                                        Unexpected
-                                            { range = rng
-                                            , problem =
-                                                Error.FloatOutOfRange
-                                                    { found = i
-                                                    , min = bottom
-                                                    , max = top
-                                                    }
-                                            }
-
-                                _ ->
-                                    found
-                        }
+                            }
+                    )
+                    floating
                 )
-                floating
         }
 
 
@@ -2824,44 +3094,81 @@ indentedString indentation found =
         ]
 
 
+type alias BlockOrNewlineCursor thing =
+    { parsedSomething : Bool
+    , found : List thing
+    , seed : Random.Seed
+    }
+
+
 {-| -}
-blocksOrNewlines : Parser Context Problem thing -> Int -> ( Bool, List thing ) -> Parser Context Problem (Parser.Step ( Bool, List thing ) (List thing))
-blocksOrNewlines myParser indentation ( parsedSomething, existing ) =
+blocksOrNewlines : Int -> List (Block thing) -> BlockOrNewlineCursor thing -> Parser Context Problem (Parser.Step (BlockOrNewlineCursor thing) (List thing))
+blocksOrNewlines indentation myParser cursor =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
                 (\_ ->
-                    Parser.Done (List.reverse existing)
+                    Parser.Done (List.reverse cursor.found)
                 )
-        , Parser.succeed (Parser.Loop ( True, existing ))
+        , Parser.succeed
+            (Parser.Loop
+                { parsedSomething = True
+                , found = cursor.found
+                , seed = cursor.seed
+                }
+            )
             |. newlineWith "empty newline"
-        , if not parsedSomething then
+        , if not cursor.parsedSomething then
             -- First thing already has indentation accounted for.
             myParser
                 |> Parser.map
                     (\foundBlock ->
-                        Parser.Loop ( True, foundBlock :: existing )
+                        Parser.Loop
+                            { parsedSomething = True
+                            , found = foundBlock :: cursor.found
+                            , seed = cursor.seed
+                            }
                     )
 
           else
             Parser.oneOf
                 [ Parser.succeed
                     (\foundBlock ->
-                        Parser.Loop ( True, foundBlock :: existing )
+                        let
+                            ( _, newSeed ) =
+                                Id.step cursor.seed
+                        in
+                        Parser.Loop
+                            { parsedSomething = True
+                            , found = foundBlock :: cursor.found
+                            , seed = newSeed
+                            }
                     )
                     |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
-                    |= myParser
-                , Parser.succeed (Parser.Loop ( True, existing ))
+                    |= makeBlocksParser blocks cursor.seed
+                , Parser.succeed
+                    (Parser.Loop
+                        { parsedSomething = True
+                        , found = cursor.found
+                        , seed = cursor.seed
+                        }
+                    )
                     |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
                     |. Parser.backtrackable newline
 
                 -- We reach here because the indentation parsing was not successful,
                 -- meaning the indentation has been lowered and the block is done
-                , Parser.succeed (Parser.Done (List.reverse existing))
+                , Parser.succeed (Parser.Done (List.reverse cursor.found))
                 ]
 
         -- Whitespace Line
-        , Parser.succeed (Parser.Loop ( True, existing ))
+        , Parser.succeed
+            (Parser.Loop
+                { parsedSomething = True
+                , found = cursor.found
+                , seed = cursor.seed
+                }
+            )
             |. Parser.chompWhile (\c -> c == ' ')
             |. newlineWith "ws-line"
         ]
@@ -2879,21 +3186,19 @@ skipBlankLineWith x =
             ]
 
 
-integer : Parser Context Problem ( Id Int, Found Int )
+integer : Parser Context Problem (Found Int)
 integer =
     Parser.map
         (\( pos, intResult ) ->
             case intResult of
                 Ok i ->
-                    ( Id pos, Found pos i )
+                    Found pos i
 
                 Err str ->
-                    ( Id pos
-                    , Unexpected
+                    Unexpected
                         { range = pos
                         , problem = Error.BadInt str
                         }
-                    )
         )
         (Parse.withRange
             (Parser.oneOf
@@ -2927,21 +3232,19 @@ integer =
 
 {-| Parses a float and must end with whitespace, not additional characters.
 -}
-floating : Parser Context Problem ( Id Float, Found ( String, Float ) )
+floating : Parser Context Problem (Found ( String, Float ))
 floating =
     Parser.map
         (\( pos, floatResult ) ->
             case floatResult of
                 Ok f ->
-                    ( Id pos, Found pos f )
+                    Found pos f
 
                 Err str ->
-                    ( Id pos
-                    , Unexpected
+                    Unexpected
                         { range = pos
                         , problem = Error.BadFloat str
                         }
-                    )
         )
         (Parse.withRange
             (Parser.oneOf
@@ -2995,12 +3298,18 @@ field name child =
     Field name child
 
 
-fieldParser : Field value -> ( String, Parser Context Problem ( String, Found Description ) )
-fieldParser (Field name myBlock) =
-    ( name
-    , withFieldName
-        name
-        (getParser myBlock)
+fieldParser : Field value -> Random.Seed -> ( Random.Seed, ( String, Parser Context Problem ( String, Found Description ) ) )
+fieldParser (Field name myBlock) seed =
+    let
+        ( newSeed, blockParser ) =
+            getParser seed myBlock
+    in
+    ( newSeed
+    , ( name
+      , withFieldName
+            name
+            blockParser
+      )
     )
 
 
@@ -3678,11 +3987,12 @@ type alias NestedIndex =
 
 -}
 indentedBlocksOrNewlines :
-    Block icon
+    Random.Seed
+    -> Block icon
     -> Block thing
     -> ( NestedIndex, List ( Int, Maybe Description, Description ) )
     -> Parser Context Problem (Parser.Step ( NestedIndex, List ( Int, Maybe Description, Description ) ) (List ( Int, Maybe Description, Description )))
-indentedBlocksOrNewlines icon item ( indentation, existing ) =
+indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
