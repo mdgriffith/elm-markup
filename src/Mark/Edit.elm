@@ -24,7 +24,8 @@ import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error
-import Mark.Internal.Id exposing (..)
+import Mark.Internal.Id as Id exposing (..)
+import Random
 import Time
 
 
@@ -461,7 +462,12 @@ update edit (Parsed original) =
                                 \i pos desc ->
                                     let
                                         ( newPos, newDesc ) =
-                                            create i pos expectation
+                                            create
+                                                { indent = i
+                                                , base = pos
+                                                , expectation = expectation
+                                                , seed = original.currentSeed
+                                                }
                                     in
                                     replaceOption id newDesc desc
                             , indentation = 0
@@ -483,7 +489,7 @@ update edit (Parsed original) =
                                                 Just
                                                     (ManyOf
                                                         { many
-                                                            | children = makeInsertAt index indentation many expectation
+                                                            | children = makeInsertAt original.currentSeed index indentation many expectation
                                                         }
                                                     )
 
@@ -770,8 +776,8 @@ withinOffsetRange offset range =
 
 
 {-| -}
-createField : Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
-createField currentIndent ( name, exp ) ( base, existingFields ) =
+createField : Random.Seed -> Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
+createField seed currentIndent ( name, exp ) ( base, existingFields ) =
     let
         -- This is the beginning of the field
         --    field = x
@@ -782,12 +788,15 @@ createField currentIndent ( name, exp ) ( base, existingFields ) =
 
         -- If the field value is more than a line
         ( end, childField ) =
-            create (currentIndent + 1)
-                (fieldValueStart
-                    -- Add a few characters to account for `field = `.
-                    |> moveColumn (String.length name + 3)
-                )
-                exp
+            create
+                { indent = currentIndent + 1
+                , base =
+                    fieldValueStart
+                        -- Add a few characters to account for `field = `.
+                        |> moveColumn (String.length name + 3)
+                , expectation = exp
+                , seed = seed
+                }
 
         height =
             end.line
@@ -814,15 +823,18 @@ createField currentIndent ( name, exp ) ( base, existingFields ) =
         let
             -- If the field value is more than a line
             ( newEnd, newChildField ) =
-                create (currentIndent + 1)
-                    (fieldValueStart
-                        -- account for just `fieldname =`
-                        |> moveColumn (String.length name + 2)
-                        |> moveNewline
-                        -- Indent one level further
-                        |> moveColumn (1 * 4)
-                    )
-                    exp
+                create
+                    { indent = currentIndent + 1
+                    , base =
+                        fieldValueStart
+                            -- account for just `fieldname =`
+                            |> moveColumn (String.length name + 2)
+                            |> moveNewline
+                            -- Indent one level further
+                            |> moveColumn (1 * 4)
+                    , expectation = exp
+                    , seed = seed
+                    }
 
             finalEnd =
                 newEnd
@@ -868,41 +880,50 @@ make expected options =
         - Block, Record, and Tree elements handle the indentation of their children.
 
 -}
-create : Int -> Position -> Expectation -> ( Position, Description )
-create currentIndent base expectation =
-    case expectation of
+create :
+    { seed : Random.Seed
+    , indent : Int
+    , base : Position
+    , expectation : Expectation
+    }
+    -> ( Position, Description )
+create current =
+    case current.expectation of
         ExpectBlock name childExpectation ->
             let
                 ( end, childDescription ) =
-                    create (currentIndent + 1)
-                        (base
-                            |> moveNewline
-                            |> moveColumn ((currentIndent + 1) * 4)
-                        )
-                        childExpectation
+                    create
+                        { indent = current.indent + 1
+                        , base =
+                            current.base
+                                |> moveNewline
+                                |> moveColumn ((current.indent + 1) * 4)
+                        , expectation = childExpectation
+                        , seed = current.seed
+                        }
             in
             ( end
             , DescribeBlock
                 { name = name
                 , found =
                     Found
-                        { start = base
+                        { start = current.base
                         , end = end
                         }
                         childDescription
-                , expected = expectation
+                , expected = current.expectation
                 }
             )
 
         ExpectStub name ->
             let
                 end =
-                    moveColumn (String.length name) base
+                    moveColumn (String.length name) current.base
             in
             ( end
             , DescribeStub name
                 (Found
-                    { start = base
+                    { start = current.base
                     , end = end
                     }
                     name
@@ -912,79 +933,90 @@ create currentIndent base expectation =
         ExpectRecord name fields ->
             let
                 ( end, renderedFields ) =
-                    List.foldl (createField (currentIndent + 1)) ( moveNewline base, [] ) fields
+                    List.foldl (createField current.seed (current.indent + 1)) ( moveNewline current.base, [] ) fields
             in
             ( end
             , Record
                 { name = name
                 , found =
                     Found
-                        { start = base
+                        { start = current.base
                         , end = moveNewline end
                         }
                         renderedFields
-                , expected = expectation
+                , expected = current.expectation
                 }
             )
 
         ExpectTree icon content ->
             let
                 range =
-                    { start = base, end = base }
+                    { start = current.base
+                    , end = current.base
+                    }
 
                 items =
                     []
             in
-            ( moveNewline base
+            ( moveNewline current.base
             , DescribeTree
                 { found = ( range, items )
-                , expected = expectation
+                , expected = current.expectation
                 }
             )
 
         ExpectOneOf choices ->
             let
-                id =
-                    Id
-                        { start = base
-                        , end = end
-                        }
+                ( newId, newSeed ) =
+                    Id.step current.seed
 
                 -- TODO: handle case of empty OneOf
                 ( end, childDescription ) =
-                    create (currentIndent + 1)
-                        base
-                        (Maybe.withDefault (ExpectStub "Unknown") (List.head choices))
+                    create
+                        { indent = current.indent + 1
+                        , base = current.base
+                        , expectation = Maybe.withDefault (ExpectStub "Unknown") (List.head choices)
+                        , seed = newSeed
+                        }
             in
-            ( base
+            ( end
             , OneOf
-                { id = id
-                , choices = List.map (Choice id) choices
+                { id = newId
+                , choices = List.map (Choice newId) choices
                 , child =
-                    Found { start = base, end = end } childDescription
+                    Found
+                        { start = current.base
+                        , end = end
+                        }
+                        childDescription
                 }
             )
 
         ExpectManyOf choices ->
             let
-                id =
-                    Id { start = base, end = base }
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
-            ( moveNewline base
+            ( moveNewline current.base
             , ManyOf
-                { id = id
-                , choices = List.map (Choice id) choices
+                { id = newId
+                , choices = List.map (Choice newId) choices
                 , children =
                     List.foldl
                         (\choice ( newBase, result ) ->
                             let
                                 ( endOfCreated, created ) =
-                                    create currentIndent newBase choice
+                                    create
+                                        { indent = current.indent
+                                        , base = newBase
+                                        , expectation = choice
+                                        , seed = newSeed
+                                        }
                             in
                             ( endOfCreated
                                 |> moveNewline
                                 |> moveNewline
-                                |> moveColumn (currentIndent * 4)
+                                |> moveColumn (current.indent * 4)
                             , Found
                                 { start = newBase
                                 , end = endOfCreated
@@ -993,7 +1025,7 @@ create currentIndent base expectation =
                                 :: result
                             )
                         )
-                        ( base, [] )
+                        ( current.base, [] )
                         choices
                         |> Tuple.second
                         |> List.reverse
@@ -1003,18 +1035,24 @@ create currentIndent base expectation =
         ExpectStartsWith start remaining ->
             let
                 ( startEnd, startChildDescription ) =
-                    create currentIndent
-                        base
-                        start
+                    create
+                        { indent = current.indent
+                        , base = current.base
+                        , expectation = start
+                        , seed = current.seed
+                        }
 
                 ( remainingEnd, remainingDescription ) =
-                    create currentIndent
-                        (moveNewline startEnd)
-                        remaining
+                    create
+                        { indent = current.indent
+                        , base = moveNewline startEnd
+                        , expectation = remaining
+                        , seed = current.seed
+                        }
             in
             ( remainingEnd
             , StartsWith
-                { start = base
+                { start = current.base
                 , end = remainingEnd
                 }
                 { found = startChildDescription
@@ -1032,20 +1070,21 @@ create currentIndent base expectation =
                     boolToString b
 
                 end =
-                    moveColumn (String.length boolString) base
+                    moveColumn (String.length boolString) current.base
 
                 range =
-                    { start = base
+                    { start = current.base
                     , end = end
                     }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
             ( end
             , DescribeBoolean
-                { id = Id range
+                { id = newId
                 , found =
-                    Found
-                        range
-                        b
+                    Found range b
                 }
             )
 
@@ -1054,16 +1093,19 @@ create currentIndent base expectation =
                 end =
                     moveColumn
                         (String.length (String.fromInt i))
-                        base
+                        current.base
 
                 pos =
-                    { start = base
+                    { start = current.base
                     , end = end
                     }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
             ( end
             , DescribeInteger
-                { id = Id pos
+                { id = newId
                 , found = Found pos i
                 }
             )
@@ -1073,17 +1115,19 @@ create currentIndent base expectation =
                 end =
                     moveColumn
                         (String.length (String.fromFloat f))
-                        base
+                        current.base
 
                 pos =
-                    { start = base
-                    , end =
-                        end
+                    { start = current.base
+                    , end = end
                     }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
             ( end
             , DescribeFloat
-                { id = Id pos
+                { id = newId
                 , found = Found pos ( String.fromFloat f, f )
                 }
             )
@@ -1093,17 +1137,20 @@ create currentIndent base expectation =
                 end =
                     moveColumn
                         (String.length (String.fromFloat details.default))
-                        base
+                        current.base
 
                 pos =
-                    { start = base
+                    { start = current.base
                     , end =
                         end
                     }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
             ( end
             , DescribeFloatBetween
-                { id = Id pos
+                { id = newId
                 , min = details.min
                 , max = details.max
                 , found =
@@ -1117,16 +1164,19 @@ create currentIndent base expectation =
         ExpectIntBetween details ->
             let
                 end =
-                    moveColumn (String.length (String.fromInt details.default)) base
+                    moveColumn (String.length (String.fromInt details.default)) current.base
 
                 pos =
-                    { start = base
+                    { start = current.base
                     , end = end
                     }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
             ( end
             , DescribeIntBetween
-                { id = Id pos
+                { id = newId
                 , min = details.min
                 , max = details.max
                 , found = Found pos details.default
@@ -1136,42 +1186,46 @@ create currentIndent base expectation =
         ExpectString str ->
             let
                 end =
-                    moveColumn (String.length str) base
+                    moveColumn (String.length str) current.base
 
                 pos =
-                    { start = base
+                    { start = current.base
                     , end = end
                     }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
             ( end
-            , DescribeString
-                (Id pos)
-                str
+            , DescribeString newId str
             )
 
         ExpectMultiline str ->
             let
                 end =
-                    moveColumn (String.length str) base
+                    moveColumn (String.length str) current.base
 
                 -- TODO: This position is not correct!
                 -- Account for newlines
                 pos =
-                    { start = base
+                    { start = current.base
                     , end = end
                     }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
             ( end
-            , DescribeMultiline (Id pos) str
+            , DescribeMultiline newId str
             )
 
         ExpectStringExactly str ->
             let
                 end =
-                    moveColumn (String.length str) base
+                    moveColumn (String.length str) current.base
 
                 pos =
-                    { start = base
+                    { start = current.base
                     , end = end
                     }
             in
@@ -1183,16 +1237,19 @@ create currentIndent base expectation =
         _ ->
             let
                 end =
-                    moveColumn (String.length "True") base
+                    moveColumn (String.length "True") current.base
 
                 range =
-                    { start = base
+                    { start = current.base
                     , end = end
                     }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
             in
             ( end
             , DescribeBoolean
-                { id = Id range
+                { id = newId
                 , found =
                     Found
                         range
@@ -1285,15 +1342,13 @@ push maybePush found =
 
 pushDescription to desc =
     case desc of
-        DescribeString id str ->
-            DescribeString (pushId to id) str
-
         _ ->
             desc
 
 
-pushId to (Id range) =
-    Id (pushRange to range)
+
+-- pushId to (Id range) =
+--     Id (pushRange to range)
 
 
 pushRange to range =
@@ -1332,7 +1387,7 @@ sizeToRange start delta =
 
 {-| TODO: return coordinate adjustment
 -}
-makeInsertAt index indentation many expectation =
+makeInsertAt seed index indentation many expectation =
     List.foldl
         (\item found ->
             if found.index == index then
@@ -1351,7 +1406,12 @@ makeInsertAt index indentation many expectation =
                             }
 
                     ( createdEnd, new ) =
-                        create indentation newStart expectation
+                        create
+                            { indent = indentation
+                            , base = newStart
+                            , expectation = expectation
+                            , seed = seed
+                            }
 
                     newDescSize =
                         minusPosition createdEnd found.position
@@ -1422,7 +1482,12 @@ makeInsertAt index indentation many expectation =
                             }
 
                         ( createdEnd, new ) =
-                            create indentation newStart expectation
+                            create
+                                { indent = indentation
+                                , base = newStart
+                                , expectation = expectation
+                                , seed = seed
+                                }
                     in
                     Found
                         { start = newStart

@@ -569,6 +569,8 @@ document doc child =
                         { errors = List.map (Error.render source) (getUnexpecteds val)
                         , found = Found range val
                         , expected = getBlockExpectation child
+                        , initialSeed = seed
+                        , currentSeed = currentSeed
                         , focus = Nothing
                         }
                 )
@@ -2237,6 +2239,7 @@ text options =
                                 { inlines = List.map getInlineExpectation options.inlines
                                 , replacements = options.replacements
                                 }
+                                seed
                                 pos
                                 []
                                 []
@@ -3102,8 +3105,7 @@ type alias BlockOrNewlineCursor thing =
 
 
 {-| -}
-blocksOrNewlines : Int -> List (Block thing) -> BlockOrNewlineCursor thing -> Parser Context Problem (Parser.Step (BlockOrNewlineCursor thing) (List thing))
-blocksOrNewlines indentation myParser cursor =
+blocksOrNewlines indentation blocks cursor =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -3120,7 +3122,7 @@ blocksOrNewlines indentation myParser cursor =
             |. newlineWith "empty newline"
         , if not cursor.parsedSomething then
             -- First thing already has indentation accounted for.
-            myParser
+            makeBlocksParser blocks cursor.seed
                 |> Parser.map
                     (\foundBlock ->
                         Parser.Loop
@@ -4004,6 +4006,13 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
         , skipBlankLineWith (Parser.Loop ( indentation, existing ))
         , case existing of
             [] ->
+                let
+                    ( iconSeed, iconParser ) =
+                        getParser seed icon
+
+                    ( itemSeed, itemParser ) =
+                        getParser iconSeed item
+                in
                 -- Indent is already parsed by the block constructor for first element, skip it
                 Parser.succeed
                     (\foundIcon foundBlock ->
@@ -4015,8 +4024,8 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
                         in
                         Parser.Loop ( newIndex, ( indentation.base, Just foundIcon, foundBlock ) :: existing )
                     )
-                    |= getParser icon
-                    |= getParser item
+                    |= iconParser
+                    |= itemParser
 
             _ ->
                 Parser.oneOf
@@ -4024,6 +4033,13 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
                       expectIndentation indentation.base indentation.prev
                         |> Parser.andThen
                             (\newIndent ->
+                                let
+                                    ( iconSeed, iconParser ) =
+                                        getParser seed icon
+
+                                    ( itemSeed, itemParser ) =
+                                        getParser iconSeed item
+                                in
                                 -- If the indent has changed, then the delimiter is required
                                 Parser.withIndent newIndent <|
                                     Parser.oneOf
@@ -4040,11 +4056,11 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
                                                     , ( newIndent, Just iconResult, itemResult ) :: existing
                                                     )
                                             )
-                                            |= getParser icon
-                                            |= getParser item
+                                            |= iconParser
+                                            |= itemParser
                                          )
                                             :: (if newIndent - 4 == indentation.prev then
-                                                    [ getParser item
+                                                    [ itemParser
                                                         |> Parser.map
                                                             (\foundBlock ->
                                                                 let

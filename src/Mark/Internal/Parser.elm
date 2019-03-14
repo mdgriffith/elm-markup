@@ -13,9 +13,10 @@ module Mark.Internal.Parser exposing
 
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
-import Mark.Internal.Id exposing (..)
+import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.TolerantParser as Tolerant
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+import Random
 
 
 {-| -}
@@ -87,11 +88,12 @@ styledText :
     { inlines : List InlineExpectation
     , replacements : List Replacement
     }
+    -> Random.Seed
     -> Position
     -> List Style
     -> List Char
     -> Parser Context Problem Description
-styledText options startingPos inheritedStyles until =
+styledText options seed startingPos inheritedStyles until =
     let
         vacantText =
             textCursor inheritedStyles startingPos
@@ -101,6 +103,11 @@ styledText options startingPos inheritedStyles until =
 
         meaningful =
             '\\' :: '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
+
+        ( newId, newSeed ) =
+            Id.step seed
+
+        -- TODO: return new seed!
     in
     Parser.oneOf
         [ -- Parser.chompIf (\c -> c == ' ') CantStartTextWithSpace
@@ -112,7 +119,7 @@ styledText options startingPos inheritedStyles until =
           Parser.map
             (\( pos, textNodes ) ->
                 DescribeText
-                    { id = Id pos
+                    { id = newId
                     , text = textNodes
                     }
             )

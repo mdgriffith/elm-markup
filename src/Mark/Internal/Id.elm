@@ -4,6 +4,7 @@ module Mark.Internal.Id exposing
     , ManyOptions(..)
     , Options(..)
     , getRange
+    , reseed
     , step
     , thread
     , threadThrough

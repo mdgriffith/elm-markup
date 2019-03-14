@@ -2,7 +2,7 @@ module Mark.Internal.Description exposing
     ( Found(..), Nested(..), UnexpectedDetails
     , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), AttrExpectation(..)
-    , Parsed(..), startingPoint, create, descriptionToString, toString
+    , Parsed(..), startingPoint, descriptionToString, toString
     )
 
 {-|
@@ -13,7 +13,7 @@ module Mark.Internal.Description exposing
 
 @docs Expectation, InlineExpectation, AttrExpectation
 
-@docs Parsed, startingPoint, create, descriptionToString, toString
+@docs Parsed, startingPoint, descriptionToString, toString
 
 -}
 
@@ -21,6 +21,7 @@ import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Error as Error
 import Mark.Internal.Id exposing (..)
+import Random
 import Time
 
 
@@ -38,6 +39,8 @@ type Parsed
         , found : Found Description
         , expected : Expectation
         , focus : Maybe Position
+        , initialSeed : Random.Seed
+        , currentSeed : Random.Seed
         }
 
 
@@ -519,79 +522,72 @@ withinOffsetRange offset range =
 
 
 -}
-
-
-{-| -}
-createField : Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
-createField currentIndent ( name, exp ) ( base, existingFields ) =
-    let
-        -- This is the beginning of the field
-        --    field = x
-        --   ^ right there
-        fieldValueStart =
-            base
-                |> moveColumn (currentIndent * 4)
-
-        -- If the field value is more than a line
-        ( end, childField ) =
-            create (currentIndent + 1)
-                (fieldValueStart
-                    -- Add a few characters to account for `field = `.
-                    |> moveColumn (String.length name + 3)
-                )
-                exp
-
-        height =
-            end.line
-                - base.line
-
-        fieldEnd =
-            moveNewline end
-    in
-    if height == 0 then
-        ( fieldEnd
-        , ( name
-          , Found
-                { start =
-                    fieldValueStart
-                , end =
-                    fieldEnd
-                }
-                childField
-          )
-            :: existingFields
-        )
-
-    else
-        let
-            -- If the field value is more than a line
-            ( newEnd, newChildField ) =
-                create (currentIndent + 1)
-                    (fieldValueStart
-                        -- account for just `fieldname =`
-                        |> moveColumn (String.length name + 2)
-                        |> moveNewline
-                        -- Indent one level further
-                        |> moveColumn (1 * 4)
-                    )
-                    exp
-
-            finalEnd =
-                newEnd
-                    |> moveNewline
-        in
-        ( finalEnd
-        , ( name
-          , Found
-                { start =
-                    fieldValueStart
-                , end =
-                    finalEnd
-                }
-                newChildField
-          )
-            :: existingFields
-        )
+-- {-| -}
+-- createField : Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
+-- createField currentIndent ( name, exp ) ( base, existingFields ) =
+--     let
+--         -- This is the beginning of the field
+--         --    field = x
+--         --   ^ right there
+--         fieldValueStart =
+--             base
+--                 |> moveColumn (currentIndent * 4)
+--         -- If the field value is more than a line
+--         ( end, childField ) =
+--             create (currentIndent + 1)
+--                 (fieldValueStart
+--                     -- Add a few characters to account for `field = `.
+--                     |> moveColumn (String.length name + 3)
+--                 )
+--                 exp
+--         height =
+--             end.line
+--                 - base.line
+--         fieldEnd =
+--             moveNewline end
+--     in
+--     if height == 0 then
+--         ( fieldEnd
+--         , ( name
+--           , Found
+--                 { start =
+--                     fieldValueStart
+--                 , end =
+--                     fieldEnd
+--                 }
+--                 childField
+--           )
+--             :: existingFields
+--         )
+--     else
+--         let
+--             -- If the field value is more than a line
+--             ( newEnd, newChildField ) =
+--                 create (currentIndent + 1)
+--                     (fieldValueStart
+--                         -- account for just `fieldname =`
+--                         |> moveColumn (String.length name + 2)
+--                         |> moveNewline
+--                         -- Indent one level further
+--                         |> moveColumn (1 * 4)
+--                     )
+--                     exp
+--             finalEnd =
+--                 newEnd
+--                     |> moveNewline
+--         in
+--         ( finalEnd
+--         , ( name
+--           , Found
+--                 { start =
+--                     fieldValueStart
+--                 , end =
+--                     finalEnd
+--                 }
+--                 newChildField
+--           )
+--             :: existingFields
+--         )
 
 
 {-| Given an expectation and a list of choices, verify that the expectation is a valid choice.
@@ -610,347 +606,316 @@ make expected options =
         |> List.head
 
 
-{-|
 
-    `Position` is the starting position for a block.
-
-    The same rules for indentation as they apply everywhere.
-
-        - Primitives do not handle their indentation.
-        - Block, Record, and Tree elements handle the indentation of their children.
-
--}
-create : Int -> Position -> Expectation -> ( Position, Description )
-create currentIndent base expectation =
-    case expectation of
-        ExpectBlock name childExpectation ->
-            let
-                ( end, childDescription ) =
-                    create (currentIndent + 1)
-                        (base
-                            |> moveNewline
-                            |> moveColumn ((currentIndent + 1) * 4)
-                        )
-                        childExpectation
-            in
-            ( end
-            , DescribeBlock
-                { name = name
-                , found =
-                    Found
-                        { start = base
-                        , end = end
-                        }
-                        childDescription
-                , expected = expectation
-                }
-            )
-
-        ExpectStub name ->
-            let
-                end =
-                    moveColumn (String.length name) base
-            in
-            ( end
-            , DescribeStub name
-                (Found
-                    { start = base
-                    , end = end
-                    }
-                    name
-                )
-            )
-
-        ExpectRecord name fields ->
-            let
-                ( end, renderedFields ) =
-                    List.foldl (createField (currentIndent + 1)) ( moveNewline base, [] ) fields
-            in
-            ( end
-            , Record
-                { name = name
-                , found =
-                    Found
-                        { start = base
-                        , end = moveNewline end
-                        }
-                        renderedFields
-                , expected = expectation
-                }
-            )
-
-        ExpectTree icon content ->
-            let
-                range =
-                    { start = base, end = base }
-
-                items =
-                    []
-            in
-            ( moveNewline base
-            , DescribeTree
-                { found = ( range, items )
-                , expected = expectation
-                }
-            )
-
-        ExpectOneOf choices ->
-            let
-                id =
-                    Id
-                        { start = base
-                        , end = end
-                        }
-
-                -- TODO: handle case of empty OneOf
-                ( end, childDescription ) =
-                    create (currentIndent + 1)
-                        base
-                        (Maybe.withDefault (ExpectStub "Unknown") (List.head choices))
-            in
-            ( base
-            , OneOf
-                { id = id
-                , choices = List.map (Choice id) choices
-                , child =
-                    Found { start = base, end = end } childDescription
-                }
-            )
-
-        ExpectManyOf choices ->
-            let
-                id =
-                    Id { start = base, end = base }
-            in
-            ( moveNewline base
-            , ManyOf
-                { id = id
-                , choices = List.map (Choice id) choices
-                , children =
-                    List.foldl
-                        (\choice ( newBase, result ) ->
-                            let
-                                ( endOfCreated, created ) =
-                                    create currentIndent newBase choice
-                            in
-                            ( endOfCreated
-                                |> moveNewline
-                                |> moveNewline
-                                |> moveColumn (currentIndent * 4)
-                            , Found
-                                { start = newBase
-                                , end = endOfCreated
-                                }
-                                created
-                                :: result
-                            )
-                        )
-                        ( base, [] )
-                        choices
-                        |> Tuple.second
-                        |> List.reverse
-                }
-            )
-
-        ExpectStartsWith start remaining ->
-            let
-                ( startEnd, startChildDescription ) =
-                    create currentIndent
-                        base
-                        start
-
-                ( remainingEnd, remainingDescription ) =
-                    create currentIndent
-                        (moveNewline startEnd)
-                        remaining
-            in
-            ( remainingEnd
-            , StartsWith
-                { start = base
-                , end = remainingEnd
-                }
-                { found = startChildDescription
-                , expected = start
-                }
-                { found = remainingDescription
-                , expected = remaining
-                }
-            )
-
-        -- Primitives
-        ExpectBoolean b ->
-            let
-                boolString =
-                    boolToString b
-
-                end =
-                    moveColumn (String.length boolString) base
-
-                range =
-                    { start = base
-                    , end = end
-                    }
-            in
-            ( end
-            , DescribeBoolean
-                { id = Id range
-                , found =
-                    Found
-                        range
-                        b
-                }
-            )
-
-        ExpectInteger i ->
-            let
-                end =
-                    moveColumn
-                        (String.length (String.fromInt i))
-                        base
-
-                pos =
-                    { start = base
-                    , end = end
-                    }
-            in
-            ( end
-            , DescribeInteger
-                { id = Id pos
-                , found = Found pos i
-                }
-            )
-
-        ExpectFloat f ->
-            let
-                end =
-                    moveColumn
-                        (String.length (String.fromFloat f))
-                        base
-
-                pos =
-                    { start = base
-                    , end =
-                        end
-                    }
-            in
-            ( end
-            , DescribeFloat
-                { id = Id pos
-                , found = Found pos ( String.fromFloat f, f )
-                }
-            )
-
-        ExpectFloatBetween details ->
-            let
-                end =
-                    moveColumn
-                        (String.length (String.fromFloat details.default))
-                        base
-
-                pos =
-                    { start = base
-                    , end =
-                        end
-                    }
-            in
-            ( end
-            , DescribeFloatBetween
-                { id = Id pos
-                , min = details.min
-                , max = details.max
-                , found =
-                    Found pos
-                        ( String.fromFloat details.default
-                        , details.default
-                        )
-                }
-            )
-
-        ExpectIntBetween details ->
-            let
-                end =
-                    moveColumn (String.length (String.fromInt details.default)) base
-
-                pos =
-                    { start = base
-                    , end = end
-                    }
-            in
-            ( end
-            , DescribeIntBetween
-                { id = Id pos
-                , min = details.min
-                , max = details.max
-                , found = Found pos details.default
-                }
-            )
-
-        ExpectString str ->
-            let
-                end =
-                    moveColumn (String.length str) base
-
-                pos =
-                    { start = base
-                    , end = end
-                    }
-            in
-            ( end
-            , DescribeString
-                (Id pos)
-                str
-            )
-
-        ExpectMultiline str ->
-            let
-                end =
-                    moveColumn (String.length str) base
-
-                -- TODO: This position is not correct!
-                -- Account for newlines
-                pos =
-                    { start = base
-                    , end = end
-                    }
-            in
-            ( end
-            , DescribeMultiline (Id pos) str
-            )
-
-        ExpectStringExactly str ->
-            let
-                end =
-                    moveColumn (String.length str) base
-
-                pos =
-                    { start = base
-                    , end = end
-                    }
-            in
-            ( end
-            , DescribeStringExactly pos str
-            )
-
-        -- ExpectDate ->
-        _ ->
-            let
-                end =
-                    moveColumn (String.length "True") base
-
-                range =
-                    { start = base
-                    , end = end
-                    }
-            in
-            ( end
-            , DescribeBoolean
-                { id = Id range
-                , found =
-                    Found
-                        range
-                        True
-                }
-            )
+-- {-|
+--     `Position` is the starting position for a block.
+--     The same rules for indentation as they apply everywhere.
+--         - Primitives do not handle their indentation.
+--         - Block, Record, and Tree elements handle the indentation of their children.
+-- -}
+-- create : Int -> Position -> Expectation -> ( Position, Description )
+-- create currentIndent base expectation =
+--     case expectation of
+--         ExpectBlock name childExpectation ->
+--             let
+--                 ( end, childDescription ) =
+--                     create (currentIndent + 1)
+--                         (base
+--                             |> moveNewline
+--                             |> moveColumn ((currentIndent + 1) * 4)
+--                         )
+--                         childExpectation
+--             in
+--             ( end
+--             , DescribeBlock
+--                 { name = name
+--                 , found =
+--                     Found
+--                         { start = base
+--                         , end = end
+--                         }
+--                         childDescription
+--                 , expected = expectation
+--                 }
+--             )
+--         ExpectStub name ->
+--             let
+--                 end =
+--                     moveColumn (String.length name) base
+--             in
+--             ( end
+--             , DescribeStub name
+--                 (Found
+--                     { start = base
+--                     , end = end
+--                     }
+--                     name
+--                 )
+--             )
+--         ExpectRecord name fields ->
+--             let
+--                 ( end, renderedFields ) =
+--                     List.foldl (createField (currentIndent + 1)) ( moveNewline base, [] ) fields
+--             in
+--             ( end
+--             , Record
+--                 { name = name
+--                 , found =
+--                     Found
+--                         { start = base
+--                         , end = moveNewline end
+--                         }
+--                         renderedFields
+--                 , expected = expectation
+--                 }
+--             )
+--         ExpectTree icon content ->
+--             let
+--                 range =
+--                     { start = base, end = base }
+--                 items =
+--                     []
+--             in
+--             ( moveNewline base
+--             , DescribeTree
+--                 { found = ( range, items )
+--                 , expected = expectation
+--                 }
+--             )
+--         ExpectOneOf choices ->
+--             let
+--                 id =
+--                     Id
+--                         { start = base
+--                         , end = end
+--                         }
+--                 -- TODO: handle case of empty OneOf
+--                 ( end, childDescription ) =
+--                     create (currentIndent + 1)
+--                         base
+--                         (Maybe.withDefault (ExpectStub "Unknown") (List.head choices))
+--             in
+--             ( base
+--             , OneOf
+--                 { id = id
+--                 , choices = List.map (Choice id) choices
+--                 , child =
+--                     Found { start = base, end = end } childDescription
+--                 }
+--             )
+--         ExpectManyOf choices ->
+--             let
+--                 id =
+--                     Id { start = base, end = base }
+--             in
+--             ( moveNewline base
+--             , ManyOf
+--                 { id = id
+--                 , choices = List.map (Choice id) choices
+--                 , children =
+--                     List.foldl
+--                         (\choice ( newBase, result ) ->
+--                             let
+--                                 ( endOfCreated, created ) =
+--                                     create currentIndent newBase choice
+--                             in
+--                             ( endOfCreated
+--                                 |> moveNewline
+--                                 |> moveNewline
+--                                 |> moveColumn (currentIndent * 4)
+--                             , Found
+--                                 { start = newBase
+--                                 , end = endOfCreated
+--                                 }
+--                                 created
+--                                 :: result
+--                             )
+--                         )
+--                         ( base, [] )
+--                         choices
+--                         |> Tuple.second
+--                         |> List.reverse
+--                 }
+--             )
+--         ExpectStartsWith start remaining ->
+--             let
+--                 ( startEnd, startChildDescription ) =
+--                     create currentIndent
+--                         base
+--                         start
+--                 ( remainingEnd, remainingDescription ) =
+--                     create currentIndent
+--                         (moveNewline startEnd)
+--                         remaining
+--             in
+--             ( remainingEnd
+--             , StartsWith
+--                 { start = base
+--                 , end = remainingEnd
+--                 }
+--                 { found = startChildDescription
+--                 , expected = start
+--                 }
+--                 { found = remainingDescription
+--                 , expected = remaining
+--                 }
+--             )
+--         -- Primitives
+--         ExpectBoolean b ->
+--             let
+--                 boolString =
+--                     boolToString b
+--                 end =
+--                     moveColumn (String.length boolString) base
+--                 range =
+--                     { start = base
+--                     , end = end
+--                     }
+--             in
+--             ( end
+--             , DescribeBoolean
+--                 { id = Id range
+--                 , found =
+--                     Found
+--                         range
+--                         b
+--                 }
+--             )
+--         ExpectInteger i ->
+--             let
+--                 end =
+--                     moveColumn
+--                         (String.length (String.fromInt i))
+--                         base
+--                 pos =
+--                     { start = base
+--                     , end = end
+--                     }
+--             in
+--             ( end
+--             , DescribeInteger
+--                 { id = Id pos
+--                 , found = Found pos i
+--                 }
+--             )
+--         ExpectFloat f ->
+--             let
+--                 end =
+--                     moveColumn
+--                         (String.length (String.fromFloat f))
+--                         base
+--                 pos =
+--                     { start = base
+--                     , end =
+--                         end
+--                     }
+--             in
+--             ( end
+--             , DescribeFloat
+--                 { id = Id pos
+--                 , found = Found pos ( String.fromFloat f, f )
+--                 }
+--             )
+--         ExpectFloatBetween details ->
+--             let
+--                 end =
+--                     moveColumn
+--                         (String.length (String.fromFloat details.default))
+--                         base
+--                 pos =
+--                     { start = base
+--                     , end =
+--                         end
+--                     }
+--             in
+--             ( end
+--             , DescribeFloatBetween
+--                 { id = Id pos
+--                 , min = details.min
+--                 , max = details.max
+--                 , found =
+--                     Found pos
+--                         ( String.fromFloat details.default
+--                         , details.default
+--                         )
+--                 }
+--             )
+--         ExpectIntBetween details ->
+--             let
+--                 end =
+--                     moveColumn (String.length (String.fromInt details.default)) base
+--                 pos =
+--                     { start = base
+--                     , end = end
+--                     }
+--             in
+--             ( end
+--             , DescribeIntBetween
+--                 { id = Id pos
+--                 , min = details.min
+--                 , max = details.max
+--                 , found = Found pos details.default
+--                 }
+--             )
+--         ExpectString str ->
+--             let
+--                 end =
+--                     moveColumn (String.length str) base
+--                 pos =
+--                     { start = base
+--                     , end = end
+--                     }
+--             in
+--             ( end
+--             , DescribeString
+--                 (Id pos)
+--                 str
+--             )
+--         ExpectMultiline str ->
+--             let
+--                 end =
+--                     moveColumn (String.length str) base
+--                 -- TODO: This position is not correct!
+--                 -- Account for newlines
+--                 pos =
+--                     { start = base
+--                     , end = end
+--                     }
+--             in
+--             ( end
+--             , DescribeMultiline (Id pos) str
+--             )
+--         ExpectStringExactly str ->
+--             let
+--                 end =
+--                     moveColumn (String.length str) base
+--                 pos =
+--                     { start = base
+--                     , end = end
+--                     }
+--             in
+--             ( end
+--             , DescribeStringExactly pos str
+--             )
+--         -- ExpectDate ->
+--         _ ->
+--             let
+--                 end =
+--                     moveColumn (String.length "True") base
+--                 range =
+--                     { start = base
+--                     , end = end
+--                     }
+--             in
+--             ( end
+--             , DescribeBoolean
+--                 { id = Id range
+--                 , found =
+--                     Found
+--                         range
+--                         True
+--                 }
+--             )
 
 
 boolToString : Bool -> String
@@ -985,51 +950,39 @@ startingPoint =
     }
 
 
-push maybePush found =
-    case maybePush of
-        Nothing ->
-            found
 
-        Just to ->
-            case found of
-                Found range item ->
-                    Found (pushRange to range) (pushDescription to item)
-
-                Unexpected unexpected ->
-                    Unexpected { unexpected | range = pushRange to unexpected.range }
-
-
-pushDescription to desc =
-    case desc of
-        DescribeString id str ->
-            DescribeString (pushId to id) str
-
-        _ ->
-            desc
-
-
-pushId to (Id range) =
-    Id (pushRange to range)
-
-
-pushRange to range =
-    { start = addPositions to range.start
-    , end = addPositions to range.end
-    }
-
-
-addPositions to pos =
-    { offset = pos.offset + to.offset
-    , line = pos.line + to.line
-    , column = pos.column + to.column
-    }
-
-
-pushFromRange { start, end } =
-    { offset = end.offset - start.offset
-    , line = end.line - start.line
-    , column = end.column - start.column
-    }
+-- push maybePush found =
+--     case maybePush of
+--         Nothing ->
+--             found
+--         Just to ->
+--             case found of
+--                 Found range item ->
+--                     Found (pushRange to range) (pushDescription to item)
+--                 Unexpected unexpected ->
+--                     Unexpected { unexpected | range = pushRange to unexpected.range }
+-- pushDescription to desc =
+--     case desc of
+--         DescribeString id str ->
+--             DescribeString (pushId to id) str
+--         _ ->
+--             desc
+-- pushId to (Id range) =
+--     Id (pushRange to range)
+-- pushRange to range =
+--     { start = addPositions to range.start
+--     , end = addPositions to range.end
+--     }
+-- addPositions to pos =
+--     { offset = pos.offset + to.offset
+--     , line = pos.line + to.line
+--     , column = pos.column + to.column
+--     }
+-- pushFromRange { start, end } =
+--     { offset = end.offset - start.offset
+--     , line = end.line - start.line
+--     , column = end.column - start.column
+--     }
 
 
 minusPosition end start =
@@ -1039,11 +992,12 @@ minusPosition end start =
     }
 
 
-sizeToRange start delta =
-    { start = start
-    , end =
-        addPositions start delta
-    }
+
+-- sizeToRange start delta =
+--     { start = start
+--     , end =
+--         addPositions start delta
+--     }
 
 
 {-| -}
