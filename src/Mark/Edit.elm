@@ -25,7 +25,6 @@ import Mark.Format as Format
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
-import Random
 import Time
 
 
@@ -776,7 +775,7 @@ withinOffsetRange offset range =
 
 
 {-| -}
-createField : Random.Seed -> Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
+createField : Id.Seed -> Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
 createField seed currentIndent ( name, exp ) ( base, existingFields ) =
     let
         -- This is the beginning of the field
@@ -881,7 +880,7 @@ make expected options =
 
 -}
 create :
-    { seed : Random.Seed
+    { seed : Id.Seed
     , indent : Int
     , base : Position
     , expectation : Expectation

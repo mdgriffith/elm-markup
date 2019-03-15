@@ -20,8 +20,7 @@ module Mark.Internal.Description exposing
 import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Error as Error
-import Mark.Internal.Id exposing (..)
-import Random
+import Mark.Internal.Id as Id exposing (..)
 import Time
 
 
@@ -39,8 +38,8 @@ type Parsed
         , found : Found Description
         , expected : Expectation
         , focus : Maybe Position
-        , initialSeed : Random.Seed
-        , currentSeed : Random.Seed
+        , initialSeed : Id.Seed
+        , currentSeed : Id.Seed
         }
 
 

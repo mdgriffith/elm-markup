@@ -3,7 +3,9 @@ module Mark.Internal.Id exposing
     , Id(..)
     , ManyOptions(..)
     , Options(..)
+    , Seed
     , getRange
+    , initialSeed
     , reseed
     , step
     , thread
@@ -12,11 +14,13 @@ module Mark.Internal.Id exposing
 
 {-| -}
 
-import Random
+
+initialSeed =
+    Seed 0
 
 
-idGenerator =
-    Random.map Id (Random.int Random.minInt Random.maxInt)
+type Seed
+    = Seed Int
 
 
 {-| This is dubious but I think it will work for this case.
@@ -52,21 +56,17 @@ Essentially we need somethign like this.
     6 -> 20 -> 21
 
 -}
-reseed : Random.Seed -> Random.Seed
-reseed seed =
-    let
-        ( Id i, newSeed ) =
-            step seed
-    in
-    Random.initialSeed i
+reseed : Seed -> Seed
+reseed (Seed seed) =
+    Seed ((seed + 1) * 100000)
 
 
-step : Random.Seed -> ( Id category, Random.Seed )
-step seed =
-    Random.step idGenerator seed
+step : Seed -> ( Id category, Seed )
+step (Seed seed) =
+    ( Id seed, Seed (seed + 1) )
 
 
-thread : Random.Seed -> List (Random.Seed -> ( Random.Seed, thing )) -> ( Random.Seed, List thing )
+thread : Seed -> List (Seed -> ( Seed, thing )) -> ( Seed, List thing )
 thread seed steps =
     List.foldl threadThrough ( seed, [] ) steps
         |> Tuple.mapSecond List.reverse

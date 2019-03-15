@@ -16,7 +16,6 @@ import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.TolerantParser as Tolerant
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
-import Random
 
 
 {-| -}
@@ -88,7 +87,7 @@ styledText :
     { inlines : List InlineExpectation
     , replacements : List Replacement
     }
-    -> Random.Seed
+    -> Id.Seed
     -> Position
     -> List Style
     -> List Char

@@ -290,8 +290,8 @@ convert (Document blocks) ((Parsed parsedDetails) as parsed) =
 type Document data
     = Document
         { converter : Parsed -> Result AstError data
-        , initialSeed : Random.Seed
-        , currentSeed : Random.Seed
+        , initialSeed : Id.Seed
+        , currentSeed : Id.Seed
         , expect : Expectation
         , parser : Parser Context Problem Parsed
         }
@@ -313,16 +313,16 @@ type
         String
         { converter : Description -> Result AstError (Found data)
         , expect : Expectation
-        , parser : Random.Seed -> ( Random.Seed, Parser Context Problem Description )
+        , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
         }
     | Value
         { converter : Description -> Result AstError (Found data)
         , expect : Expectation
-        , parser : Random.Seed -> ( Random.Seed, Parser Context Problem Description )
+        , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
         }
 
 
-getParser : Random.Seed -> Block data -> ( Random.Seed, Parser Context Problem Description )
+getParser : Id.Seed -> Block data -> ( Id.Seed, Parser Context Problem Description )
 getParser seed fromBlock =
     case fromBlock of
         Block name { parser } ->
@@ -536,8 +536,7 @@ document doc child =
             getBlockExpectation child
 
         seed =
-            -- Hmm, a cosmological constant appears again.
-            Random.initialSeed 11056
+            Id.initialSeed
 
         ( currentSeed, blockParser ) =
             getParser seed child
@@ -1252,10 +1251,13 @@ manyOf manyOfDetails blocks =
                     ( parentId, newSeed ) =
                         Id.step seed
 
+                    ( _, childStart ) =
+                        Id.step newSeed
+
                     reseeded =
-                        Id.reseed newSeed
+                        Id.reseed childStart
                 in
-                ( newSeed
+                ( reseeded
                 , Parser.succeed
                     (\( range, results ) ->
                         ManyOf
@@ -1271,7 +1273,7 @@ manyOf manyOfDetails blocks =
                                     Parser.loop
                                         { parsedSomething = False
                                         , found = []
-                                        , seed = reseeded
+                                        , seed = childStart
                                         }
                                         (blocksOrNewlines
                                             indentation
@@ -1283,26 +1285,101 @@ manyOf manyOfDetails blocks =
         }
 
 
+{-| -}
+blocksOrNewlines indentation blocks cursor =
+    Parser.oneOf
+        [ Parser.end End
+            |> Parser.map
+                (\_ ->
+                    Parser.Done (List.reverse cursor.found)
+                )
+        , Parser.succeed
+            (Parser.Loop
+                { parsedSomething = True
+                , found = cursor.found
+                , seed = cursor.seed
+                }
+            )
+            |. newlineWith "empty newline"
+        , if not cursor.parsedSomething then
+            -- First thing already has indentation accounted for.
+            makeBlocksParser blocks cursor.seed
+                |> Parser.map
+                    (\foundBlock ->
+                        let
+                            ( _, newSeed ) =
+                                Id.step cursor.seed
+                        in
+                        Parser.Loop
+                            { parsedSomething = True
+                            , found = foundBlock :: cursor.found
+                            , seed = newSeed
+                            }
+                    )
+
+          else
+            Parser.oneOf
+                [ Parser.succeed
+                    (\foundBlock ->
+                        let
+                            ( _, newSeed ) =
+                                Id.step cursor.seed
+                        in
+                        Parser.Loop
+                            { parsedSomething = True
+                            , found = foundBlock :: cursor.found
+                            , seed = newSeed
+                            }
+                    )
+                    |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
+                    |= makeBlocksParser blocks cursor.seed
+                , Parser.succeed
+                    (Parser.Loop
+                        { parsedSomething = True
+                        , found = cursor.found
+                        , seed = cursor.seed
+                        }
+                    )
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable newline
+
+                -- We reach here because the indentation parsing was not successful,
+                -- meaning the indentation has been lowered and the block is done
+                , Parser.succeed (Parser.Done (List.reverse cursor.found))
+                ]
+
+        -- Whitespace Line
+        , Parser.succeed
+            (Parser.Loop
+                { parsedSomething = True
+                , found = cursor.found
+                , seed = cursor.seed
+                }
+            )
+            |. Parser.chompWhile (\c -> c == ' ')
+            |. newlineWith "ws-line"
+        ]
+
+
 makeBlocksParser blocks seed =
     let
         gatherParsers myBlock details =
             let
-                ( currentSeed, parser ) =
-                    getParser details.seed myBlock
+                -- We don't care about the new seed because that's handled by the loop.
+                ( _, parser ) =
+                    getParser seed myBlock
             in
             case blockName myBlock of
                 Just name ->
                     { blockNames = name :: details.blockNames
                     , childBlocks = Parser.map Ok parser :: details.childBlocks
                     , childValues = details.childValues
-                    , seed = currentSeed
                     }
 
                 Nothing ->
                     { blockNames = details.blockNames
                     , childBlocks = details.childBlocks
                     , childValues = Parser.map Ok (Parse.withRange parser) :: details.childValues
-                    , seed = currentSeed
                     }
 
         children =
@@ -1310,7 +1387,6 @@ makeBlocksParser blocks seed =
                 { blockNames = []
                 , childBlocks = []
                 , childValues = []
-                , seed = seed
                 }
                 blocks
 
@@ -3100,80 +3176,8 @@ indentedString indentation found =
 type alias BlockOrNewlineCursor thing =
     { parsedSomething : Bool
     , found : List thing
-    , seed : Random.Seed
+    , seed : Id.Seed
     }
-
-
-{-| -}
-blocksOrNewlines indentation blocks cursor =
-    Parser.oneOf
-        [ Parser.end End
-            |> Parser.map
-                (\_ ->
-                    Parser.Done (List.reverse cursor.found)
-                )
-        , Parser.succeed
-            (Parser.Loop
-                { parsedSomething = True
-                , found = cursor.found
-                , seed = cursor.seed
-                }
-            )
-            |. newlineWith "empty newline"
-        , if not cursor.parsedSomething then
-            -- First thing already has indentation accounted for.
-            makeBlocksParser blocks cursor.seed
-                |> Parser.map
-                    (\foundBlock ->
-                        Parser.Loop
-                            { parsedSomething = True
-                            , found = foundBlock :: cursor.found
-                            , seed = cursor.seed
-                            }
-                    )
-
-          else
-            Parser.oneOf
-                [ Parser.succeed
-                    (\foundBlock ->
-                        let
-                            ( _, newSeed ) =
-                                Id.step cursor.seed
-                        in
-                        Parser.Loop
-                            { parsedSomething = True
-                            , found = foundBlock :: cursor.found
-                            , seed = newSeed
-                            }
-                    )
-                    |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
-                    |= makeBlocksParser blocks cursor.seed
-                , Parser.succeed
-                    (Parser.Loop
-                        { parsedSomething = True
-                        , found = cursor.found
-                        , seed = cursor.seed
-                        }
-                    )
-                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                    |. Parser.backtrackable newline
-
-                -- We reach here because the indentation parsing was not successful,
-                -- meaning the indentation has been lowered and the block is done
-                , Parser.succeed (Parser.Done (List.reverse cursor.found))
-                ]
-
-        -- Whitespace Line
-        , Parser.succeed
-            (Parser.Loop
-                { parsedSomething = True
-                , found = cursor.found
-                , seed = cursor.seed
-                }
-            )
-            |. Parser.chompWhile (\c -> c == ' ')
-            |. newlineWith "ws-line"
-        ]
 
 
 skipBlankLineWith : thing -> Parser Context Problem thing
@@ -3300,7 +3304,7 @@ field name child =
     Field name child
 
 
-fieldParser : Field value -> Random.Seed -> ( Random.Seed, ( String, Parser Context Problem ( String, Found Description ) ) )
+fieldParser : Field value -> Id.Seed -> ( Id.Seed, ( String, Parser Context Problem ( String, Found Description ) ) )
 fieldParser (Field name myBlock) seed =
     let
         ( newSeed, blockParser ) =
@@ -3989,7 +3993,7 @@ type alias NestedIndex =
 
 -}
 indentedBlocksOrNewlines :
-    Random.Seed
+    Id.Seed
     -> Block icon
     -> Block thing
     -> ( NestedIndex, List ( Int, Maybe Description, Description ) )
