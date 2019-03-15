@@ -460,7 +460,7 @@ update edit (Parsed original) =
                             , makeEdit =
                                 \i pos desc ->
                                     let
-                                        ( newPos, newDesc ) =
+                                        new =
                                             create
                                                 { indent = i
                                                 , base = pos
@@ -468,7 +468,7 @@ update edit (Parsed original) =
                                                 , seed = original.currentSeed
                                                 }
                                     in
-                                    replaceOption id newDesc desc
+                                    replaceOption id new.desc desc
                             , indentation = 0
                             }
                             original.found
@@ -774,19 +774,32 @@ withinOffsetRange offset range =
 -}
 
 
+type alias CreateFieldCursor =
+    { position : Position
+
+    -- We've already created these
+    , fields : List ( String, Found Description )
+    , seed : Id.Seed
+    }
+
+
 {-| -}
-createField : Id.Seed -> Int -> ( String, Expectation ) -> ( Position, List ( String, Found Description ) ) -> ( Position, List ( String, Found Description ) )
-createField seed currentIndent ( name, exp ) ( base, existingFields ) =
+createField :
+    Int
+    -> ( String, Expectation )
+    -> CreateFieldCursor
+    -> CreateFieldCursor
+createField currentIndent ( name, exp ) current =
     let
         -- This is the beginning of the field
         --    field = x
         --   ^ right there
         fieldValueStart =
-            base
+            current.position
                 |> moveColumn (currentIndent * 4)
 
         -- If the field value is more than a line
-        ( end, childField ) =
+        new =
             create
                 { indent = currentIndent + 1
                 , base =
@@ -794,34 +807,36 @@ createField seed currentIndent ( name, exp ) ( base, existingFields ) =
                         -- Add a few characters to account for `field = `.
                         |> moveColumn (String.length name + 3)
                 , expectation = exp
-                , seed = seed
+                , seed = current.seed
                 }
 
         height =
-            end.line
-                - base.line
+            new.pos.line
+                - current.position.line
 
         fieldEnd =
-            moveNewline end
+            moveNewline new.pos
     in
     if height == 0 then
-        ( fieldEnd
-        , ( name
-          , Found
+        { position = fieldEnd
+        , fields =
+            ( name
+            , Found
                 { start =
                     fieldValueStart
                 , end =
                     fieldEnd
                 }
-                childField
-          )
-            :: existingFields
-        )
+                new.desc
+            )
+                :: current.fields
+        , seed = new.seed
+        }
 
     else
         let
             -- If the field value is more than a line
-            ( newEnd, newChildField ) =
+            multiline =
                 create
                     { indent = currentIndent + 1
                     , base =
@@ -832,25 +847,27 @@ createField seed currentIndent ( name, exp ) ( base, existingFields ) =
                             -- Indent one level further
                             |> moveColumn (1 * 4)
                     , expectation = exp
-                    , seed = seed
+                    , seed = current.seed
                     }
 
             finalEnd =
-                newEnd
+                multiline.pos
                     |> moveNewline
         in
-        ( finalEnd
-        , ( name
-          , Found
+        { position = finalEnd
+        , fields =
+            ( name
+            , Found
                 { start =
                     fieldValueStart
                 , end =
                     finalEnd
                 }
-                newChildField
-          )
-            :: existingFields
-        )
+                multiline.desc
+            )
+                :: current.fields
+        , seed = multiline.seed
+        }
 
 
 {-| Given an expectation and a list of choices, verify that the expectation is a valid choice.
@@ -885,12 +902,16 @@ create :
     , base : Position
     , expectation : Expectation
     }
-    -> ( Position, Description )
+    ->
+        { pos : Position
+        , desc : Description
+        , seed : Id.Seed
+        }
 create current =
     case current.expectation of
         ExpectBlock name childExpectation ->
             let
-                ( end, childDescription ) =
+                new =
                     create
                         { indent = current.indent + 1
                         , base =
@@ -901,51 +922,63 @@ create current =
                         , seed = current.seed
                         }
             in
-            ( end
-            , DescribeBlock
-                { name = name
-                , found =
-                    Found
-                        { start = current.base
-                        , end = end
-                        }
-                        childDescription
-                , expected = current.expectation
-                }
-            )
+            { pos = new.pos
+            , desc =
+                DescribeBlock
+                    { name = name
+                    , found =
+                        Found
+                            { start = current.base
+                            , end = new.pos
+                            }
+                            new.desc
+                    , expected = current.expectation
+                    }
+            , seed = new.seed
+            }
 
         ExpectStub name ->
             let
                 end =
                     moveColumn (String.length name) current.base
             in
-            ( end
-            , DescribeStub name
-                (Found
-                    { start = current.base
-                    , end = end
-                    }
-                    name
-                )
-            )
+            { pos = end
+            , desc =
+                DescribeStub name
+                    (Found
+                        { start = current.base
+                        , end = end
+                        }
+                        name
+                    )
+            , seed = current.seed
+            }
 
         ExpectRecord name fields ->
             let
-                ( end, renderedFields ) =
-                    List.foldl (createField current.seed (current.indent + 1)) ( moveNewline current.base, [] ) fields
-            in
-            ( end
-            , Record
-                { name = name
-                , found =
-                    Found
-                        { start = current.base
-                        , end = moveNewline end
+                new =
+                    List.foldl
+                        (createField (current.indent + 1))
+                        { position = moveNewline current.base
+                        , fields = []
+                        , seed = current.seed
                         }
-                        renderedFields
-                , expected = current.expectation
-                }
-            )
+                        fields
+            in
+            { pos = new.position
+            , desc =
+                Record
+                    { name = name
+                    , found =
+                        Found
+                            { start = current.base
+                            , end = moveNewline new.position
+                            }
+                            new.fields
+                    , expected = current.expectation
+                    }
+            , seed = new.seed
+            }
 
         ExpectTree icon content ->
             let
@@ -957,12 +990,14 @@ create current =
                 items =
                     []
             in
-            ( moveNewline current.base
-            , DescribeTree
-                { found = ( range, items )
-                , expected = current.expectation
-                }
-            )
+            { pos = moveNewline current.base
+            , desc =
+                DescribeTree
+                    { found = ( range, items )
+                    , expected = current.expectation
+                    }
+            , seed = current.seed
+            }
 
         ExpectOneOf choices ->
             let
@@ -970,7 +1005,7 @@ create current =
                     Id.step current.seed
 
                 -- TODO: handle case of empty OneOf
-                ( end, childDescription ) =
+                new =
                     create
                         { indent = current.indent + 1
                         , base = current.base
@@ -978,62 +1013,75 @@ create current =
                         , seed = newSeed
                         }
             in
-            ( end
-            , OneOf
-                { id = newId
-                , choices = List.map (Choice newId) choices
-                , child =
-                    Found
-                        { start = current.base
-                        , end = end
-                        }
-                        childDescription
-                }
-            )
+            { pos = new.pos
+            , desc =
+                OneOf
+                    { id = newId
+                    , choices = List.map (Choice newId) choices
+                    , child =
+                        Found
+                            { start = current.base
+                            , end = new.pos
+                            }
+                            new.desc
+                    }
+            , seed = new.seed
+            }
 
         ExpectManyOf choices ->
             let
-                ( newId, newSeed ) =
+                ( parentId, newSeed ) =
                     Id.step current.seed
-            in
-            ( moveNewline current.base
-            , ManyOf
-                { id = newId
-                , choices = List.map (Choice newId) choices
-                , children =
+
+                ( _, childStart ) =
+                    Id.step newSeed
+
+                reseeded =
+                    Id.reseed childStart
+
+                ( finalSeed, children ) =
                     List.foldl
-                        (\choice ( newBase, result ) ->
+                        (\choice ( seed, newBase, result ) ->
                             let
-                                ( endOfCreated, created ) =
+                                new =
                                     create
                                         { indent = current.indent
                                         , base = newBase
                                         , expectation = choice
-                                        , seed = newSeed
+                                        , seed = seed
                                         }
                             in
-                            ( endOfCreated
+                            ( new.seed
+                            , new.pos
                                 |> moveNewline
                                 |> moveNewline
                                 |> moveColumn (current.indent * 4)
                             , Found
                                 { start = newBase
-                                , end = endOfCreated
+                                , end = new.pos
                                 }
-                                created
+                                new.desc
                                 :: result
                             )
                         )
-                        ( current.base, [] )
+                        ( newSeed, current.base, [] )
                         choices
-                        |> Tuple.second
-                        |> List.reverse
-                }
-            )
+                        |> (\( s, _, c ) -> ( s, c ))
+                        |> Tuple.mapSecond List.reverse
+            in
+            { pos = moveNewline current.base
+            , seed = finalSeed
+            , desc =
+                ManyOf
+                    { id = parentId
+                    , choices = List.map (Choice parentId) choices
+                    , children = children
+                    }
+            }
 
         ExpectStartsWith start remaining ->
             let
-                ( startEnd, startChildDescription ) =
+                first =
                     create
                         { indent = current.indent
                         , base = current.base
@@ -1041,26 +1089,28 @@ create current =
                         , seed = current.seed
                         }
 
-                ( remainingEnd, remainingDescription ) =
+                second =
                     create
                         { indent = current.indent
-                        , base = moveNewline startEnd
+                        , base = moveNewline first.pos
                         , expectation = remaining
-                        , seed = current.seed
+                        , seed = first.seed
                         }
             in
-            ( remainingEnd
-            , StartsWith
-                { start = current.base
-                , end = remainingEnd
-                }
-                { found = startChildDescription
-                , expected = start
-                }
-                { found = remainingDescription
-                , expected = remaining
-                }
-            )
+            { pos = second.pos
+            , desc =
+                StartsWith
+                    { start = current.base
+                    , end = second.pos
+                    }
+                    { found = first.desc
+                    , expected = start
+                    }
+                    { found = second.desc
+                    , expected = remaining
+                    }
+            , seed = second.seed
+            }
 
         -- Primitives
         ExpectBoolean b ->
@@ -1079,13 +1129,15 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            ( end
-            , DescribeBoolean
-                { id = newId
-                , found =
-                    Found range b
-                }
-            )
+            { pos = end
+            , desc =
+                DescribeBoolean
+                    { id = newId
+                    , found =
+                        Found range b
+                    }
+            , seed = newSeed
+            }
 
         ExpectInteger i ->
             let
@@ -1102,12 +1154,14 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            ( end
-            , DescribeInteger
-                { id = newId
-                , found = Found pos i
-                }
-            )
+            { pos = end
+            , desc =
+                DescribeInteger
+                    { id = newId
+                    , found = Found pos i
+                    }
+            , seed = newSeed
+            }
 
         ExpectFloat f ->
             let
@@ -1124,12 +1178,14 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            ( end
-            , DescribeFloat
-                { id = newId
-                , found = Found pos ( String.fromFloat f, f )
-                }
-            )
+            { pos = end
+            , desc =
+                DescribeFloat
+                    { id = newId
+                    , found = Found pos ( String.fromFloat f, f )
+                    }
+            , seed = newSeed
+            }
 
         ExpectFloatBetween details ->
             let
@@ -1147,23 +1203,27 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            ( end
-            , DescribeFloatBetween
-                { id = newId
-                , min = details.min
-                , max = details.max
-                , found =
-                    Found pos
-                        ( String.fromFloat details.default
-                        , details.default
-                        )
-                }
-            )
+            { pos = end
+            , desc =
+                DescribeFloatBetween
+                    { id = newId
+                    , min = details.min
+                    , max = details.max
+                    , found =
+                        Found pos
+                            ( String.fromFloat details.default
+                            , details.default
+                            )
+                    }
+            , seed = newSeed
+            }
 
         ExpectIntBetween details ->
             let
                 end =
-                    moveColumn (String.length (String.fromInt details.default)) current.base
+                    moveColumn
+                        (String.length (String.fromInt details.default))
+                        current.base
 
                 pos =
                     { start = current.base
@@ -1173,14 +1233,16 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            ( end
-            , DescribeIntBetween
-                { id = newId
-                , min = details.min
-                , max = details.max
-                , found = Found pos details.default
-                }
-            )
+            { pos = end
+            , desc =
+                DescribeIntBetween
+                    { id = newId
+                    , min = details.min
+                    , max = details.max
+                    , found = Found pos details.default
+                    }
+            , seed = newSeed
+            }
 
         ExpectString str ->
             let
@@ -1195,9 +1257,10 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            ( end
-            , DescribeString newId str
-            )
+            { pos = end
+            , desc = DescribeString newId str
+            , seed = newSeed
+            }
 
         ExpectMultiline str ->
             let
@@ -1214,9 +1277,10 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            ( end
-            , DescribeMultiline newId str
-            )
+            { pos = end
+            , desc = DescribeMultiline newId str
+            , seed = newSeed
+            }
 
         ExpectStringExactly str ->
             let
@@ -1228,9 +1292,10 @@ create current =
                     , end = end
                     }
             in
-            ( end
-            , DescribeStringExactly pos str
-            )
+            { pos = end
+            , desc = DescribeStringExactly pos str
+            , seed = current.seed
+            }
 
         -- ExpectDate ->
         _ ->
@@ -1246,15 +1311,17 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            ( end
-            , DescribeBoolean
-                { id = newId
-                , found =
-                    Found
-                        range
-                        True
-                }
-            )
+            { pos = end
+            , desc =
+                DescribeBoolean
+                    { id = newId
+                    , found =
+                        Found
+                            range
+                            True
+                    }
+            , seed = newSeed
+            }
 
 
 boolToString : Bool -> String
@@ -1404,7 +1471,8 @@ makeInsertAt seed index indentation many expectation =
                             , column = (indentation * 4) + 1
                             }
 
-                    ( createdEnd, new ) =
+                    -- ( createdEnd, new ) =
+                    created =
                         create
                             { indent = indentation
                             , base = newStart
@@ -1413,14 +1481,14 @@ makeInsertAt seed index indentation many expectation =
                             }
 
                     newDescSize =
-                        minusPosition createdEnd found.position
+                        minusPosition created.pos found.position
 
                     newFound =
                         Found
                             { start = newStart
-                            , end = createdEnd
+                            , end = created.pos
                             }
-                            new
+                            created.desc
 
                     pushAmount =
                         Just <|
@@ -1480,7 +1548,7 @@ makeInsertAt seed index indentation many expectation =
                             , column = (indentation * 4) + 1
                             }
 
-                        ( createdEnd, new ) =
+                        created =
                             create
                                 { indent = indentation
                                 , base = newStart
@@ -1490,9 +1558,9 @@ makeInsertAt seed index indentation many expectation =
                     in
                     Found
                         { start = newStart
-                        , end = createdEnd
+                        , end = created.pos
                         }
-                        new
+                        created.desc
                         :: found.list
            )
         |> List.reverse
