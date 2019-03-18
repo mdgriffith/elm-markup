@@ -10,6 +10,7 @@ module Mark exposing
     , oneOf, manyOf, startWith, nested
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
     , text, replacement, balanced, Replacement
+    , Inline, token, annotation, attrString
     , Range, Position
     , Error, errorToString, errorToHtml, Theme(..)
     )
@@ -64,7 +65,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs text, replacement, balanced, Replacement
 
--- @docs Inline, inline, inlineString, inlineText, mapInline
+@docs Inline, token, annotation, attrString
 
 @docs Range, Position
 
@@ -84,7 +85,6 @@ import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Parser as Parse
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
-import Random
 import Time
 
 
@@ -2469,16 +2469,16 @@ token name result =
         }
 
 
-
--- annotated result =
---     Annotated
---         { converter =
---             \descriptor ->
---                 Ok [ result ]
---         , expect =
---             -- TODO: THIS IS WRONG< NEED A NEW CONSTRUCTOR
---             InlineExpectation "annotated" []
---         }
+{-| -}
+annotation : String -> result -> Inline result
+annotation name result =
+    Inline
+        { converter =
+            \descriptor ->
+                Ok [ result ]
+        , expect =
+            ExpectAnnotation name []
+        }
 
 
 {-| -}
@@ -2510,89 +2510,11 @@ attrString name newInline =
                 }
 
 
-
--- type Attribute
---     = AttrString String
---     | AttrFloat Float
---     | AttrInt Int
-
-
 getInlineExpectation (Inline details) =
     details.expect
 
 
 
--- {- Errors for inlines.
---    UnknownInline
---    InlineUnexpectedFormat
---        -> Needs Text Value
---        -> Needs String Value
--- -}
--- {-| -}
--- mapInline : (a -> b) -> Inline a -> Inline b
--- mapInline fn (Inline name details) =
---     Inline name
---         { converter =
---             \desc ->
---                 Result.map (List.map fn) (details.converter desc)
---         , expect =
---             details.expect
---         }
--- {-| -}
--- inline : String -> result -> Inline result
--- inline name result =
---     Inline name
---         { converter =
---             \descriptor ->
---                 Ok [ result ]
---         , expect =
---             InlineExpectation name []
---         }
--- {-| -}
--- inlineString : String -> Inline (String -> result) -> Inline result
--- inlineString name (Inline inlineName details) =
---     Inline inlineName
---         { converter =
---             \descriptors ->
---                 case descriptors of
---                     [] ->
---                         Err NoMatch
---                     (DescribeInlineString key range str) :: remaining ->
---                         case details.converter remaining of
---                             Err err ->
---                                 Err err
---                             Ok renderers ->
---                                 Ok (List.map (\x -> x str) renderers)
---                     _ ->
---                         Err NoMatch
---         , expect =
---             case details.expect of
---                 InlineExpectation parentName vals ->
---                     InlineExpectation parentName
---                         (vals ++ [ ExpectInlineString name ])
---         }
--- {-| -}
--- inlineText : Inline (List Text -> result) -> Inline result
--- inlineText (Inline inlineName details) =
---     Inline inlineName
---         { converter =
---             \descriptors ->
---                 case descriptors of
---                     [] ->
---                         Err NoMatch
---                     (DescribeInlineText range str) :: remaining ->
---                         case details.converter remaining of
---                             Err err ->
---                                 Err err
---                             Ok renderers ->
---                                 Ok (List.map (\x -> x str) renderers)
---                     _ ->
---                         Err NoMatch
---         , expect =
---             case details.expect of
---                 InlineExpectation parentName vals ->
---                     InlineExpectation parentName (vals ++ [ ExpectInlineText ])
---         }
 {- PRIMITIVE BLOCKS -}
 
 
@@ -4381,274 +4303,6 @@ balanced =
 
 
 {- TEXT HELPERS -}
--- parseCustomInline options found =
---     Parser.succeed
---         (\start maybeRendered end ->
---             let
---                 current =
---                     case changeStyle options found Nothing of
---                         TextCursor accum ->
---                             accum
---             in
---             Parser.Loop
---                 (TextCursor
---                     { found =
---                         case maybeRendered of
---                             Nothing ->
---                                 UnexpectedInline
---                                     { range =
---                                         { start = start
---                                         , end = end
---                                         }
---                                     , problem =
---                                         Error.UnknownInline (List.map getInlineName options.inlines)
---                                     }
---                                     :: current.found
---                             Just rendered ->
---                                 rendered :: current.found
---                     , start = end
---                     -- TODO: This should inherit formatting from the inline parser
---                     , current = empty
---                     , balancedReplacements = current.balancedReplacements
---                     }
---                 )
---         )
---         |= Parse.getPosition
---         |. Parser.token
---             (Parser.Token "{" InlineStart)
---         |= Parser.oneOf
---             [ Parser.succeed
---                 (\maybeInlineResult hasEnd ->
---                     if hasEnd then
---                         maybeInlineResult
---                     else
---                         Nothing
---                 )
---                 |= Parser.oneOf
---                     (List.map
---                         (\(InlineExpectation inlineName inlineComponents) ->
---                             Parser.inContext
---                                 (InInline inlineName)
---                                 (parseInline inlineName inlineComponents)
---                         )
---                         options.inlines
---                     )
---                 |= Parser.oneOf
---                     [ Parser.map (always True) (Parser.token (Parser.Token "}" InlineEnd))
---                     , Parser.succeed False
---                         |. parseTillEnd
---                     ]
---             , Parser.succeed Nothing
---                 |. parseTillEnd
---             ]
---         |= Parse.getPosition
--- parseInline : String -> List InlineAttribute -> Parser Context Problem (Maybe TextDescription)
--- parseInline name attributes =
---     case attributes of
---         [] ->
---             Parser.succeed (\( range, _ ) -> Just (DescribeInline name range []))
---                 |= Parse.withRange (Parser.keyword (Parser.Token name (ExpectingInlineName name)))
---         _ ->
---             Parser.succeed
---                 (\( range, maybeFoundComponents ) ->
---                     case maybeFoundComponents of
---                         Nothing ->
---                             Nothing
---                         Just foundComponents ->
---                             Just (DescribeInline name range foundComponents)
---                 )
---                 |= Parse.withRange
---                     (Parser.succeed identity
---                         |. Parser.keyword (Parser.Token name (ExpectingInlineName name))
---                         |. Parser.chompWhile (\c -> c == ' ')
---                         |= Parser.loop ( attributes, [] ) parseInlineComponents
---                     )
--- parseInlineComponents :
---     ( List InlineValueExpectation, List InlineDescription )
---     -> Parser Context Problem (Parser.Step ( List InlineValueExpectation, List InlineDescription ) (Maybe (List InlineDescription)))
--- parseInlineComponents ( components, found ) =
---     case components of
---         [] ->
---             Parser.succeed (Parser.Done (Just (List.reverse found)))
---         current :: remaining ->
---             -- Returning `Nothing` will return an Error describing what this inline should look like.
---             -- When `Nothing` is returned, the parser needs to consume everything until either `}` or `\n`
---             case current of
---                 -- If `|` fails -> Nothing
---                 -- if Keyword fails -> Nothing
---                 -- if `=` fails -> Nothing
---                 ExpectInlineString inlineName ->
---                     Parser.oneOf
---                         [ (Parser.succeed
---                             (\start hasName hasEquals ->
---                                 if hasName && hasEquals then
---                                     -- Parser.Loop
---                                     --     ( remaining
---                                     --     , DescribeInlineString
---                                     --         inlineName
---                                     --         { start = start
---                                     --         , end = end
---                                     --         }
---                                     --         str
---                                     --         :: found
---                                     --     )
---                                     ( True, start )
---                                 else
---                                     ( False, start )
---                             )
---                             |. Parser.chompIf (\c -> c == '|') (Expecting "|")
---                             |. Parser.chompWhile (\c -> c == ' ')
---                             |= Parse.getPosition
---                             |= Parser.oneOf
---                                 [ Parser.map (always True)
---                                     (Parser.keyword
---                                         (Parser.Token
---                                             inlineName
---                                             (ExpectingFieldName inlineName)
---                                         )
---                                     )
---                                 , Parser.succeed False
---                                 ]
---                             |. Parser.chompWhile (\c -> c == ' ')
---                             |= Parser.oneOf
---                                 [ Parser.map (always True) (Parser.chompIf (\c -> c == '=') (Expecting "="))
---                                 , Parser.succeed False
---                                 ]
---                           )
---                             |> Parser.andThen
---                                 (\( continue, start ) ->
---                                     if continue then
---                                         Parser.succeed
---                                             (\str end ->
---                                                 Parser.Loop
---                                                     ( remaining
---                                                     , DescribeInlineString
---                                                         inlineName
---                                                         { start = start
---                                                         , end = end
---                                                         }
---                                                         str
---                                                         :: found
---                                                     )
---                                             )
---                                             |. Parser.chompWhile (\c -> c == ' ')
---                                             |= Parser.getChompedString
---                                                 (Parser.chompWhile (\c -> c /= '|' && c /= '}' && c /= '\n'))
---                                             |= Parse.getPosition
---                                     else
---                                         Parser.succeed
---                                             (\end ->
---                                                 Parser.Done Nothing
---                                             )
---                                             |. parseTillEnd
---                                             |= Parse.getPosition
---                                 )
---                         , Parser.succeed
---                             (\start end ->
---                                 Parser.Done Nothing
---                             )
---                             |= Parse.getPosition
---                             |. parseTillEnd
---                             |= Parse.getPosition
---                         ]
---                 ExpectInlineText ->
---                     -- if `|` fails,
---                     -- parseInline Text cannot fail.  (though we could make it fail on unclosed formatting.)
---                     Parser.oneOf
---                         [ Parser.succeed
---                             (\start str end ->
---                                 Parser.Loop
---                                     ( remaining
---                                     , DescribeInlineText
---                                         { start = start
---                                         , end = end
---                                         }
---                                         str
---                                         :: found
---                                     )
---                             )
---                             |. Parser.chompIf (\c -> c == '|') (Expecting "|")
---                             |. Parser.chompWhile (\c -> c == ' ')
---                             |= Parse.getPosition
---                             |= Parser.loop [] (parseInlineText { replacements = [] })
---                             |= Parse.getPosition
---                         , Parser.succeed
---                             (\start end ->
---                                 Parser.Done Nothing
---                             )
---                             |= Parse.getPosition
---                             |. parseTillEnd
---                             |= Parse.getPosition
---                         ]
--- {-| -}
--- parseInlineText :
---     { replacements : List Replacement
---     }
---     -> List Text
---     -> Parser Context Problem (Parser.Step (List Text) (List Text))
--- parseInlineText options found =
---     Parser.oneOf
---         [ --     Parser.oneOf (replace options.replacements found)
---           --     |> Parser.map Parser.Loop
---           -- -- If a char matches the first character of a replacement,
---           -- -- but didn't match the full replacement captured above,
---           -- -- then stash that char.
---           -- , Parser.oneOf (almostReplacement options.replacements found)
---           --     |> Parser.map Parser.Loop
---           -- Capture style command characters
---           Parser.succeed
---             (Parser.Loop << changeStyleOnText found)
---             |= Parser.oneOf
---                 [ Parser.map (always Italic) (Parser.token (Parser.Token "/" (Expecting "/")))
---                 -- , Parser.map (always rline)) (Parser.token (Parser.Token "_" (Expecting "_")))
---                 , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
---                 , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
---                 -- , Parser.map (always (Just Code)) (Parser.token (Parser.Token "`" (Expecting "`")))
---                 ]
---         , -- chomp until a meaningful character
---           Parser.chompWhile
---             (\c ->
---                 not (List.member c [ '}', '/', '|', '*', '~', '\n' ])
---             )
---             |> Parser.getChompedString
---             |> Parser.andThen
---                 (\new ->
---                     if new == "" || new == "\n" then
---                         -- TODO: Warning about unclosed styles
---                         Parser.succeed (Parser.Done (List.reverse found))
---                     else
---                         Parser.succeed (Parser.Loop (addTextToText new found))
---                 )
---         ]
--- changeStyleOnText textNodes styleToken =
---     case textNodes of
---         [] ->
---             case styleToken of
---                 Bold ->
---                     [ Text [ Bold ] "" ]
---                 Italic ->
---                     [ Text [ Italic ] "" ]
---                 Strike ->
---                     [ Text [ Strike ] "" ]
---         current :: remaining ->
---             let
---                 newText =
---                     case styleToken of
---                         Bold ->
---                             flipStyle Bold current
---                         Italic ->
---                             flipStyle Italic current
---                         Strike ->
---                             flipStyle Strike current
---             in
---             newText :: current :: remaining
--- flipStyle newStyle textStyle =
---     case textStyle of
---         Text styles str ->
---             if List.member newStyle styles then
---                 Text (List.filter ((/=) newStyle) styles) ""
---             else
---                 Text (newStyle :: styles) ""
 
 
 {-| -}
