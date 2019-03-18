@@ -3,6 +3,7 @@ module Mark.Internal.Description exposing
     , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), AttrExpectation(..)
     , Parsed(..), startingPoint, descriptionToString, toString
+    , create
     )
 
 {-|
@@ -14,6 +15,8 @@ module Mark.Internal.Description exposing
 @docs Expectation, InlineExpectation, AttrExpectation
 
 @docs Parsed, startingPoint, descriptionToString, toString
+
+@docs create
 
 -}
 
@@ -1580,3 +1583,541 @@ writeField ( name, foundVal ) cursor =
         Unexpected unexpected ->
             cursor
                 |> advanceTo unexpected.range
+
+
+
+{- CREATION -}
+
+
+{-|
+
+    `Position` is the starting position for a block.
+
+    The same rules for indentation as they apply everywhere.
+
+        - Primitives do not handle their indentation.
+        - Block, Record, and Tree elements handle the indentation of their children.
+
+-}
+create :
+    { seed : Id.Seed
+    , indent : Int
+    , base : Position
+    , expectation : Expectation
+    }
+    ->
+        { pos : Position
+        , desc : Description
+        , seed : Id.Seed
+        }
+create current =
+    case current.expectation of
+        ExpectBlock name childExpectation ->
+            let
+                new =
+                    create
+                        { indent = current.indent + 1
+                        , base =
+                            current.base
+                                |> moveNewline
+                                |> moveColumn ((current.indent + 1) * 4)
+                        , expectation = childExpectation
+                        , seed = current.seed
+                        }
+            in
+            { pos = new.pos
+            , desc =
+                DescribeBlock
+                    { name = name
+                    , found =
+                        Found
+                            { start = current.base
+                            , end = new.pos
+                            }
+                            new.desc
+                    , expected = current.expectation
+                    }
+            , seed = new.seed
+            }
+
+        ExpectStub name ->
+            let
+                end =
+                    moveColumn (String.length name) current.base
+            in
+            { pos = end
+            , desc =
+                DescribeStub name
+                    (Found
+                        { start = current.base
+                        , end = end
+                        }
+                        name
+                    )
+            , seed = current.seed
+            }
+
+        ExpectRecord name fields ->
+            let
+                new =
+                    List.foldl
+                        (createField (current.indent + 1))
+                        { position = moveNewline current.base
+                        , fields = []
+                        , seed = current.seed
+                        }
+                        fields
+            in
+            { pos = new.position
+            , desc =
+                Record
+                    { name = name
+                    , found =
+                        Found
+                            { start = current.base
+                            , end = moveNewline new.position
+                            }
+                            new.fields
+                    , expected = current.expectation
+                    }
+            , seed = new.seed
+            }
+
+        ExpectTree icon content ->
+            let
+                range =
+                    { start = current.base
+                    , end = current.base
+                    }
+
+                items =
+                    []
+            in
+            { pos = moveNewline current.base
+            , desc =
+                DescribeTree
+                    { found = ( range, items )
+                    , expected = current.expectation
+                    }
+            , seed = current.seed
+            }
+
+        ExpectOneOf choices ->
+            let
+                ( newId, newSeed ) =
+                    Id.step current.seed
+
+                -- TODO: handle case of empty OneOf
+                new =
+                    create
+                        { indent = current.indent + 1
+                        , base = current.base
+                        , expectation = Maybe.withDefault (ExpectStub "Unknown") (List.head choices)
+                        , seed = newSeed
+                        }
+            in
+            { pos = new.pos
+            , desc =
+                OneOf
+                    { id = newId
+                    , choices = List.map (Choice newId) choices
+                    , child =
+                        Found
+                            { start = current.base
+                            , end = new.pos
+                            }
+                            new.desc
+                    }
+            , seed = new.seed
+            }
+
+        ExpectManyOf choices ->
+            let
+                ( parentId, newSeed ) =
+                    Id.step current.seed
+
+                ( _, childStart ) =
+                    Id.step newSeed
+
+                reseeded =
+                    Id.reseed childStart
+
+                ( finalSeed, children ) =
+                    List.foldl
+                        (\choice ( seed, newBase, result ) ->
+                            let
+                                new =
+                                    create
+                                        { indent = current.indent
+                                        , base = newBase
+                                        , expectation = choice
+                                        , seed = seed
+                                        }
+                            in
+                            ( new.seed
+                            , new.pos
+                                |> moveNewline
+                                |> moveNewline
+                                |> moveColumn (current.indent * 4)
+                            , Found
+                                { start = newBase
+                                , end = new.pos
+                                }
+                                new.desc
+                                :: result
+                            )
+                        )
+                        ( newSeed, current.base, [] )
+                        choices
+                        |> (\( s, _, c ) -> ( s, c ))
+                        |> Tuple.mapSecond List.reverse
+            in
+            { pos = moveNewline current.base
+            , seed = finalSeed
+            , desc =
+                ManyOf
+                    { id = parentId
+                    , choices = List.map (Choice parentId) choices
+                    , children = children
+                    }
+            }
+
+        ExpectStartsWith start remaining ->
+            let
+                first =
+                    create
+                        { indent = current.indent
+                        , base = current.base
+                        , expectation = start
+                        , seed = current.seed
+                        }
+
+                second =
+                    create
+                        { indent = current.indent
+                        , base = moveNewline first.pos
+                        , expectation = remaining
+                        , seed = first.seed
+                        }
+            in
+            { pos = second.pos
+            , desc =
+                StartsWith
+                    { start = current.base
+                    , end = second.pos
+                    }
+                    { found = first.desc
+                    , expected = start
+                    }
+                    { found = second.desc
+                    , expected = remaining
+                    }
+            , seed = second.seed
+            }
+
+        -- Primitives
+        ExpectBoolean b ->
+            let
+                boolString =
+                    boolToString b
+
+                end =
+                    moveColumn (String.length boolString) current.base
+
+                range =
+                    { start = current.base
+                    , end = end
+                    }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = end
+            , desc =
+                DescribeBoolean
+                    { id = newId
+                    , found =
+                        Found range b
+                    }
+            , seed = newSeed
+            }
+
+        ExpectInteger i ->
+            let
+                end =
+                    moveColumn
+                        (String.length (String.fromInt i))
+                        current.base
+
+                pos =
+                    { start = current.base
+                    , end = end
+                    }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = end
+            , desc =
+                DescribeInteger
+                    { id = newId
+                    , found = Found pos i
+                    }
+            , seed = newSeed
+            }
+
+        ExpectFloat f ->
+            let
+                end =
+                    moveColumn
+                        (String.length (String.fromFloat f))
+                        current.base
+
+                pos =
+                    { start = current.base
+                    , end = end
+                    }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = end
+            , desc =
+                DescribeFloat
+                    { id = newId
+                    , found = Found pos ( String.fromFloat f, f )
+                    }
+            , seed = newSeed
+            }
+
+        ExpectFloatBetween details ->
+            let
+                end =
+                    moveColumn
+                        (String.length (String.fromFloat details.default))
+                        current.base
+
+                pos =
+                    { start = current.base
+                    , end =
+                        end
+                    }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = end
+            , desc =
+                DescribeFloatBetween
+                    { id = newId
+                    , min = details.min
+                    , max = details.max
+                    , found =
+                        Found pos
+                            ( String.fromFloat details.default
+                            , details.default
+                            )
+                    }
+            , seed = newSeed
+            }
+
+        ExpectIntBetween details ->
+            let
+                end =
+                    moveColumn
+                        (String.length (String.fromInt details.default))
+                        current.base
+
+                pos =
+                    { start = current.base
+                    , end = end
+                    }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = end
+            , desc =
+                DescribeIntBetween
+                    { id = newId
+                    , min = details.min
+                    , max = details.max
+                    , found = Found pos details.default
+                    }
+            , seed = newSeed
+            }
+
+        ExpectString str ->
+            let
+                end =
+                    moveColumn (String.length str) current.base
+
+                pos =
+                    { start = current.base
+                    , end = end
+                    }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = end
+            , desc = DescribeString newId str
+            , seed = newSeed
+            }
+
+        ExpectMultiline str ->
+            let
+                end =
+                    moveColumn (String.length str) current.base
+
+                -- TODO: This position is not correct!
+                -- Account for newlines
+                pos =
+                    { start = current.base
+                    , end = end
+                    }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = end
+            , desc = DescribeMultiline newId str
+            , seed = newSeed
+            }
+
+        ExpectStringExactly str ->
+            let
+                end =
+                    moveColumn (String.length str) current.base
+
+                pos =
+                    { start = current.base
+                    , end = end
+                    }
+            in
+            { pos = end
+            , desc = DescribeStringExactly pos str
+            , seed = current.seed
+            }
+
+        -- ExpectDate ->
+        _ ->
+            let
+                end =
+                    moveColumn (String.length "True") current.base
+
+                range =
+                    { start = current.base
+                    , end = end
+                    }
+
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = end
+            , desc =
+                DescribeBoolean
+                    { id = newId
+                    , found =
+                        Found
+                            range
+                            True
+                    }
+            , seed = newSeed
+            }
+
+
+type alias CreateFieldCursor =
+    { position : Position
+
+    -- We've already created these
+    , fields : List ( String, Found Description )
+    , seed : Id.Seed
+    }
+
+
+{-| -}
+createField :
+    Int
+    -> ( String, Expectation )
+    -> CreateFieldCursor
+    -> CreateFieldCursor
+createField currentIndent ( name, exp ) current =
+    let
+        -- This is the beginning of the field
+        --    field = x
+        --   ^ right there
+        fieldValueStart =
+            current.position
+                |> moveColumn (currentIndent * 4)
+
+        -- If the field value is more than a line
+        new =
+            create
+                { indent = currentIndent + 1
+                , base =
+                    fieldValueStart
+                        -- Add a few characters to account for `field = `.
+                        |> moveColumn (String.length name + 3)
+                , expectation = exp
+                , seed = current.seed
+                }
+
+        height =
+            new.pos.line
+                - current.position.line
+
+        fieldEnd =
+            moveNewline new.pos
+    in
+    if height == 0 then
+        { position = fieldEnd
+        , fields =
+            ( name
+            , Found
+                { start =
+                    fieldValueStart
+                , end =
+                    fieldEnd
+                }
+                new.desc
+            )
+                :: current.fields
+        , seed = new.seed
+        }
+
+    else
+        let
+            -- If the field value is more than a line
+            multiline =
+                create
+                    { indent = currentIndent + 1
+                    , base =
+                        fieldValueStart
+                            -- account for just `fieldname =`
+                            |> moveColumn (String.length name + 2)
+                            |> moveNewline
+                            -- Indent one level further
+                            |> moveColumn (1 * 4)
+                    , expectation = exp
+                    , seed = current.seed
+                    }
+
+            finalEnd =
+                multiline.pos
+                    |> moveNewline
+        in
+        { position = finalEnd
+        , fields =
+            ( name
+            , Found
+                { start =
+                    fieldValueStart
+                , end =
+                    finalEnd
+                }
+                multiline.desc
+            )
+                :: current.fields
+        , seed = multiline.seed
+        }
