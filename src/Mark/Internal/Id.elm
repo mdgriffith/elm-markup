@@ -16,54 +16,44 @@ module Mark.Internal.Id exposing
 
 
 initialSeed =
-    Seed 0
+    Seed [ 0 ]
 
 
-type Seed
-    = Seed Int
+{-| We might want to move to a list based ID.
+
+So, when we `reseed`, we're actually adding a level.
+
+    Seed [0]
+
+    Seed [1] --reseed -> Seed [1, 0]
+                            |
+                            v
+                         Seed [1, 1]
 
 
-{-| This is dubious but I think it will work for this case.
+    Seed [2]
 
-We need to create a seed that's orthogonal to the original due to how `Mark.manyOf` needs to generate ids based on what it finds vs what the parser structure is.
-
-Meaning, normally each parser is given a unique seed based on where it is in the parser tree.
-
-However, manyOf will need to issue some number of IDs based on the # of items it finds, as opposed ot the parser structure.
-
-Essentially we need somethign like this.
-
-
-## Normal, deterministic number generation
-
-    1
-
-    8
-
-    3
-
-    5
-
-    6
-
-
-## With branching
-
-    1
-    8
-    3 -> 12 -> 18
-    5
-    6 -> 20 -> 21
+Is there a performance issue with allocating a bunch of lists intead of base Ints?
 
 -}
+type Seed
+    = Seed (List Int)
+
+
+{-| -}
 reseed : Seed -> Seed
 reseed (Seed seed) =
-    Seed ((seed + 1) * 100000)
+    Seed (0 :: seed)
 
 
 step : Seed -> ( Id category, Seed )
 step (Seed seed) =
-    ( Id seed, Seed (seed + 1) )
+    case seed of
+        [] ->
+            ( Id 0, Seed [ 0 ] )
+
+        current :: remain ->
+            ( Id current, Seed (current + 1 :: remain) )
 
 
 thread : Seed -> List (Seed -> ( Seed, thing )) -> ( Seed, List thing )
@@ -82,12 +72,6 @@ threadThrough current ( seed, past ) =
 
 type Id category
     = Id Int
-
-
-
--- {-| -}
--- type Id category
---     = Id Range
 
 
 type alias Position =
