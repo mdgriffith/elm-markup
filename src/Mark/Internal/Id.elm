@@ -50,10 +50,10 @@ step : Seed -> ( Id category, Seed )
 step (Seed seed) =
     case seed of
         [] ->
-            ( Id 0, Seed [ 0 ] )
+            ( Id [ 0 ], Seed [ 0 ] )
 
         current :: remain ->
-            ( Id current, Seed (current + 1 :: remain) )
+            ( Id seed, Seed (current + 1 :: remain) )
 
 
 thread : Seed -> List (Seed -> ( Seed, thing )) -> ( Seed, List thing )
@@ -71,7 +71,7 @@ threadThrough current ( seed, past ) =
 
 
 type Id category
-    = Id Int
+    = Id (List Int)
 
 
 type alias Position =
