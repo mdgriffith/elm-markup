@@ -106,6 +106,7 @@ text =
                             { inlines = []
                             , replacements = []
                             }
+                            Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
                             []
                             []
@@ -115,10 +116,7 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id =
-                                Id.Id
-                                    { end = { column = 28, line = 1, offset = 27 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
+                                Id.Id [ 0 ]
                             , text =
                                 [ Description.Styled { end = { column = 12, line = 1, offset = 11 }, start = { column = 1, line = 1, offset = 0 } }
                                     (Description.Text [] "Here is my ")
@@ -145,6 +143,7 @@ text =
                                 ]
                             , replacements = []
                             }
+                            Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
                             []
                             []
@@ -154,10 +153,7 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id =
-                                Id.Id
-                                    { end = { column = 43, line = 1, offset = 42 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
+                                Id.Id [ 0 ]
                             , text =
                                 [ Description.Styled
                                     { end = { column = 12, line = 1, offset = 11 }
@@ -213,6 +209,7 @@ text =
                                 ]
                             , replacements = []
                             }
+                            Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
                             []
                             []
@@ -221,11 +218,7 @@ text =
                     )
                     (Ok
                         (Description.DescribeText
-                            { id =
-                                Id.Id
-                                    { end = { column = 60, line = 1, offset = 59 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
+                            { id = Id.Id [ 0 ]
                             , text =
                                 [ Description.Styled
                                     { end = { column = 12, line = 1, offset = 11 }
@@ -294,6 +287,7 @@ text =
                                 ]
                             , replacements = []
                             }
+                            Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
                             []
                             []
@@ -303,10 +297,7 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id =
-                                Id.Id
-                                    { end = { column = 71, line = 1, offset = 70 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
+                                Id.Id [ 0 ]
                             , text =
                                 [ Description.Styled
                                     { end = { column = 12, line = 1, offset = 11 }
@@ -371,6 +362,7 @@ text =
                                 ]
                             , replacements = []
                             }
+                            Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
                             []
                             []
@@ -380,14 +372,7 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id =
-                                Id.Id
-                                    { end =
-                                        { column = 73
-                                        , line = 1
-                                        , offset = 72
-                                        }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
+                                Id.Id [ 0 ]
                             , text =
                                 [ Description.Styled
                                     { end = { column = 12, line = 1, offset = 11 }

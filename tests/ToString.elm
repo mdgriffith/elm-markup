@@ -1,4 +1,4 @@
-module ToString exposing (edits, suite)
+module ToString exposing (suite)
 
 {-| -}
 
@@ -12,19 +12,23 @@ import Test exposing (..)
 
 
 create exp =
-    Tuple.second <|
+    .desc <|
         Description.create
-            0
-            Description.startingPoint
-            exp
+            { indent = 0
+            , base = Description.startingPoint
+            , expectation = exp
+            , seed = Id.initialSeed
+            }
 
 
 createIndented exp =
-    Tuple.second <|
+    .desc <|
         Description.create
-            1
-            Description.startingPoint
-            exp
+            { indent = 1
+            , base = Description.startingPoint
+            , expectation = exp
+            , seed = Id.initialSeed
+            }
 
 
 record =
@@ -169,9 +173,7 @@ suite =
                         )
                         """| Indented
     hello
-
     hello
-
     hello"""
             ]
         , describe "Indented - toString"
@@ -208,10 +210,7 @@ suite =
 
 
 manyIndentedHellosId =
-    Id.Id
-        { end = { column = 5, line = 2, offset = 5 }
-        , start = { column = 5, line = 2, offset = 5 }
-        }
+    Id.Id [ 0 ]
 
 
 edits =
@@ -229,6 +228,8 @@ edits =
                             )
                             (Description.Parsed
                                 { errors = []
+                                , initialSeed = Id.initialSeed
+                                , currentSeed = Id.initialSeed
                                 , found =
                                     Description.Found
                                         { start = Description.startingPoint
@@ -250,11 +251,8 @@ edits =
                 Expect.equal (Description.toString new)
                     """| Indented
     hello
-
     hello
-
     world
-
     hello"""
         , test
             "Insert at 2"
@@ -265,16 +263,14 @@ edits =
                         Mark.Edit.update
                             (Mark.Edit.insertAt 2
                                 (Id.Choice
-                                    (Id.Id
-                                        { start = Description.startingPoint
-                                        , end = Description.startingPoint
-                                        }
-                                    )
+                                    (Id.Id [ 0 ])
                                     (Description.ExpectString "world")
                                 )
                             )
                             (Description.Parsed
                                 { errors = []
+                                , initialSeed = Id.initialSeed
+                                , currentSeed = Id.initialSeed
                                 , found =
                                     Description.Found
                                         { start = Description.startingPoint
@@ -299,16 +295,14 @@ edits =
                         Mark.Edit.update
                             (Mark.Edit.insertAt 1
                                 (Id.Choice
-                                    (Id.Id
-                                        { start = Description.startingPoint
-                                        , end = Description.startingPoint
-                                        }
-                                    )
+                                    (Id.Id [ 0 ])
                                     (Description.ExpectString "world")
                                 )
                             )
                             (Description.Parsed
                                 { errors = []
+                                , initialSeed = Id.initialSeed
+                                , currentSeed = Id.initialSeed
                                 , found =
                                     Description.Found
                                         { start = Description.startingPoint
@@ -333,16 +327,14 @@ edits =
                         Mark.Edit.update
                             (Mark.Edit.insertAt 0
                                 (Id.Choice
-                                    (Id.Id
-                                        { start = Description.startingPoint
-                                        , end = Description.startingPoint
-                                        }
-                                    )
+                                    (Id.Id [ 0 ])
                                     (Description.ExpectString "world")
                                 )
                             )
                             (Description.Parsed
                                 { errors = []
+                                , initialSeed = Id.initialSeed
+                                , currentSeed = Id.initialSeed
                                 , found =
                                     Description.Found
                                         { start = Description.startingPoint
@@ -367,16 +359,14 @@ edits =
                         Mark.Edit.update
                             (Mark.Edit.insertAt 3
                                 (Id.Choice
-                                    (Id.Id
-                                        { start = Description.startingPoint
-                                        , end = Description.startingPoint
-                                        }
-                                    )
+                                    (Id.Id [ 0 ])
                                     (Description.ExpectString "world")
                                 )
                             )
                             (Description.Parsed
                                 { errors = []
+                                , initialSeed = Id.initialSeed
+                                , currentSeed = Id.initialSeed
                                 , found =
                                     Description.Found
                                         { start = Description.startingPoint
