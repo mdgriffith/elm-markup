@@ -119,6 +119,7 @@ styledText options seed startingPos inheritedStyles until =
             (\( pos, textNodes ) ->
                 DescribeText
                     { id = newId
+                    , range = pos
                     , text = textNodes
                     }
             )

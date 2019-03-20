@@ -4,7 +4,6 @@ module Mark.Internal.Id exposing
     , ManyOptions(..)
     , Options(..)
     , Seed
-    , getRange
     , initialSeed
     , reseed
     , step
@@ -15,6 +14,7 @@ module Mark.Internal.Id exposing
 {-| -}
 
 
+initialSeed : Seed
 initialSeed =
     Seed [ 0 ]
 
@@ -74,39 +74,9 @@ type Id category
     = Id (List Int)
 
 
-type alias Position =
-    { offset : Int
-    , line : Int
-    , column : Int
-    }
-
-
 {-| -}
 type Choice id expectation
     = Choice id expectation
-
-
-type alias Range =
-    { start : Position
-    , end : Position
-    }
-
-
-{-| -}
-getRange : Id anything -> Range
-getRange (Id range) =
-    Debug.todo "ohno"
-
-
-
--- {-| -}
--- manyOptionId : Range -> Id ManyOptions
--- manyOptionId =
---     Id
--- {-| -}
--- optionId : Range -> Id Options
--- optionId =
---     Id
 
 
 type ManyOptions

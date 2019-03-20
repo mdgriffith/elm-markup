@@ -452,10 +452,10 @@ getUnexpecteds description =
         DescribeText details ->
             []
 
-        DescribeString rng str ->
+        DescribeString rng _ str ->
             []
 
-        DescribeMultiline rng str ->
+        DescribeMultiline rng _ str ->
             []
 
         DescribeStringExactly rng str ->
@@ -1234,7 +1234,7 @@ manyOf manyOfDetails blocks =
                             |> Tuple.first
                             |> Result.map
                                 (\items ->
-                                    Found (getRange many.id)
+                                    Found many.range
                                         (manyOfDetails.merge
                                             { parent = many.id
                                             , options = many.choices
@@ -1263,6 +1263,7 @@ manyOf manyOfDetails blocks =
                         ManyOf
                             { choices = List.map (Choice parentId) expectations
                             , id = parentId
+                            , range = range
                             , children = List.map resultToFound results
                             }
                     )
@@ -2336,7 +2337,7 @@ renderText options description =
     case description of
         DescribeText details ->
             List.foldl (convertTextDescription options) [] details.text
-                |> (Found (getRange details.id) << List.reverse)
+                |> (Found details.range << List.reverse)
                 |> Ok
 
         _ ->
@@ -2530,11 +2531,8 @@ multiline details =
         , converter =
             \desc ->
                 case desc of
-                    DescribeMultiline id str ->
-                        Ok
-                            (Found (getRange id)
-                                (details.view id str)
-                            )
+                    DescribeMultiline id range str ->
+                        Ok (Found range (details.view id str))
 
                     _ ->
                         Err NoMatch
@@ -2547,7 +2545,7 @@ multiline details =
                 ( newSeed
                 , Parser.map
                     (\( pos, str ) ->
-                        DescribeMultiline id str
+                        DescribeMultiline id pos str
                     )
                     (Parse.withRange
                         (Parser.getIndent
@@ -2573,11 +2571,8 @@ string details =
         , converter =
             \desc ->
                 case desc of
-                    DescribeString id str ->
-                        Ok
-                            (Found (getRange id)
-                                (details.view id str)
-                            )
+                    DescribeString id range str ->
+                        Ok (Found range (details.view id str))
 
                     _ ->
                         Err NoMatch
@@ -2590,7 +2585,11 @@ string details =
                 ( newSeed
                 , Parser.succeed
                     (\start val end ->
-                        DescribeString id val
+                        DescribeString id
+                            { start = start
+                            , end = end
+                            }
+                            val
                     )
                     |= Parse.getPosition
                     |= Parser.getChompedString

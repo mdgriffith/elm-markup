@@ -96,6 +96,13 @@ suite =
         ]
 
 
+dummyRange =
+    { end =
+        { column = 55, line = 1, offset = 54 }
+    , start = { column = 29, line = 1, offset = 28 }
+    }
+
+
 text =
     describe "styled text and inlines"
         [ test "basic" <|
@@ -115,8 +122,8 @@ text =
                     )
                     (Ok
                         (Description.DescribeText
-                            { id =
-                                Id.Id [ 0 ]
+                            { id = Id.Id [ 0 ]
+                            , range = dummyRange
                             , text =
                                 [ Description.Styled { end = { column = 12, line = 1, offset = 11 }, start = { column = 1, line = 1, offset = 0 } }
                                     (Description.Text [] "Here is my ")
@@ -154,6 +161,7 @@ text =
                         (Description.DescribeText
                             { id =
                                 Id.Id [ 0 ]
+                            , range = dummyRange
                             , text =
                                 [ Description.Styled
                                     { end = { column = 12, line = 1, offset = 11 }
@@ -219,6 +227,7 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id = Id.Id [ 0 ]
+                            , range = dummyRange
                             , text =
                                 [ Description.Styled
                                     { end = { column = 12, line = 1, offset = 11 }
@@ -298,6 +307,7 @@ text =
                         (Description.DescribeText
                             { id =
                                 Id.Id [ 0 ]
+                            , range = dummyRange
                             , text =
                                 [ Description.Styled
                                     { end = { column = 12, line = 1, offset = 11 }
@@ -373,6 +383,7 @@ text =
                         (Description.DescribeText
                             { id =
                                 Id.Id [ 0 ]
+                            , range = dummyRange
                             , text =
                                 [ Description.Styled
                                     { end = { column = 12, line = 1, offset = 11 }

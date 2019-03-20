@@ -277,7 +277,7 @@ match description exp =
                 _ ->
                     False
 
-        DescribeString _ _ ->
+        DescribeString _ _ _ ->
             case exp of
                 ExpectString _ ->
                     True
@@ -285,7 +285,7 @@ match description exp =
                 _ ->
                     False
 
-        DescribeMultiline _ _ ->
+        DescribeMultiline _ _ _ ->
             case exp of
                 ExpectMultiline _ ->
                     True
@@ -396,8 +396,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            { targetRange = getRange id
-                            , makeEdit = \i pos desc -> updateFoundDate id newDate desc
+                            { makeEdit = \i pos desc -> updateFoundDate id newDate desc
                             , indentation = 0
                             }
                             original.found
@@ -408,8 +407,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            { targetRange = getRange id
-                            , makeEdit = \i pos desc -> updateFoundBool id newBool desc
+                            { makeEdit = \i pos desc -> updateFoundBool id newBool desc
                             , indentation = 0
                             }
                             original.found
@@ -420,8 +418,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            { targetRange = getRange id
-                            , makeEdit = \i pos desc -> updateFoundFloat id newFloat desc
+                            { makeEdit = \i pos desc -> updateFoundFloat id newFloat desc
                             , indentation = 0
                             }
                             original.found
@@ -432,8 +429,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            { targetRange = getRange id
-                            , makeEdit = \i pos desc -> updateFoundString id newStr desc
+                            { makeEdit = \i pos desc -> updateFoundString id newStr desc
                             , indentation = 0
                             }
                             original.found
@@ -444,8 +440,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            { targetRange = getRange id
-                            , makeEdit = \i pos desc -> updateFoundInt id newInt desc
+                            { makeEdit = \i pos desc -> updateFoundInt id newInt desc
                             , indentation = 0
                             }
                             original.found
@@ -456,8 +451,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            { targetRange = getRange id
-                            , makeEdit =
+                            { makeEdit =
                                 \i pos desc ->
                                     let
                                         new =
@@ -479,8 +473,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            { targetRange = getRange id
-                            , makeEdit =
+                            { makeEdit =
                                 \indentation pos desc ->
                                     case desc of
                                         ManyOf many ->
@@ -507,8 +500,7 @@ update edit (Parsed original) =
                 { original
                     | found =
                         makeFoundEdit
-                            { targetRange = getRange id
-                            , makeEdit = \i pos desc -> makeDeleteBlock id index desc
+                            { makeEdit = \i pos desc -> makeDeleteBlock id index desc
                             , indentation = 0
                             }
                             original.found
@@ -524,7 +516,6 @@ type alias EditCursor =
     -- and the current description
     { makeEdit : Int -> Position -> Description -> Maybe Description
     , indentation : Int
-    , targetRange : Range
     }
 
 
@@ -532,16 +523,12 @@ makeFoundEdit : EditCursor -> Found Description -> Found Description
 makeFoundEdit cursor foundDesc =
     case foundDesc of
         Found range desc ->
-            if within cursor.targetRange range then
-                case cursor.makeEdit cursor.indentation range.start desc of
-                    Nothing ->
-                        Found range (makeEdit cursor desc)
+            case cursor.makeEdit cursor.indentation range.start desc of
+                Nothing ->
+                    Found range (makeEdit cursor desc)
 
-                    Just newDesc ->
-                        Found range newDesc
-
-            else
-                foundDesc
+                Just newDesc ->
+                    Found range newDesc
 
         Unexpected unexpected ->
             foundDesc
@@ -581,21 +568,17 @@ makeEdit cursor desc =
                 Nothing ->
                     case details.found of
                         Found rng fields ->
-                            if within cursor.targetRange rng then
-                                Record
-                                    { details
-                                        | found =
-                                            Found rng
-                                                (List.map
-                                                    (Tuple.mapSecond
-                                                        (makeFoundEdit (increaseIndent (increaseIndent cursor)))
-                                                    )
-                                                    fields
+                            Record
+                                { details
+                                    | found =
+                                        Found rng
+                                            (List.map
+                                                (Tuple.mapSecond
+                                                    (makeFoundEdit (increaseIndent (increaseIndent cursor)))
                                                 )
-                                    }
-
-                            else
-                                desc
+                                                fields
+                                            )
+                                }
 
                         Unexpected unexpected ->
                             desc
@@ -620,31 +603,22 @@ makeEdit cursor desc =
                             desc
 
         ManyOf many ->
-            if within cursor.targetRange (getRange many.id) then
-                case cursor.makeEdit cursor.indentation (.start (getRange many.id)) desc of
-                    Just newDesc ->
-                        -- replace current description
-                        newDesc
+            case cursor.makeEdit cursor.indentation many.range.start desc of
+                Just newDesc ->
+                    -- replace current description
+                    newDesc
 
-                    Nothing ->
-                        -- dive further
-                        ManyOf
-                            { many
-                                | children = List.map (makeFoundEdit cursor) many.children
-                            }
-
-            else
-                desc
+                Nothing ->
+                    -- dive further
+                    ManyOf
+                        { many
+                            | children = List.map (makeFoundEdit cursor) many.children
+                        }
 
         StartsWith range fst snd ->
-            -- if id is within range
-            if within cursor.targetRange range then
-                StartsWith range
-                    { fst | found = makeEdit cursor fst.found }
-                    { snd | found = makeEdit cursor snd.found }
-
-            else
-                desc
+            StartsWith range
+                { fst | found = makeEdit cursor fst.found }
+                { snd | found = makeEdit cursor snd.found }
 
         DescribeTree details ->
             -- TODO
@@ -670,13 +644,13 @@ makeEdit cursor desc =
             replacePrimitive cursor (foundStart details.found) desc
 
         DescribeText txt ->
-            replacePrimitive cursor (.start (getRange txt.id)) desc
+            replacePrimitive cursor (.start txt.range) desc
 
-        DescribeString id str ->
-            replacePrimitive cursor (.start (getRange id)) desc
+        DescribeString id range str ->
+            replacePrimitive cursor range.start desc
 
-        DescribeMultiline id str ->
-            replacePrimitive cursor (.start (getRange id)) desc
+        DescribeMultiline id range str ->
+            replacePrimitive cursor range.start desc
 
         DescribeStringExactly rng str ->
             replacePrimitive cursor rng.start desc
@@ -996,7 +970,7 @@ makeInsertAt seed index indentation many expectation =
                 }
         )
         { index = 0
-        , position = .start (getRange many.id)
+        , position = many.range.start
         , inserted = False
         , list = []
         , push = Nothing
@@ -1219,22 +1193,16 @@ updateFoundFloat id newFloat desc =
 
 updateFoundString id newString desc =
     case desc of
-        DescribeString range _ ->
-            if range == id then
-                Just
-                    (DescribeString range
-                        newString
-                    )
+        DescribeString strId range _ ->
+            if strId == id then
+                Just (DescribeString strId range newString)
 
             else
                 Nothing
 
-        DescribeMultiline range _ ->
-            if range == id then
-                Just
-                    (DescribeMultiline range
-                        newString
-                    )
+        DescribeMultiline strId range _ ->
+            if strId == id then
+                Just (DescribeMultiline strId range newString)
 
             else
                 Nothing
@@ -1421,13 +1389,13 @@ isPrimitive description =
         DescribeText _ ->
             True
 
-        DescribeString rng str ->
+        DescribeString _ _ _ ->
             True
 
-        DescribeMultiline rng str ->
+        DescribeMultiline _ _ _ ->
             True
 
-        DescribeStringExactly rng str ->
+        DescribeStringExactly _ _ ->
             True
 
         DescribeDate found ->
@@ -1523,21 +1491,21 @@ getContainingDescriptions description offset =
                 []
 
         DescribeText txt ->
-            if withinOffsetRange offset (getRange txt.id) then
+            if withinOffsetRange offset txt.range then
                 [ description ]
 
             else
                 []
 
-        DescribeString id str ->
-            if withinOffsetRange offset (getRange id) then
+        DescribeString id range str ->
+            if withinOffsetRange offset range then
                 [ description ]
 
             else
                 []
 
-        DescribeMultiline id str ->
-            if withinOffsetRange offset (getRange id) then
+        DescribeMultiline id range str ->
+            if withinOffsetRange offset range then
                 [ description ]
 
             else
