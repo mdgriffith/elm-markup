@@ -148,7 +148,7 @@ suite =
                 \_ ->
                     Expect.equal
                         (Description.descriptionToString
-                            (Debug.log "record" (create record))
+                            (create record)
                         )
                         recordString
             , test "RecordOfRecord" <|
@@ -164,7 +164,7 @@ suite =
                         (Description.descriptionToString
                             (manyHellos ())
                         )
-                        "hello\n\nhello\n\nhello"
+                        "hello\nhello\nhello"
             , test "Many Indented Strings" <|
                 \_ ->
                     Expect.equal

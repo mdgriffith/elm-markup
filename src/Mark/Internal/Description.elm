@@ -955,7 +955,6 @@ writeDescription description cursor =
                             -- TODO: This seems to be necessary for the recordOfRecord test, but
                             -- makes things parsed normally fail...sooo
                             -- |> writeIndent
-                            |> Debug.log ("record: " ++ details.name)
                             |> write ("| " ++ details.name)
                             |> indent
                             |> (\c ->
@@ -1317,7 +1316,6 @@ create current =
                             in
                             ( new.seed
                             , new.pos
-                                |> moveNewline
                                 |> moveNewline
                                 |> moveColumn (current.indent * 4)
                             , Found
