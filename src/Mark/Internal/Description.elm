@@ -1626,8 +1626,7 @@ createField currentIndent ( name, exp ) current =
                 }
 
         height =
-            new.pos.line
-                - current.position.line
+            new.pos.line - current.position.line
 
         fieldEnd =
             moveNewline new.pos
@@ -1660,7 +1659,7 @@ createField currentIndent ( name, exp ) current =
                             |> moveColumn (String.length name + 2)
                             |> moveNewline
                             -- Indent one level further
-                            |> moveColumn (1 * 4)
+                            |> moveColumn ((currentIndent + 1) * 4)
                     , expectation = exp
                     , seed = current.seed
                     }
