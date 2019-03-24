@@ -4,6 +4,7 @@ module Mark.Internal.Description exposing
     , Expectation(..), InlineExpectation(..), AttrExpectation(..)
     , Parsed(..), startingPoint, descriptionToString, toString
     , create
+    , Styling, emptyStyles
     )
 
 {-|
@@ -17,6 +18,8 @@ module Mark.Internal.Description exposing
 @docs Parsed, startingPoint, descriptionToString, toString
 
 @docs create
+
+@docs Styling, emptyStyles
 
 -}
 
@@ -205,7 +208,21 @@ type Style
 {-| A text fragment with some styling.
 -}
 type Text
-    = Text (List Style) String
+    = Text Styling String
+
+
+type alias Styling =
+    { bold : Bool
+    , italic : Bool
+    , strike : Bool
+    }
+
+
+emptyStyles =
+    { bold = False
+    , italic = False
+    , strike = False
+    }
 
 
 {-| -}

@@ -71,7 +71,7 @@ type Replacement
 
 empty : Text
 empty =
-    Text [] ""
+    Text emptyStyles ""
 
 
 textCursor inheritedStyles startingPos =
@@ -89,7 +89,7 @@ styledText :
     }
     -> Id.Seed
     -> Position
-    -> List Style
+    -> Styling
     -> List Char
     -> Parser Context Problem Description
 styledText options seed startingPos inheritedStyles until =
@@ -625,11 +625,15 @@ changeStyle (TextCursor cursor) styleToken =
 flipStyle newStyle textStyle =
     case textStyle of
         Text styles str ->
-            if List.member newStyle styles then
-                Text (List.filter ((/=) newStyle) styles) ""
+            case newStyle of
+                Bold ->
+                    Text { styles | bold = not styles.bold } str
 
-            else
-                Text (newStyle :: styles) ""
+                Italic ->
+                    Text { styles | italic = not styles.italic } str
+
+                Strike ->
+                    Text { styles | strike = not styles.strike } str
 
 
 advanceTo target (TextCursor cursor) =
@@ -793,7 +797,7 @@ removeBalance id (TextCursor cursor) =
 addTextToText newString textNodes =
     case textNodes of
         [] ->
-            [ Text [] newString ]
+            [ Text emptyStyles newString ]
 
         (Text styles txt) :: remaining ->
             Text styles (txt ++ newString) :: remaining

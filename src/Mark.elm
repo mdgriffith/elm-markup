@@ -2275,6 +2275,14 @@ record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 f
 {- TEXT BLOCKS -}
 
 
+{-| -}
+type alias Styles =
+    { bold : Bool
+    , italic : Bool
+    , strike : Bool
+    }
+
+
 {-| Handling formatted text is a little more involved than may be initially apparent.
 
 Text styling can be overlapped such as
@@ -2291,7 +2299,7 @@ In order to render this, the above sentence is chopped up into `Text` fragments 
 
 -}
 text :
-    { view : { range : Range } -> Text -> rendered
+    { view : { range : Range } -> Styles -> String -> rendered
     , error :
         { range : Range
         , problem : Error.Error
@@ -2318,7 +2326,7 @@ text options =
                                 }
                                 seed
                                 pos
-                                []
+                                emptyStyles
                                 []
                         )
                 )
@@ -2326,7 +2334,7 @@ text options =
 
 
 renderText :
-    { view : { range : Range } -> Text -> rendered
+    { view : { range : Range } -> Styles -> String -> rendered
     , error : UnexpectedDetails -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
@@ -2345,7 +2353,7 @@ renderText options description =
 
 
 convertTextDescription :
-    { view : { range : Range } -> Text -> rendered
+    { view : { range : Range } -> Styles -> String -> rendered
     , error : UnexpectedDetails -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
@@ -3406,8 +3414,10 @@ renderRecordResult renderUnexpected pos result =
 
 
 type alias RecordFields =
-    { remaining : List ( String, Parser Context Problem ( String, Found Description ) )
-    , found : Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))
+    { remaining :
+        List ( String, Parser Context Problem ( String, Found Description ) )
+    , found :
+        Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))
     }
 
 
