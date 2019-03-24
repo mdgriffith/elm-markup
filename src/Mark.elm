@@ -2529,13 +2529,12 @@ getInlineExpectation (Inline details) =
 
 {-| -}
 multiline :
-    { default : String
-    , view : Id String -> String -> a
+    { view : Id String -> String -> a
     }
     -> Block a
 multiline details =
     Value
-        { expect = ExpectMultiline details.default
+        { expect = ExpectMultiline "REPLACE"
         , converter =
             \desc ->
                 case desc of
@@ -2569,13 +2568,12 @@ multiline details =
 
 {-| -}
 string :
-    { default : String
-    , view : Id String -> String -> a
+    { view : Id String -> String -> a
     }
     -> Block a
 string details =
     Value
-        { expect = ExpectString details.default
+        { expect = ExpectString "-- Replace Me --"
         , converter =
             \desc ->
                 case desc of
@@ -2619,13 +2617,12 @@ Results in a `Posix` integer, which works well with [elm/time](https://package.e
 
 -}
 date :
-    { default : Time.Posix
-    , view : Id Time.Posix -> Time.Posix -> a
+    { view : Id Time.Posix -> Time.Posix -> a
     }
     -> Block a
 date details =
     Value
-        { expect = ExpectDate details.default
+        { expect = ExpectDate (Time.millisToPosix 0)
         , converter =
             \desc ->
                 case desc of
@@ -2722,13 +2719,12 @@ exactly key value =
 {-| Parse either `True` or `False`.
 -}
 bool :
-    { default : Bool
-    , view : Id Bool -> Bool -> a
+    { view : Id Bool -> Bool -> a
     }
     -> Block a
-bool { default, view } =
+bool { view } =
     Value
-        { expect = ExpectBoolean default
+        { expect = ExpectBoolean False
         , converter =
             \desc ->
                 case desc of
@@ -2776,16 +2772,12 @@ bool { default, view } =
 
 
 {-| Parse an `Int` block.
-
-Takes a default value that is used when autofilling.
-
 -}
 int :
-    { default : Int
-    , view : Id Int -> Int -> a
+    { view : Id Int -> Int -> a
     }
     -> Block a
-int { default, view } =
+int { view } =
     Value
         { converter =
             \desc ->
@@ -2795,7 +2787,7 @@ int { default, view } =
 
                     _ ->
                         Err NoMatch
-        , expect = ExpectInteger default
+        , expect = ExpectInteger 0
         , parser =
             \seed ->
                 let
@@ -2815,14 +2807,12 @@ int { default, view } =
         }
 
 
-{-| Takes a default value that is used when autofilling.
--}
+{-| -}
 float :
-    { default : Float
-    , view : Id Float -> Float -> a
+    { view : Id Float -> Float -> a
     }
     -> Block a
-float { default, view } =
+float { view } =
     Value
         { converter =
             \desc ->
@@ -2838,7 +2828,7 @@ float { default, view } =
 
                     _ ->
                         Err NoMatch
-        , expect = ExpectFloat default
+        , expect = ExpectFloat 0
         , parser =
             \seed ->
                 let
@@ -2860,7 +2850,6 @@ float { default, view } =
 intBetween :
     { min : Int
     , max : Int
-    , default : Int
     , view : Id Int -> Int -> a
     }
     -> Block a
@@ -2877,7 +2866,7 @@ intBetween bounds =
             ExpectIntBetween
                 { min = bottom
                 , max = top
-                , default = bounds.default
+                , default = bottom
                 }
         , converter =
             \desc ->
@@ -2930,7 +2919,6 @@ intBetween bounds =
 floatBetween :
     { min : Float
     , max : Float
-    , default : Float
     , view : Id Float -> Float -> a
     }
     -> Block a
@@ -2947,7 +2935,7 @@ floatBetween bounds =
             ExpectFloatBetween
                 { min = bounds.min
                 , max = bounds.max
-                , default = bounds.default
+                , default = bounds.min
                 }
         , converter =
             \desc ->
