@@ -53,6 +53,10 @@ type Error
         , min : Float
         , max : Float
         }
+    | Custom
+        { title : String
+        , message : List String
+        }
 
 
 
@@ -442,6 +446,13 @@ render source current =
                             |> Format.text
                             |> Format.yellow
                         ]
+            }
+
+        Custom custom ->
+            { title = String.toUpper custom.title
+            , region = current.range
+            , message =
+                List.map Format.text custom.message
             }
 
 

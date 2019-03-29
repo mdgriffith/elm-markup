@@ -2,11 +2,11 @@ module Mark exposing
     ( Document
     , Outcome(..), Partial
     , parse, Parsed, toString
-    , compile, convert
+    , compile, render
     , document
     , Block, map
-    , string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
-    , block, stub
+    , string, int, float, bool, multiline
+    , block
     , oneOf, manyOf, startWith, nested
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
     , text, replacement, balanced, Replacement
@@ -37,7 +37,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs parse, Parsed, toString
 
-@docs compile, convert
+@docs compile, render
 
 
 ## Building Documents
@@ -49,9 +49,9 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Primitives
 
-@docs string, exactly, int, float, floatBetween, intBetween, bool, date, multiline
+@docs string, int, float, bool, date, multiline
 
-@docs block, stub
+@docs block
 
 @docs oneOf, manyOf, startWith, nested
 
@@ -95,13 +95,6 @@ type alias Parsed =
 
 
 {- INTERFACE -}
-
-
-{-| -}
-type Outcome failure almost success
-    = Success success
-    | Almost almost
-    | Failure failure
 
 
 {-| -}
@@ -186,50 +179,71 @@ startDocRange =
     }
 
 
+errorsToList ( fst, remain ) =
+    fst :: remain
+
+
 {-| -}
-compile : Document data -> String -> Outcome Error (Partial data) data
+compile : Document data -> String -> Outcome (List Error) (Partial data) data
 compile (Document blocks) source =
     case Parser.run blocks.parser source of
         Ok ((Parsed parsedDetails) as parsed) ->
             case parsedDetails.errors of
                 [] ->
                     case blocks.converter parsed of
-                        Ok rendered ->
+                        Success rendered ->
                             Success rendered
 
-                        Err noMatch ->
+                        Almost (Recovered errors rendered) ->
+                            Almost
+                                { errors = List.map (Error.render source) (errorsToList errors)
+                                , result = rendered
+                                }
+
+                        Almost (Uncertain errors) ->
+                            -- now we're certain :/
+                            Failure (List.map (Error.render source) (errorsToList errors))
+
+                        Failure NoMatch ->
                             -- Invalid Ast.
                             -- This should never happen because
                             -- we definitely have the same document in both parsing and converting.
                             Failure
-                                (Error.render source
+                                [ Error.render source
                                     { problem = Error.DocumentMismatch
                                     , range = startDocRange
                                     }
-                                )
+                                ]
 
                 _ ->
                     case blocks.converter parsed of
-                        Ok rendered ->
+                        Success rendered ->
                             Almost
                                 { errors = parsedDetails.errors
                                 , result = rendered
                                 }
 
-                        Err noMatch ->
-                            -- Invalid Ast.
-                            -- This should never happen because
-                            -- we definitely have the same document in both parsing and converting.
+                        Almost (Uncertain ( err, remainError )) ->
+                            Failure (List.map (Error.render "") (err :: remainError) ++ parsedDetails.errors)
+
+                        Almost (Recovered ( err, remainError ) result) ->
+                            Almost
+                                { errors = List.map (Error.render "") (err :: remainError) ++ parsedDetails.errors
+                                , result = result
+                                }
+
+                        Failure noMatch ->
                             Failure
-                                (Error.render source
+                                (Error.render ""
                                     { problem = Error.DocumentMismatch
                                     , range = startDocRange
                                     }
+                                    :: parsedDetails.errors
                                 )
 
         Err deadEnds ->
             Failure <|
-                Error.render
+                [ Error.render
                     source
                     { problem = Error.ParsingIssue deadEnds
                     , range =
@@ -250,51 +264,163 @@ compile (Document blocks) source =
                                     }
                                 }
                     }
+                ]
 
 
 {-| -}
-convert : Document data -> Parsed -> Outcome Error (Partial data) data
-convert (Document blocks) ((Parsed parsedDetails) as parsed) =
+render : Document data -> Parsed -> Outcome (List Error) (Partial data) data
+render (Document blocks) ((Parsed parsedDetails) as parsed) =
     case parsedDetails.errors of
         [] ->
             case blocks.converter parsed of
-                Ok rendered ->
+                Success rendered ->
                     Success rendered
 
-                Err noMatch ->
+                Almost (Uncertain ( err, remainError )) ->
+                    Failure (List.map (Error.render "") (err :: remainError))
+
+                Almost (Recovered ( err, remainError ) result) ->
+                    Almost
+                        { errors = List.map (Error.render "") (err :: remainError)
+                        , result = result
+                        }
+
+                Failure noMatch ->
                     Failure
-                        (Error.render ""
+                        [ Error.render ""
                             { problem = Error.DocumentMismatch
                             , range = startDocRange
                             }
-                        )
+                        ]
 
         _ ->
             case blocks.converter parsed of
-                Ok rendered ->
+                Success rendered ->
                     Almost
                         { errors = parsedDetails.errors
                         , result = rendered
                         }
 
-                Err noMatch ->
+                Almost (Uncertain ( err, remainError )) ->
+                    Failure (List.map (Error.render "") (err :: remainError) ++ parsedDetails.errors)
+
+                Almost (Recovered ( err, remainError ) result) ->
+                    Almost
+                        { errors = List.map (Error.render "") (err :: remainError) ++ parsedDetails.errors
+                        , result = result
+                        }
+
+                Failure noMatch ->
                     Failure
                         (Error.render ""
                             { problem = Error.DocumentMismatch
                             , range = startDocRange
                             }
+                            :: parsedDetails.errors
                         )
 
 
 {-| -}
 type Document data
     = Document
-        { converter : Parsed -> Result AstError data
+        { converter : Parsed -> Outcome AstError (Uncertain data) data
         , initialSeed : Id.Seed
         , currentSeed : Id.Seed
         , expect : Expectation
         , parser : Parser Context Problem Parsed
         }
+
+
+type AstError
+    = NoMatch
+
+
+{-| -}
+type Outcome failure almost success
+    = Success success
+    | Almost almost
+    | Failure failure
+
+
+mapSuccess : (success -> otherSuccess) -> Outcome f a success -> Outcome f a otherSuccess
+mapSuccess fn outcome =
+    case outcome of
+        Success s ->
+            Success (fn s)
+
+        Almost a ->
+            Almost a
+
+        Failure f ->
+            Failure f
+
+
+{-| This doesn't cause something to completely fail, but logs the error.
+-}
+logErrors :
+    ( ErrorWithRange, List ErrorWithRange )
+    -> Outcome f (Uncertain success) success
+    -> Outcome f (Uncertain success) success
+logErrors (( fst, remainingErrs ) as err) outcome =
+    case outcome of
+        Success s ->
+            Almost (Recovered err s)
+
+        Almost (Uncertain u) ->
+            Almost (Uncertain (mergeErrors u err))
+
+        Almost (Recovered e a) ->
+            Almost (Recovered (mergeErrors e err) a)
+
+        Failure failures ->
+            Failure failures
+
+
+mapSuccessAndRecovered :
+    (success -> otherSuccess)
+    -> Outcome f (Uncertain success) success
+    -> Outcome f (Uncertain otherSuccess) otherSuccess
+mapSuccessAndRecovered fn outcome =
+    case outcome of
+        Success s ->
+            Success (fn s)
+
+        Almost (Uncertain u) ->
+            Almost (Uncertain u)
+
+        Almost (Recovered e a) ->
+            Almost (Recovered e (fn a))
+
+        Failure f ->
+            Failure f
+
+
+{-| As an error propogates up, it can gather futher context
+-}
+type alias ErrorWithRange =
+    { range : Range
+    , problem : Error.Error
+    }
+
+
+{-| With this type, we're not quite sure if we're going to be able to render or not.
+
+Scenarios:
+
+  - A field value of a record has multiple errors with it.
+  - It's caught and the error statue is rendered immediately.
+  - The document can be rendered, but we still have multiple errors to keep track of.
+
+-}
+type Uncertain data
+    = Uncertain ( ErrorWithRange, List ErrorWithRange )
+    | Recovered ( ErrorWithRange, List ErrorWithRange ) data
+
+
+{-| -}
+uncertain : ErrorWithRange -> Outcome AstError (Uncertain data) data
+uncertain err =
+    Almost (Uncertain ( err, [] ))
 
 
 {-| -}
@@ -308,15 +434,40 @@ type
        A block starts with `|` and has a name(already built into the parser)
 
        A value is just a raw parser.
+
+       --- Error Propagation
+
+        Failure
+            -> The document has had a mismatch
+            -> This can only be recovered by `oneOf` or `manyOf`
+        Almost
+            -> An `Error` has been "raised".  It's propogated until it's resolved by `onError`
+            ->
+
+        Success
+            -> Well, this is the easy one.
+
+        Ids are only available on the element they apply to.
+
+        Recovery is done at the level above the errored block.
+
+        So, if there is a record with a string that is constrained
+
+        If the constraint fails, the record can say "Here's the reset"
+
+
+
+
+
     -}
     = Block
         String
-        { converter : Description -> Result AstError (Found data)
+        { converter : Description -> Outcome AstError (Uncertain data) data
         , expect : Expectation
         , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
         }
     | Value
-        { converter : Description -> Result AstError (Found data)
+        { converter : Description -> Outcome AstError (Uncertain data) data
         , expect : Expectation
         , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
         }
@@ -351,7 +502,7 @@ blockName fromBlock =
             Nothing
 
 
-renderBlock : Block data -> Description -> Result AstError (Found data)
+renderBlock : Block data -> Description -> Outcome AstError (Uncertain data) data
 renderBlock fromBlock =
     case fromBlock of
         Block name { converter } ->
@@ -368,10 +519,6 @@ getBlockExpectation fromBlock =
 
         Value { expect } ->
             expect
-
-
-type AstError
-    = NoMatch
 
 
 
@@ -464,6 +611,9 @@ getUnexpecteds description =
         DescribeDate details ->
             unexpectedFromFound details.found
 
+        DescribeNothing ->
+            []
+
 
 getNestedUnexpecteds (Nested nest) =
     case nest.content of
@@ -521,16 +671,10 @@ type alias Range =
 
 {-| -}
 document :
-    { error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> result
-    , view : Range -> child -> result
-    }
+    (child -> result)
     -> Block child
     -> Document result
-document doc child =
+document view child =
     let
         expectation =
             getBlockExpectation child
@@ -550,17 +694,20 @@ document doc child =
                 case parsed.found of
                     Found range childDesc ->
                         case renderBlock child childDesc of
-                            Err err ->
-                                Err err
+                            Success renderedChild ->
+                                Success (view renderedChild)
 
-                            Ok (Found r renderedChild) ->
-                                Ok (doc.view r renderedChild)
+                            Failure err ->
+                                Failure err
 
-                            Ok (Unexpected unexpected) ->
-                                Ok (doc.error unexpected)
+                            Almost (Uncertain unexpected) ->
+                                Almost (Uncertain unexpected)
+
+                            Almost (Recovered errors renderedChild) ->
+                                Almost (Recovered errors (view renderedChild))
 
                     Unexpected unexpected ->
-                        Ok (doc.error unexpected)
+                        Almost (Uncertain ( unexpected, [] ))
         , parser =
             Parser.succeed
                 (\source ( range, val ) ->
@@ -570,7 +717,6 @@ document doc child =
                         , expected = getBlockExpectation child
                         , initialSeed = seed
                         , currentSeed = currentSeed
-                        , focus = Nothing
                         }
                 )
                 |= Parser.getSource
@@ -586,17 +732,61 @@ map fn child =
     case child of
         Block name details ->
             Block name
-                { converter = Result.map (mapFound fn) << details.converter
+                { converter = mapSuccessAndRecovered fn << details.converter
                 , parser = details.parser
                 , expect = details.expect
                 }
 
         Value details ->
             Value
-                { converter = Result.map (mapFound fn) << details.converter
+                { converter = mapSuccessAndRecovered fn << details.converter
                 , parser = details.parser
                 , expect = details.expect
                 }
+
+
+
+{-
+
+   myBlock =
+       Mark.string
+           |> Mark.verify
+               (\s ->
+                   if String.length >= 10 then
+                       Ok s
+                   else
+                       Err
+                           { title = "String is too short"
+                           , message = ["Yup, need a bigger string"]
+                           }
+               )
+
+-}
+
+
+type alias CustomError =
+    { title : String
+    , message : List String
+    }
+
+
+
+-- {-| -}
+-- verify : (a -> Result CustomError b) -> Block a -> Block b
+-- verify fn myBlock =
+--     case myBlock of
+--         Block name details ->
+--             Block name
+--                 { expect = details.expect
+--                 , parser = details.parser
+--                 , converter = Result.map (mapFound fn) myBlock
+--                 }
+--         Value details ->
+--             Debug.todo "Oh boy"
+-- -- {-| -}
+-- -- onError : (UnexpectedDetails -> a) -> Block a -> Block a
+-- -- onError myBlock =
+-- --     myBlock
 
 
 {-| -}
@@ -610,41 +800,47 @@ mapFound fn found =
             Unexpected unexp
 
 
-{-| -}
-stub : String -> (Range -> result) -> Block result
-stub name renderer =
-    Block name
-        { expect = ExpectStub name
-        , converter =
-            \desc ->
-                case desc of
-                    DescribeStub actualBlockName found ->
-                        if actualBlockName == name then
-                            case found of
-                                Found range _ ->
-                                    Ok (Found range (renderer range))
 
-                                Unexpected unexpected ->
-                                    Ok (Unexpected unexpected)
-
-                        else
-                            Err NoMatch
-
-                    _ ->
-                        Err NoMatch
-        , parser =
-            skipSeed <|
-                Parser.map
-                    (\( range, _ ) ->
-                        DescribeStub name (Found range name)
-                    )
-                    (Parse.withRange
-                        (Parser.succeed ()
-                            |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
-                            |. Parser.chompWhile (\c -> c == ' ')
-                        )
-                    )
-        }
+-- {-| -}
+-- andThenFound : (a -> Result CustomError b) -> Found a -> Found b
+-- andThenFound fn found =
+--     case found of
+--         Found range item ->
+--             Found range (fn item)
+--         Unexpected unexp ->
+--             Unexpected unexp
+-- {-| -}
+-- stub : String -> (Range -> result) -> Block result
+-- stub name renderer =
+--     Block name
+--         { expect = ExpectStub name
+--         , converter =
+--             \desc ->
+--                 case desc of
+--                     DescribeStub actualBlockName found ->
+--                         if actualBlockName == name then
+--                             case found of
+--                                 Found range _ ->
+--                                     Ok (Found range (renderer range))
+--                                 Unexpected unexpected ->
+--                                     Almost unexpected
+--                         else
+--                             Failure NoMatch
+--                     _ ->
+--                         Failure NoMatch
+--         , parser =
+--             skipSeed <|
+--                 Parser.map
+--                     (\( range, _ ) ->
+--                         DescribeStub name (Found range name)
+--                     )
+--                     (Parse.withRange
+--                         (Parser.succeed ()
+--                             |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
+--                             |. Parser.chompWhile (\c -> c == ' ')
+--                         )
+--                     )
+--         }
 
 
 skipSeed parser seed =
@@ -658,7 +854,7 @@ skipSeed parser seed =
 {-| -}
 block :
     { name : String
-    , view : Range -> child -> result
+    , view : child -> result
     , error :
         { range : Range
         , problem : Error.Error
@@ -677,35 +873,18 @@ block blockDetails child =
                         if details.name == blockDetails.name then
                             case details.found of
                                 Found range found ->
-                                    case renderBlock child found of
-                                        Err err ->
-                                            -- AST mismatch
-                                            Err err
-
-                                        Ok foundRenderedChild ->
-                                            Ok
-                                                (case foundRenderedChild of
-                                                    Found rng renderedChild ->
-                                                        Found range
-                                                            (blockDetails.view rng renderedChild)
-
-                                                    Unexpected unexpectedDetails ->
-                                                        Found unexpectedDetails.range
-                                                            (blockDetails.error unexpectedDetails)
-                                                )
+                                    renderBlock child found
+                                        |> mapSuccessAndRecovered blockDetails.view
 
                                 Unexpected unexpected ->
-                                    Ok
-                                        (Found unexpected.range
-                                            (blockDetails.error unexpected)
-                                        )
+                                    uncertain unexpected
 
                         else
                             -- This is not the block that was expected.
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -802,13 +981,7 @@ blockNameParser name =
 
 {-| -}
 startWith :
-    { view : Range -> start -> rest -> result
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> result
-    }
+    (start -> rest -> result)
     -> Block start
     -> Block rest
     -> Block result
@@ -820,23 +993,27 @@ startWith fn startBlock endBlock =
                 case desc of
                     StartsWith range start end ->
                         case ( renderBlock startBlock start.found, renderBlock endBlock end.found ) of
-                            ( Ok (Found startRange renderedStart), Ok (Found endRange renderedEnd) ) ->
-                                Ok <|
-                                    Found
-                                        range
-                                        (fn.view range renderedStart renderedEnd)
+                            ( Success renderedStart, Success renderedEnd ) ->
+                                Success (fn renderedStart renderedEnd)
 
-                            ( Ok (Unexpected unexpected), _ ) ->
-                                Ok (Found range (fn.error unexpected))
+                            ( Almost (Recovered firstErrs fst), Almost (Recovered secondErrs snd) ) ->
+                                Almost
+                                    (Recovered
+                                        (mergeErrors firstErrs secondErrs)
+                                        (fn fst snd)
+                                    )
 
-                            ( _, Ok (Unexpected unexpected) ) ->
-                                Ok (Found range (fn.error unexpected))
+                            ( Almost (Uncertain unexpected), _ ) ->
+                                Almost (Uncertain unexpected)
+
+                            ( _, Almost (Uncertain unexpected) ) ->
+                                Almost (Uncertain unexpected)
 
                             _ ->
-                                Err NoMatch
+                                Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -900,11 +1077,14 @@ oneOf oneOfDetails blocks =
             case found of
                 Nothing ->
                     case renderBlock blck description of
-                        Err err ->
+                        Success rendered ->
+                            Just rendered
+
+                        Failure _ ->
                             found
 
-                        Ok rendered ->
-                            Just rendered
+                        _ ->
+                            found
 
                 _ ->
                     found
@@ -916,56 +1096,54 @@ oneOf oneOfDetails blocks =
         { expect = ExpectOneOf expectations
         , converter =
             \desc ->
-                case desc of
-                    OneOf details ->
-                        case details.child of
-                            Found rng found ->
-                                case List.foldl (applyDesc found) Nothing blocks of
-                                    Nothing ->
-                                        Err NoMatch
+                Failure NoMatch
 
-                                    Just foundResult ->
-                                        case foundResult of
-                                            Found r child ->
-                                                Ok
-                                                    (Found r
-                                                        (oneOfDetails.view
-                                                            { id = details.id
-                                                            , options =
-                                                                List.map (Choice details.id) expectations
-                                                            }
-                                                            child
-                                                        )
-                                                    )
-
-                                            Unexpected unexpected ->
-                                                Ok
-                                                    (Found unexpected.range
-                                                        (oneOfDetails.error
-                                                            { id = details.id
-                                                            , range = unexpected.range
-                                                            , problem = unexpected.problem
-                                                            , options =
-                                                                List.map (Choice details.id) expectations
-                                                            }
-                                                        )
-                                                    )
-
-                            Unexpected unexpected ->
-                                Ok
-                                    (Found unexpected.range
-                                        (oneOfDetails.error
-                                            { id = details.id
-                                            , problem = unexpected.problem
-                                            , range = unexpected.range
-                                            , options =
-                                                List.map (Choice details.id) expectations
-                                            }
-                                        )
-                                    )
-
-                    _ ->
-                        Err NoMatch
+        -- case desc of
+        --     OneOf details ->
+        --         case details.child of
+        --             Found rng found ->
+        --                 case List.foldl (applyDesc found) Nothing blocks of
+        --                     Nothing ->
+        --                         Failure NoMatch
+        --                     Just foundResult ->
+        --                         case foundResult of
+        --                             Found r child ->
+        --                                 Ok
+        --                                     (Found r
+        --                                         (oneOfDetails.view
+        --                                             { id = details.id
+        --                                             , options =
+        --                                                 List.map (Choice details.id) expectations
+        --                                             }
+        --                                             child
+        --                                         )
+        --                                     )
+        --                             Unexpected unexpected ->
+        --                                 Ok
+        --                                     (Found unexpected.range
+        --                                         (oneOfDetails.error
+        --                                             { id = details.id
+        --                                             , range = unexpected.range
+        --                                             , problem = unexpected.problem
+        --                                             , options =
+        --                                                 List.map (Choice details.id) expectations
+        --                                             }
+        --                                         )
+        --                                     )
+        --             Unexpected unexpected ->
+        --                 Ok
+        --                     (Found unexpected.range
+        --                         (oneOfDetails.error
+        --                             { id = details.id
+        --                             , problem = unexpected.problem
+        --                             , range = unexpected.range
+        --                             , options =
+        --                                 List.map (Choice details.id) expectations
+        --                             }
+        --                         )
+        --                     )
+        --     _ ->
+        --         Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1068,6 +1246,9 @@ unexpectedInOneOf expectations =
 
 humanReadableExpectations expect =
     case expect of
+        ExpectNothing ->
+            ""
+
         ExpectBlock name exp ->
             "| " ++ name
 
@@ -1150,7 +1331,7 @@ manyOf :
         -> final
     }
     -> List (Block a)
-    -> Block final
+    -> Block (List final)
 manyOf manyOfDetails blocks =
     let
         expectations =
@@ -1160,91 +1341,96 @@ manyOf manyOfDetails blocks =
         { expect = ExpectManyOf expectations
         , converter =
             \desc ->
-                let
-                    applyDesc description blck found =
-                        case found of
-                            Nothing ->
-                                case renderBlock blck description of
-                                    Err err ->
-                                        found
+                Failure NoMatch
 
-                                    Ok rendered ->
-                                        Just rendered
-
-                            _ ->
-                                found
-
-                    -- getRendered : Found Description -> Result AstError (List a) -> Result AstError (List a)
-                    getRendered id choices found ( existingResult, index ) =
-                        case existingResult of
-                            Err err ->
-                                ( Err err, index + 1 )
-
-                            Ok existing ->
-                                case found of
-                                    Unexpected unexpected ->
-                                        ( Ok
-                                            (manyOfDetails.error
-                                                { parent = id
-                                                , options = choices
-                                                , index = index
-                                                , range = unexpected.range
-                                                , problem = unexpected.problem
-                                                }
-                                                :: existing
-                                            )
-                                        , index + 1
-                                        )
-
-                                    Found range child ->
-                                        case List.foldl (applyDesc child) Nothing blocks of
-                                            Nothing ->
-                                                ( Err NoMatch, index + 1 )
-
-                                            Just (Found rng result) ->
-                                                ( Ok
-                                                    (manyOfDetails.view
-                                                        { parent = id
-                                                        , options = choices
-                                                        , index = index
-                                                        }
-                                                        result
-                                                        :: existing
-                                                    )
-                                                , index + 1
-                                                )
-
-                                            Just (Unexpected unexpected) ->
-                                                ( Ok
-                                                    (manyOfDetails.error
-                                                        { parent = id
-                                                        , options = choices
-                                                        , index = index
-                                                        , problem = unexpected.problem
-                                                        , range = unexpected.range
-                                                        }
-                                                        :: existing
-                                                    )
-                                                , index + 1
-                                                )
-                in
-                case desc of
-                    ManyOf many ->
-                        List.foldl (getRendered many.id many.choices) ( Ok [], 0 ) many.children
-                            |> Tuple.first
-                            |> Result.map
-                                (\items ->
-                                    Found many.range
-                                        (manyOfDetails.merge
-                                            { parent = many.id
-                                            , options = many.choices
-                                            }
-                                            (List.reverse items)
-                                        )
-                                )
-
-                    _ ->
-                        Err NoMatch
+        -- let
+        --     applyDesc description blck found =
+        --         case found of
+        --             Nothing ->
+        --                 case renderBlock blck description of
+        --                     Failure _ ->
+        --                         found
+        --                     Success rendered ->
+        --                         Just rendered
+        --                     _ ->
+        --                         found
+        --             _ ->
+        --                 found
+        --     -- getRendered : Found Description -> Result AstError (List a) -> Result AstError (List a)
+        --     getRendered id choices found ( existingResult, index ) =
+        --         case existingResult of
+        --             Err err ->
+        --                 ( Err err, index + 1 )
+        --             Ok existing ->
+        --                 case found of
+        --                     Unexpected unexpected ->
+        --                         ( uncertain unexpected
+        --                             (manyOfDetails.error
+        --                                 { parent = id
+        --                                 , options = choices
+        --                                 , index = index
+        --                                 , range = unexpected.range
+        --                                 , problem = unexpected.problem
+        --                                 }
+        --                                 :: existing
+        --                             )
+        --                         , index + 1
+        --                         )
+        --                     Found range child ->
+        --                         case List.foldl (applyDesc child) Nothing blocks of
+        --                             Nothing ->
+        --                                 ( Failure NoMatch, index + 1 )
+        --                             Just (Success result) ->
+        --                                 ( Success
+        --                                     (manyOfDetails.view
+        --                                         { parent = id
+        --                                         , options = choices
+        --                                         , index = index
+        --                                         }
+        --                                         result
+        --                                         :: existing
+        --                                     )
+        --                                 , index + 1
+        --                                 )
+        --                             Just (Almost (Recovered err result)) ->
+        --                                 ( Almost
+        --                                     (Recovered err
+        --                                         (manyOfDetails.view
+        --                                             { parent = id
+        --                                             , options = choices
+        --                                             , index = index
+        --                                             }
+        --                                             result
+        --                                             :: existing
+        --                                         )
+        --                                     )
+        --                                 , index + 1
+        --                                 )
+        --                             Just (Almost (Uncertain err)) ->
+        --                                 ( Almost (Uncertain err)
+        --                                 , index + 1
+        --                                 )
+        --                             Just (Failure err) ->
+        --                                 ( Failure err
+        --                                 , index + 1
+        --                                 )
+        -- in
+        -- case desc of
+        --     ManyOf many ->
+        --         List.foldl (getRendered many.id many.choices) ( Ok [], 0 ) many.children
+        --             |> Tuple.first
+        --             |> Result.map
+        --                 (\items ->
+        --                     Success
+        --                         (manyOfDetails.merge
+        --                             { parent = many.id
+        --                             , options = many.choices
+        --                             }
+        --                             (List.reverse items)
+        --                         )
+        --                 )
+        --     _ ->
+        --         Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1468,18 +1654,10 @@ nested config =
                     DescribeTree details ->
                         case details.found of
                             ( pos, nestedDescriptors ) ->
-                                case reduceRender (renderTreeNodeSmall config) nestedDescriptors of
-                                    Err invalidAst ->
-                                        Err invalidAst
-
-                                    Ok (Err unexpectedDetails) ->
-                                        Ok (Unexpected unexpectedDetails)
-
-                                    Ok (Ok list) ->
-                                        Ok (Found pos list)
+                                reduceRender (renderTreeNodeSmall config) nestedDescriptors
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 -- TODO: AHHHH, A NEW SEED NEEDS TO GET CREATED
@@ -1586,9 +1764,7 @@ type alias New =
 record2 :
     { name : String
     , view :
-        { range : Range
-        }
-        -> one
+        one
         -> two
         -> data
     , error :
@@ -1617,19 +1793,19 @@ record2 record field1 field2 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1650,7 +1826,7 @@ record2 record field1 field2 =
 {-| -}
 record3 :
     { name : String
-    , view : { range : Range } -> one -> two -> three -> data
+    , view : one -> two -> three -> data
     , error :
         { range : Range
         , problem : Error.Error
@@ -1679,20 +1855,20 @@ record3 record field1 field2 field3 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1714,7 +1890,7 @@ record3 record field1 field2 field3 =
 {-| -}
 record4 :
     { name : String
-    , view : { range : Range } -> one -> two -> three -> four -> data
+    , view : one -> two -> three -> four -> data
     , error :
         { range : Range
         , problem : Error.Error
@@ -1745,21 +1921,21 @@ record4 record field1 field2 field3 field4 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
                                         |> Result.map2 applyField (getField field4 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1782,7 +1958,7 @@ record4 record field1 field2 field3 field4 =
 {-| -}
 record5 :
     { name : String
-    , view : { range : Range } -> one -> two -> three -> four -> five -> data
+    , view : one -> two -> three -> four -> five -> data
     , error :
         { range : Range
         , problem : Error.Error
@@ -1815,22 +1991,22 @@ record5 record field1 field2 field3 field4 field5 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
                                         |> Result.map2 applyField (getField field4 fieldDescriptions)
                                         |> Result.map2 applyField (getField field5 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1854,7 +2030,7 @@ record5 record field1 field2 field3 field4 field5 =
 {-| -}
 record6 :
     { name : String
-    , view : { range : Range } -> one -> two -> three -> four -> five -> six -> data
+    , view : one -> two -> three -> four -> five -> six -> data
     , error :
         { range : Range
         , problem : Error.Error
@@ -1889,23 +2065,23 @@ record6 record field1 field2 field3 field4 field5 field6 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
                                         |> Result.map2 applyField (getField field4 fieldDescriptions)
                                         |> Result.map2 applyField (getField field5 fieldDescriptions)
                                         |> Result.map2 applyField (getField field6 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1930,7 +2106,7 @@ record6 record field1 field2 field3 field4 field5 field6 =
 {-| -}
 record7 :
     { name : String
-    , view : { range : Range } -> one -> two -> three -> four -> five -> six -> seven -> data
+    , view : one -> two -> three -> four -> five -> six -> seven -> data
     , error :
         { range : Range
         , problem : Error.Error
@@ -1967,7 +2143,7 @@ record7 record field1 field2 field3 field4 field5 field6 field7 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -1975,16 +2151,16 @@ record7 record field1 field2 field3 field4 field5 field6 field7 =
                                         |> Result.map2 applyField (getField field5 fieldDescriptions)
                                         |> Result.map2 applyField (getField field6 fieldDescriptions)
                                         |> Result.map2 applyField (getField field7 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2010,7 +2186,7 @@ record7 record field1 field2 field3 field4 field5 field6 field7 =
 {-| -}
 record8 :
     { name : String
-    , view : { range : Range } -> one -> two -> three -> four -> five -> six -> seven -> eight -> data
+    , view : one -> two -> three -> four -> five -> six -> seven -> eight -> data
     , error :
         { range : Range
         , problem : Error.Error
@@ -2049,7 +2225,7 @@ record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -2058,16 +2234,16 @@ record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
                                         |> Result.map2 applyField (getField field6 fieldDescriptions)
                                         |> Result.map2 applyField (getField field7 fieldDescriptions)
                                         |> Result.map2 applyField (getField field8 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2094,7 +2270,7 @@ record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
 {-| -}
 record9 :
     { name : String
-    , view : { range : Range } -> one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> data
+    , view : one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> data
     , error :
         { range : Range
         , problem : Error.Error
@@ -2135,7 +2311,7 @@ record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -2145,16 +2321,16 @@ record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
                                         |> Result.map2 applyField (getField field7 fieldDescriptions)
                                         |> Result.map2 applyField (getField field8 fieldDescriptions)
                                         |> Result.map2 applyField (getField field9 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2182,7 +2358,7 @@ record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
 {-| -}
 record10 :
     { name : String
-    , view : { range : Range } -> one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> ten -> data
+    , view : one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> ten -> data
     , error :
         { range : Range
         , problem : Error.Error
@@ -2225,7 +2401,7 @@ record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 f
                         if details.name == record.name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok (record.view { range = pos }))
+                                    Ok (Ok record.view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -2236,16 +2412,16 @@ record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 f
                                         |> Result.map2 applyField (getField field8 fieldDescriptions)
                                         |> Result.map2 applyField (getField field9 fieldDescriptions)
                                         |> Result.map2 applyField (getField field10 fieldDescriptions)
-                                        |> renderRecordResult record.error pos
+                                        |> renderRecordResult pos
 
                                 Unexpected unexpected ->
-                                    Ok (Found unexpected.range (record.error unexpected))
+                                    uncertain unexpected
 
                         else
-                            Err NoMatch
+                            Failure NoMatch
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2340,16 +2516,17 @@ renderText :
     , replacements : List Replacement
     }
     -> Description
-    -> Result AstError (Found (List rendered))
+    -> Outcome AstError (Uncertain (List rendered)) (List rendered)
 renderText options description =
     case description of
         DescribeText details ->
-            List.foldl (convertTextDescription options) [] details.text
-                |> (Found details.range << List.reverse)
-                |> Ok
+            -- List.foldl (convertTextDescription options) [] details.text
+            --     |> (Found details.range << List.reverse)
+            --     |> Success
+            Success []
 
         _ ->
-            Err NoMatch
+            Failure NoMatch
 
 
 convertTextDescription :
@@ -2370,7 +2547,7 @@ convertTextDescription options comp found =
     --             convertedInline =
     --                 List.foldl
     --                     (convertMatchedInline details.attributes)
-    --                     (Err NoMatch)
+    --                     (Failure NoMatch)
     --                     options.inlines
     --         in
     --         case convertedInline of
@@ -2383,7 +2560,7 @@ convertTextDescription options comp found =
     --             Ok list ->
     --                 list ++ found
     --     InlineAnnotation details ->
-    --         case List.foldl (renderInline details.name (List.reverse details.attributes)) (Err NoMatch) options.inlines of
+    --         case List.foldl (renderInline details.name (List.reverse details.attributes)) (Failure NoMatch) options.inlines of
     --             Err err ->
     --                 options.error
     --                     { range = details.range
@@ -2393,7 +2570,7 @@ convertTextDescription options comp found =
     --             Ok list ->
     --                 list ++ found
     --     -- DescribeInline name range foundInline ->
-    --     -- case List.foldl (renderInline name range (List.reverse foundInline)) (Err NoMatch) options.inlines of
+    --     -- case List.foldl (renderInline name range (List.reverse foundInline)) (Failure NoMatch) options.inlines of
     --     --     Err err ->
     --     --         options.error
     --     --             { range = range
@@ -2461,7 +2638,7 @@ type alias Replacement =
 
 type Inline data
     = Inline
-        { converter : List InlineAttribute -> Result AstError (List data)
+        { converter : List InlineAttribute -> Outcome AstError (Uncertain (List data)) (List data)
         , expect : InlineExpectation
         }
 
@@ -2472,7 +2649,7 @@ token name result =
     Inline
         { converter =
             \descriptor ->
-                Ok [ result ]
+                Success [ result ]
         , expect =
             ExpectToken name []
         }
@@ -2484,7 +2661,7 @@ annotation name result =
     Inline
         { converter =
             \descriptor ->
-                Ok [ result ]
+                Success [ result ]
         , expect =
             ExpectAnnotation name []
         }
@@ -2500,15 +2677,11 @@ attrString name newInline =
                     \descriptors ->
                         case descriptors of
                             [] ->
-                                Err NoMatch
+                                Failure NoMatch
 
                             (AttrString attr) :: remaining ->
-                                case details.converter remaining of
-                                    Err err ->
-                                        Err err
-
-                                    Ok renderers ->
-                                        Ok (List.map (\x -> x attr.value) renderers)
+                                details.converter remaining
+                                    |> mapSuccessAndRecovered (List.map (\x -> x attr.value))
                 , expect =
                     case details.expect of
                         ExpectToken tokenName attrs ->
@@ -2528,21 +2701,18 @@ getInlineExpectation (Inline details) =
 
 
 {-| -}
-multiline :
-    { view : Id String -> String -> a
-    }
-    -> Block a
-multiline details =
+multiline : Block String
+multiline =
     Value
         { expect = ExpectMultiline "REPLACE"
         , converter =
             \desc ->
                 case desc of
                     DescribeMultiline id range str ->
-                        Ok (Found range (details.view id str))
+                        Success str
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2567,21 +2737,18 @@ multiline details =
 
 
 {-| -}
-string :
-    { view : Id String -> String -> a
-    }
-    -> Block a
-string details =
+string : Block String
+string =
     Value
         { expect = ExpectString "-- Replace Me --"
         , converter =
             \desc ->
                 case desc of
                     DescribeString id range str ->
-                        Ok (Found range (details.view id str))
+                        Success str
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2607,74 +2774,66 @@ string details =
         }
 
 
-{-| Parse an ISO-8601 date string.
 
-Format: `YYYY-MM-DDTHH:mm:ss.SSSZ`
-
-Though you don't need to specify all segments, so `YYYY-MM-DD` works as well.
-
-Results in a `Posix` integer, which works well with [elm/time](https://package.elm-lang.org/packages/elm/time/latest/).
-
--}
-date :
-    { view : Id Time.Posix -> Time.Posix -> a
-    }
-    -> Block a
-date details =
-    Value
-        { expect = ExpectDate (Time.millisToPosix 0)
-        , converter =
-            \desc ->
-                case desc of
-                    DescribeDate found ->
-                        Ok (mapFound (\( str_, fl ) -> details.view found.id fl) found.found)
-
-                    _ ->
-                        Err NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( id, newSeed ) =
-                        Id.step seed
-                in
-                ( newSeed
-                , Parser.map
-                    (\( pos, parsedPosix ) ->
-                        case parsedPosix of
-                            Err str ->
-                                DescribeDate
-                                    { id = id
-                                    , found =
-                                        Unexpected
-                                            { range = pos
-                                            , problem = Error.BadDate str
-                                            }
-                                    }
-
-                            Ok ( str, posix ) ->
-                                DescribeDate
-                                    { id = id
-                                    , found = Found pos ( str, posix )
-                                    }
-                    )
-                    (Parse.withRange
-                        (Parser.getChompedString
-                            (Parser.chompWhile
-                                (\c -> c /= '\n')
-                            )
-                            |> Parser.andThen
-                                (\str ->
-                                    case Iso8601.toTime str of
-                                        Err err ->
-                                            Parser.succeed (Err str)
-
-                                        Ok parsedPosix ->
-                                            Parser.succeed (Ok ( str, parsedPosix ))
-                                )
-                        )
-                    )
-                )
-        }
+-- {-| Parse an ISO-8601 date string.
+-- Format: `YYYY-MM-DDTHH:mm:ss.SSSZ`
+-- Though you don't need to specify all segments, so `YYYY-MM-DD` works as well.
+-- Results in a `Posix` integer, which works well with [elm/time](https://package.elm-lang.org/packages/elm/time/latest/).
+-- -}
+-- date :
+--      Block Time.Posix
+-- date =
+--     Value
+--         { expect = ExpectDate (Time.millisToPosix 0)
+--         , converter =
+--             \desc ->
+--                 case desc of
+--                     DescribeDate found ->
+--                         Success (mapFound (\( str_, fl ) -> details.view found.id fl) found.found)
+--                     _ ->
+--                         Failure NoMatch
+--         , parser =
+--             \seed ->
+--                 let
+--                     ( id, newSeed ) =
+--                         Id.step seed
+--                 in
+--                 ( newSeed
+--                 , Parser.map
+--                     (\( pos, parsedPosix ) ->
+--                         case parsedPosix of
+--                             Err str ->
+--                                 DescribeDate
+--                                     { id = id
+--                                     , found =
+--                                         Unexpected
+--                                             { range = pos
+--                                             , problem = Error.BadDate str
+--                                             }
+--                                     }
+--                             Ok ( str, posix ) ->
+--                                 DescribeDate
+--                                     { id = id
+--                                     , found = Found pos ( str, posix )
+--                                     }
+--                     )
+--                     (Parse.withRange
+--                         (Parser.getChompedString
+--                             (Parser.chompWhile
+--                                 (\c -> c /= '\n')
+--                             )
+--                             |> Parser.andThen
+--                                 (\str ->
+--                                     case Iso8601.toTime str of
+--                                         Err err ->
+--                                             Parser.succeed (Err str)
+--                                         Ok parsedPosix ->
+--                                             Parser.succeed (Ok ( str, parsedPosix ))
+--                                 )
+--                         )
+--                     )
+--                 )
+--         }
 
 
 foundToResult found err =
@@ -2686,53 +2845,49 @@ foundToResult found err =
             Err err
 
 
-{-| -}
-exactly : String -> value -> Block value
-exactly key value =
-    Value
-        { expect = ExpectStringExactly key
-        , converter =
-            \desc ->
-                case desc of
-                    DescribeStringExactly range existingKey ->
-                        if key == existingKey then
-                            Ok (Found range value)
 
-                        else
-                            Err NoMatch
-
-                    _ ->
-                        Err NoMatch
-        , parser =
-            skipSeed
-                (Parser.succeed
-                    (\start _ end ->
-                        DescribeStringExactly { start = start, end = end } key
-                    )
-                    |= Parse.getPosition
-                    |= Parser.token (Parser.Token key (Expecting key))
-                    |= Parse.getPosition
-                )
-        }
+-- {-| -}
+-- exactly : String -> value -> Block value
+-- exactly key value =
+--     Value
+--         { expect = ExpectStringExactly key
+--         , converter =
+--             \desc ->
+--                 case desc of
+--                     DescribeStringExactly range existingKey ->
+--                         if key == existingKey then
+--                             Ok (Found range value)
+--                         else
+--                             Failure NoMatch
+--                     _ ->
+--                         Failure NoMatch
+--         , parser =
+--             skipSeed
+--                 (Parser.succeed
+--                     (\start _ end ->
+--                         DescribeStringExactly { start = start, end = end } key
+--                     )
+--                     |= Parse.getPosition
+--                     |= Parser.token (Parser.Token key (Expecting key))
+--                     |= Parse.getPosition
+--                 )
+--         }
 
 
 {-| Parse either `True` or `False`.
 -}
-bool :
-    { view : Id Bool -> Bool -> a
-    }
-    -> Block a
-bool { view } =
+bool : Block Bool
+bool =
     Value
         { expect = ExpectBoolean False
         , converter =
             \desc ->
                 case desc of
                     DescribeBoolean details ->
-                        Ok (mapFound (view details.id) details.found)
+                        foundToOutcome details.found
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2771,22 +2926,28 @@ bool { view } =
         }
 
 
+foundToOutcome found =
+    case found of
+        Found rng i ->
+            Success i
+
+        Unexpected unexpected ->
+            Almost (Uncertain ( unexpected, [] ))
+
+
 {-| Parse an `Int` block.
 -}
-int :
-    { view : Id Int -> Int -> a
-    }
-    -> Block a
-int { view } =
+int : Block Int
+int =
     Value
         { converter =
             \desc ->
                 case desc of
                     DescribeInteger details ->
-                        Ok (mapFound (view details.id) details.found)
+                        foundToOutcome details.found
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , expect = ExpectInteger 0
         , parser =
             \seed ->
@@ -2808,26 +2969,18 @@ int { view } =
 
 
 {-| -}
-float :
-    { view : Id Float -> Float -> a
-    }
-    -> Block a
-float { view } =
+float : Block Float
+float =
     Value
         { converter =
             \desc ->
                 case desc of
                     DescribeFloat details ->
-                        Ok
-                            (mapFound
-                                (\( str_, fl ) ->
-                                    view details.id fl
-                                )
-                                details.found
-                            )
+                        foundToOutcome details.found
+                            |> mapSuccess Tuple.second
 
                     _ ->
-                        Err NoMatch
+                        Failure NoMatch
         , expect = ExpectFloat 0
         , parser =
             \seed ->
@@ -2846,145 +2999,133 @@ float { view } =
         }
 
 
-{-| -}
-intBetween :
-    { min : Int
-    , max : Int
-    , view : Id Int -> Int -> a
-    }
-    -> Block a
-intBetween bounds =
-    let
-        top =
-            max bounds.min bounds.max
 
-        bottom =
-            min bounds.min bounds.max
-    in
-    Value
-        { expect =
-            ExpectIntBetween
-                { min = bottom
-                , max = top
-                , default = bottom
-                }
-        , converter =
-            \desc ->
-                case desc of
-                    DescribeIntBetween details ->
-                        Ok (mapFound (bounds.view details.id) details.found)
-
-                    _ ->
-                        Err NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( id, newSeed ) =
-                        Id.step seed
-                in
-                ( newSeed
-                , Parser.map
-                    (\found ->
-                        DescribeIntBetween
-                            { min = bottom
-                            , max = top
-                            , id = id
-                            , found =
-                                case found of
-                                    Found rng i ->
-                                        if i >= bottom && i <= top then
-                                            found
-
-                                        else
-                                            Unexpected
-                                                { range = rng
-                                                , problem =
-                                                    Error.IntOutOfRange
-                                                        { found = i
-                                                        , min = bottom
-                                                        , max = top
-                                                        }
-                                                }
-
-                                    _ ->
-                                        found
-                            }
-                    )
-                    integer
-                )
-        }
-
-
-{-| -}
-floatBetween :
-    { min : Float
-    , max : Float
-    , view : Id Float -> Float -> a
-    }
-    -> Block a
-floatBetween bounds =
-    let
-        top =
-            max bounds.min bounds.max
-
-        bottom =
-            min bounds.min bounds.max
-    in
-    Value
-        { expect =
-            ExpectFloatBetween
-                { min = bounds.min
-                , max = bounds.max
-                , default = bounds.min
-                }
-        , converter =
-            \desc ->
-                case desc of
-                    DescribeFloatBetween details ->
-                        Ok (mapFound (\( str_, fl ) -> bounds.view details.id fl) details.found)
-
-                    _ ->
-                        Err NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( id, newSeed ) =
-                        Id.step seed
-                in
-                ( newSeed
-                , Parser.map
-                    (\found ->
-                        DescribeFloatBetween
-                            { min = bottom
-                            , max = top
-                            , id = id
-                            , found =
-                                case found of
-                                    Found rng ( str, i ) ->
-                                        if i >= bottom && i <= top then
-                                            found
-
-                                        else
-                                            Unexpected
-                                                { range = rng
-                                                , problem =
-                                                    Error.FloatOutOfRange
-                                                        { found = i
-                                                        , min = bottom
-                                                        , max = top
-                                                        }
-                                                }
-
-                                    _ ->
-                                        found
-                            }
-                    )
-                    floating
-                )
-        }
-
-
-
+-- {-| -}
+-- intBetween :
+--     { min : Int
+--     , max : Int
+--     , view : Id Int -> Int -> a
+--     }
+--     -> Block a
+-- intBetween bounds =
+--     let
+--         top =
+--             max bounds.min bounds.max
+--         bottom =
+--             min bounds.min bounds.max
+--     in
+--     Value
+--         { expect =
+--             ExpectIntBetween
+--                 { min = bottom
+--                 , max = top
+--                 , default = bottom
+--                 }
+--         , converter =
+--             \desc ->
+--                 case desc of
+--                     DescribeIntBetween details ->
+--                         Ok (mapFound (bounds.view details.id) details.found)
+--                     _ ->
+--                         Failure NoMatch
+--         , parser =
+--             \seed ->
+--                 let
+--                     ( id, newSeed ) =
+--                         Id.step seed
+--                 in
+--                 ( newSeed
+--                 , Parser.map
+--                     (\found ->
+--                         DescribeIntBetween
+--                             { min = bottom
+--                             , max = top
+--                             , id = id
+--                             , found =
+--                                 case found of
+--                                     Found rng i ->
+--                                         if i >= bottom && i <= top then
+--                                             found
+--                                         else
+--                                             Unexpected
+--                                                 { range = rng
+--                                                 , problem =
+--                                                     Error.IntOutOfRange
+--                                                         { found = i
+--                                                         , min = bottom
+--                                                         , max = top
+--                                                         }
+--                                                 }
+--                                     _ ->
+--                                         found
+--                             }
+--                     )
+--                     integer
+--                 )
+--         }
+-- {-| -}
+-- floatBetween :
+--     { min : Float
+--     , max : Float
+--     , view : Id Float -> Float -> a
+--     }
+--     -> Block a
+-- floatBetween bounds =
+--     let
+--         top =
+--             max bounds.min bounds.max
+--         bottom =
+--             min bounds.min bounds.max
+--     in
+--     Value
+--         { expect =
+--             ExpectFloatBetween
+--                 { min = bounds.min
+--                 , max = bounds.max
+--                 , default = bounds.min
+--                 }
+--         , converter =
+--             \desc ->
+--                 case desc of
+--                     DescribeFloatBetween details ->
+--                         Ok (mapFound (\( str_, fl ) -> bounds.view details.id fl) details.found)
+--                     _ ->
+--                         Failure NoMatch
+--         , parser =
+--             \seed ->
+--                 let
+--                     ( id, newSeed ) =
+--                         Id.step seed
+--                 in
+--                 ( newSeed
+--                 , Parser.map
+--                     (\found ->
+--                         DescribeFloatBetween
+--                             { min = bottom
+--                             , max = top
+--                             , id = id
+--                             , found =
+--                                 case found of
+--                                     Found rng ( str, i ) ->
+--                                         if i >= bottom && i <= top then
+--                                             found
+--                                         else
+--                                             Unexpected
+--                                                 { range = rng
+--                                                 , problem =
+--                                                     Error.FloatOutOfRange
+--                                                         { found = i
+--                                                         , min = bottom
+--                                                         , max = top
+--                                                         }
+--                                                 }
+--                                     _ ->
+--                                         found
+--                             }
+--                     )
+--                     floating
+--                 )
+--         }
 {- Parser Heleprs -}
 
 
@@ -3276,14 +3417,14 @@ parseRecord recordName expectations fields =
                             Found (backtrackCharacters 2 pos) ok
                         }
 
-                Err ( maybePosition, problem ) ->
+                Err ( maybePosition, prob ) ->
                     Record
                         { expected = expectations
                         , name = recordName
                         , found =
                             Unexpected
                                 { range = Maybe.withDefault (backtrackCharacters 2 pos) maybePosition
-                                , problem = problem
+                                , problem = prob
                                 }
                         }
         )
@@ -3369,36 +3510,28 @@ resultToFound result =
         Ok ( range, desc ) ->
             Found range desc
 
-        Err ( range, problem ) ->
+        Err ( range, prob ) ->
             Unexpected
                 { range = range
-                , problem = problem
+                , problem = prob
                 }
 
 
-renderRecordResult renderUnexpected pos result =
+renderRecordResult pos result =
     case result of
         Ok parsedCorrectly ->
             case parsedCorrectly of
                 Ok rendered ->
-                    Ok (Found pos rendered)
+                    Success rendered
 
                 Err unexpected ->
-                    Ok
-                        (Found
-                            pos
-                            (renderUnexpected unexpected)
-                        )
+                    uncertain unexpected
 
-        Err problem ->
-            Ok
-                (Found pos
-                    (renderUnexpected
-                        { problem = problem
-                        , range = pos
-                        }
-                    )
-                )
+        Err prob ->
+            uncertain
+                { problem = prob
+                , range = pos
+                }
 
 
 type alias RecordFields =
@@ -3639,12 +3772,20 @@ applyField foundField possiblyFn =
                     Err unexpected
 
 
-getField : Field value -> List ( String, Found Description ) -> Result Error.Error (Found value)
+getField :
+    Field value
+    -> List ( String, Found Description )
+    -> Result Error.Error (Found value)
 getField (Field name fieldBlock) fields =
     List.foldl (matchField name fieldBlock) (Err (Error.MissingFields [ name ])) fields
 
 
-matchField : String -> Block value -> ( String, Found Description ) -> Result Error.Error (Found value) -> Result Error.Error (Found value)
+matchField :
+    String
+    -> Block value
+    -> ( String, Found Description )
+    -> Result Error.Error (Found value)
+    -> Result Error.Error (Found value)
 matchField targetName targetBlock ( name, foundDescription ) existing =
     case existing of
         Ok _ ->
@@ -3655,10 +3796,13 @@ matchField targetName targetBlock ( name, foundDescription ) existing =
                 case foundDescription of
                     Found rng description ->
                         case renderBlock targetBlock description of
-                            Ok rendered ->
-                                Ok rendered
+                            Success rendered ->
+                                Ok (Found rng rendered)
 
-                            Err invalidAst ->
+                            Almost invalidAst ->
+                                Err err
+
+                            Failure _ ->
                                 Err err
 
                     Unexpected unexpected ->
@@ -3747,33 +3891,41 @@ emptyTreeBuilder =
         }
 
 
-reduceRender : (thing -> Result AstError (Found other)) -> List thing -> Result AstError (Result UnexpectedDetails (List other))
+reduceRender :
+    (thing -> Outcome AstError (Uncertain other) other)
+    -> List thing
+    -> Outcome AstError (Uncertain (List other)) (List other)
 reduceRender fn list =
-    List.foldl
-        (\x gathered ->
-            case gathered of
-                Err _ ->
-                    gathered
+    list
+        |> List.foldl
+            (\x gathered ->
+                case gathered of
+                    Success remain ->
+                        case fn x of
+                            Success newThing ->
+                                Success (newThing :: remain)
 
-                Ok (Err unexpected) ->
-                    gathered
+                            Almost (Uncertain err) ->
+                                Almost (Uncertain err)
 
-                Ok (Ok remain) ->
-                    case fn x of
-                        Err err ->
-                            Err err
+                            Almost (Recovered err data) ->
+                                Almost
+                                    (Recovered err
+                                        (data :: remain)
+                                    )
 
-                        Ok foundSuccess ->
-                            case foundSuccess of
-                                Found _ success ->
-                                    Ok (Ok (success :: remain))
+                            Failure f ->
+                                Failure f
 
-                                Unexpected unexpected ->
-                                    Ok (Err unexpected)
-        )
-        (Ok (Ok []))
-        list
-        |> Result.map (Result.map List.reverse)
+                    almostOrfailure ->
+                        almostOrfailure
+            )
+            (Success [])
+        |> mapSuccess List.reverse
+
+
+mergeErrors ( h1, r1 ) ( h2, r2 ) =
+    ( h1, r1 ++ h2 :: r2 )
 
 
 renderTreeNodeSmall :
@@ -3781,7 +3933,7 @@ renderTreeNodeSmall :
     , start : Block icon
     }
     -> Nested ( Description, List Description )
-    -> Result AstError (Found (Nested ( icon, List item )))
+    -> Outcome AstError (Uncertain (Nested ( icon, List item ))) (Nested ( icon, List item ))
 renderTreeNodeSmall config (Nested cursor) =
     let
         renderedChildren =
@@ -3795,34 +3947,79 @@ renderTreeNodeSmall config (Nested cursor) =
                     )
     in
     case renderedContent of
-        ( Ok (Found pos icon), Ok (Ok content) ) ->
-            case renderedChildren of
-                Err err ->
-                    Err err
+        ( Success icon, Success content ) ->
+            mapSuccessAndRecovered
+                (\children ->
+                    Nested
+                        { content = ( icon, content )
+                        , children = children
+                        }
+                )
+                renderedChildren
 
-                Ok (Ok successfullyRenderedChildren) ->
-                    Ok
-                        (Found pos <|
-                            Nested
+        ( Success icon, Almost (Recovered contentErrors content) ) ->
+            renderedChildren
+                |> mapSuccessAndRecovered
+                    (\children ->
+                        Nested
+                            { content = ( icon, content )
+                            , children = children
+                            }
+                    )
+                |> logErrors contentErrors
+
+        ( Almost (Recovered iconErrors icon), Success content ) ->
+            renderedChildren
+                |> mapSuccessAndRecovered
+                    (\children ->
+                        Nested
+                            { content = ( icon, content )
+                            , children = children
+                            }
+                    )
+                |> logErrors iconErrors
+
+        ( Almost (Recovered iconErrors icon), Almost (Recovered contentErrors content) ) ->
+            case renderedChildren of
+                Success successfullyRenderedChildren ->
+                    Almost
+                        (Recovered
+                            (mergeErrors iconErrors contentErrors)
+                            (Nested
                                 { content = ( icon, content )
                                 , children = successfullyRenderedChildren
                                 }
+                            )
                         )
 
-                Ok (Err unexpected) ->
-                    Ok (Unexpected unexpected)
+                Almost (Recovered errors result) ->
+                    Almost
+                        (Recovered
+                            (mergeErrors errors (mergeErrors iconErrors contentErrors))
+                            (Nested
+                                { content = ( icon, content )
+                                , children = result
+                                }
+                            )
+                        )
 
-        ( Ok (Unexpected unexpected), _ ) ->
-            Ok (Unexpected unexpected)
+                Almost (Uncertain errs) ->
+                    Almost (Uncertain errs)
 
-        ( _, Ok (Err unexpected) ) ->
-            Ok (Unexpected unexpected)
+                Failure failure ->
+                    Failure failure
 
-        ( Err err, _ ) ->
-            Err err
+        ( Almost (Uncertain unexpected), _ ) ->
+            Almost (Uncertain unexpected)
 
-        ( _, Err err ) ->
-            Err err
+        ( _, Almost (Uncertain unexpected) ) ->
+            Almost (Uncertain unexpected)
+
+        ( Failure err, _ ) ->
+            Failure err
+
+        ( _, Failure err ) ->
+            Failure err
 
 
 buildTree baseIndent items =

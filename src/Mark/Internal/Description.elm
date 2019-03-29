@@ -43,7 +43,6 @@ type Parsed
         { errors : List Error
         , found : Found Description
         , expected : Expectation
-        , focus : Maybe Position
         , initialSeed : Id.Seed
         , currentSeed : Id.Seed
         }
@@ -162,6 +161,7 @@ type Description
         { id : Id Time.Posix
         , found : Found ( String, Time.Posix )
         }
+    | DescribeNothing
 
 
 {-| -}
@@ -252,6 +252,7 @@ type Expectation
     | ExpectStringExactly String
     | ExpectDate Time.Posix
     | ExpectTree Expectation Expectation
+    | ExpectNothing
 
 
 {-| -}
@@ -276,6 +277,14 @@ choiceExpectation (Choice id exp) =
 
 match description exp =
     case description of
+        DescribeNothing ->
+            case exp of
+                ExpectNothing ->
+                    True
+
+                _ ->
+                    False
+
         DescribeBlock details ->
             case exp of
                 ExpectBlock expectedName expectedChild ->
@@ -676,6 +685,9 @@ isPrimitive description =
         DescribeDate found ->
             True
 
+        DescribeNothing ->
+            False
+
 
 {-| -}
 getContainingDescriptions : Description -> { start : Int, end : Int } -> List Description
@@ -799,6 +811,9 @@ getContainingDescriptions description offset =
 
             else
                 []
+
+        DescribeNothing ->
+            []
 
 
 getWithinNested offset (Nested nest) =
@@ -952,6 +967,9 @@ dedent cursor =
 writeDescription : Description -> PrintCursor -> PrintCursor
 writeDescription description cursor =
     case description of
+        DescribeNothing ->
+            cursor
+
         DescribeBlock details ->
             cursor
                 |> write ("| " ++ details.name)
