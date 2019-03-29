@@ -770,23 +770,126 @@ type alias CustomError =
     }
 
 
+{-| -}
+verify : (a -> Result CustomError b) -> Block a -> Block b
+verify fn myBlock =
+    case myBlock of
+        Block name details ->
+            Block name
+                { expect = details.expect
+                , parser = details.parser
+                , converter =
+                    \desc ->
+                        case details.converter desc of
+                            Success a ->
+                                case fn a of
+                                    Ok new ->
+                                        Success new
 
--- {-| -}
--- verify : (a -> Result CustomError b) -> Block a -> Block b
--- verify fn myBlock =
---     case myBlock of
---         Block name details ->
---             Block name
---                 { expect = details.expect
---                 , parser = details.parser
---                 , converter = Result.map (mapFound fn) myBlock
---                 }
---         Value details ->
---             Debug.todo "Oh boy"
--- -- {-| -}
--- -- onError : (UnexpectedDetails -> a) -> Block a -> Block a
--- -- onError myBlock =
--- --     myBlock
+                                    Err newErr ->
+                                        uncertain
+                                            { problem = Error.Custom newErr
+                                            , range = startDocRange
+                                            }
+
+                            Almost (Recovered err a) ->
+                                case fn a of
+                                    Ok new ->
+                                        Almost (Recovered err new)
+
+                                    Err newErr ->
+                                        uncertain
+                                            { problem = Error.Custom newErr
+                                            , range = startDocRange
+                                            }
+
+                            Almost (Uncertain x) ->
+                                Almost (Uncertain x)
+
+                            Failure f ->
+                                Failure f
+                }
+
+        Value details ->
+            Value
+                { expect = details.expect
+                , parser = details.parser
+                , converter =
+                    \desc ->
+                        case details.converter desc of
+                            Success a ->
+                                case fn a of
+                                    Ok new ->
+                                        Success new
+
+                                    Err newErr ->
+                                        uncertain
+                                            { problem = Error.Custom newErr
+                                            , range = startDocRange
+                                            }
+
+                            Almost (Recovered err a) ->
+                                case fn a of
+                                    Ok new ->
+                                        Almost (Recovered err new)
+
+                                    Err newErr ->
+                                        uncertain
+                                            { problem = Error.Custom newErr
+                                            , range = startDocRange
+                                            }
+
+                            Almost (Uncertain x) ->
+                                Almost (Uncertain x)
+
+                            Failure f ->
+                                Failure f
+                }
+
+
+{-| -}
+onError : (List UnexpectedDetails -> a) -> Block a -> Block a
+onError recover myBlock =
+    case myBlock of
+        Block name details ->
+            Block name
+                { expect = details.expect
+                , parser = details.parser
+                , converter =
+                    \desc ->
+                        case details.converter desc of
+                            Success a ->
+                                Success a
+
+                            Almost (Recovered err a) ->
+                                Almost (Recovered err a)
+
+                            Almost (Uncertain x) ->
+                                Almost (Recovered x (recover (errorsToList x)))
+
+                            Failure f ->
+                                Failure f
+                }
+
+        Value details ->
+            Value
+                { expect = details.expect
+                , parser = details.parser
+                , converter =
+                    \desc ->
+                        case details.converter desc of
+                            Success a ->
+                                Success a
+
+                            Almost (Recovered err a) ->
+                                Almost (Recovered err a)
+
+                            Almost (Uncertain x) ->
+                                Almost (Recovered x (recover (errorsToList x)))
+
+                            Failure f ->
+                                Failure f
+                }
 
 
 {-| -}

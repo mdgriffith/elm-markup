@@ -7,6 +7,9 @@ module Mark.Edit exposing
 {-|
 
 
+# Editable Blocks
+
+
 # Making Edits
 
 @docs update
@@ -308,6 +311,9 @@ match description exp =
 
                 _ ->
                     False
+
+        DescribeNothing ->
+            False
 
 
 {-| Is the first expectation a subset of the second?
@@ -657,6 +663,9 @@ makeEdit cursor desc =
 
         DescribeDate details ->
             replacePrimitive cursor (foundStart details.found) desc
+
+        DescribeNothing ->
+            desc
 
 
 foundStart found =
@@ -1401,11 +1410,17 @@ isPrimitive description =
         DescribeDate found ->
             True
 
+        DescribeNothing ->
+            True
+
 
 {-| -}
 getContainingDescriptions : Description -> { start : Int, end : Int } -> List Description
 getContainingDescriptions description offset =
     case description of
+        DescribeNothing ->
+            []
+
         DescribeBlock details ->
             getWithinFound offset details.found
 
@@ -1741,3 +1756,336 @@ setRecordField targetFieldName fieldSetter ( fieldName, fieldExp ) gathered =
 
             else
                 NotYet (( fieldName, fieldExp ) :: fields)
+
+
+
+{- EDITABLE BLOCKS -}
+-- {-| -}
+-- oneOf :
+--     { view :
+--         { id : Id Options
+--         , options : List (Choice (Id Options) Expectation)
+--         }
+--         -> a
+--         -> b
+--     , error :
+--         { id : Id Options
+--         , options : List (Choice (Id Options) Expectation)
+--         , range : Range
+--         , problem : Error.Error
+--         }
+--         -> b
+--     }
+--     -> List (Block a)
+--     -> Block b
+-- oneOf oneOfDetails blocks =
+--     let
+--         applyDesc description blck found =
+--             case found of
+--                 Nothing ->
+--                     case renderBlock blck description of
+--                         Success rendered ->
+--                             Just rendered
+--                         Failure _ ->
+--                             found
+--                         _ ->
+--                             found
+--                 _ ->
+--                     found
+--         expectations =
+--             List.map getBlockExpectation blocks
+--     in
+--     Value
+--         { expect = ExpectOneOf expectations
+--         , converter =
+--             \desc ->
+--                 Failure NoMatch
+--         -- case desc of
+--         --     OneOf details ->
+--         --         case details.child of
+--         --             Found rng found ->
+--         --                 case List.foldl (applyDesc found) Nothing blocks of
+--         --                     Nothing ->
+--         --                         Failure NoMatch
+--         --                     Just foundResult ->
+--         --                         case foundResult of
+--         --                             Found r child ->
+--         --                                 Ok
+--         --                                     (Found r
+--         --                                         (oneOfDetails.view
+--         --                                             { id = details.id
+--         --                                             , options =
+--         --                                                 List.map (Choice details.id) expectations
+--         --                                             }
+--         --                                             child
+--         --                                         )
+--         --                                     )
+--         --                             Unexpected unexpected ->
+--         --                                 Ok
+--         --                                     (Found unexpected.range
+--         --                                         (oneOfDetails.error
+--         --                                             { id = details.id
+--         --                                             , range = unexpected.range
+--         --                                             , problem = unexpected.problem
+--         --                                             , options =
+--         --                                                 List.map (Choice details.id) expectations
+--         --                                             }
+--         --                                         )
+--         --                                     )
+--         --             Unexpected unexpected ->
+--         --                 Ok
+--         --                     (Found unexpected.range
+--         --                         (oneOfDetails.error
+--         --                             { id = details.id
+--         --                             , problem = unexpected.problem
+--         --                             , range = unexpected.range
+--         --                             , options =
+--         --                                 List.map (Choice details.id) expectations
+--         --                             }
+--         --                         )
+--         --                     )
+--         --     _ ->
+--         --         Failure NoMatch
+--         , parser =
+--             \seed ->
+--                 let
+--                     gatherParsers myBlock details =
+--                         let
+--                             ( currentSeed, parser ) =
+--                                 getParser details.seed myBlock
+--                         in
+--                         case blockName myBlock of
+--                             Just name ->
+--                                 { blockNames = name :: details.blockNames
+--                                 , childBlocks = Parser.map Ok parser :: details.childBlocks
+--                                 , childValues = details.childValues
+--                                 , seed = currentSeed
+--                                 }
+--                             Nothing ->
+--                                 { blockNames = details.blockNames
+--                                 , childBlocks = details.childBlocks
+--                                 , childValues = Parser.map Ok parser :: details.childValues
+--                                 , seed = currentSeed
+--                                 }
+--                     children =
+--                         List.foldl gatherParsers
+--                             { blockNames = []
+--                             , childBlocks = []
+--                             , childValues = []
+--                             , seed = newSeed
+--                             }
+--                             blocks
+--                     blockParser =
+--                         Parser.succeed identity
+--                             |. Parser.token (Parser.Token "|" BlockStart)
+--                             |. Parser.oneOf
+--                                 [ Parser.chompIf (\c -> c == ' ') Space
+--                                 , Parser.succeed ()
+--                                 ]
+--                             |= Parser.oneOf
+--                                 (List.reverse children.childBlocks
+--                                     ++ [ Parser.getIndent
+--                                             |> Parser.andThen
+--                                                 (\indentation ->
+--                                                     Parser.succeed
+--                                                         (\( pos, foundWord ) ->
+--                                                             Err ( pos, Error.UnknownBlock children.blockNames )
+--                                                         )
+--                                                         |= Parse.withRange Parse.word
+--                                                         |. newline
+--                                                         |. Parser.loop "" (raggedIndentedStringAbove indentation)
+--                                                 )
+--                                        ]
+--                                 )
+--                     ( parentId, newSeed ) =
+--                         Id.step seed
+--                 in
+--                 ( children.seed
+--                 , Parser.succeed
+--                     (\( range, result ) ->
+--                         case result of
+--                             Ok found ->
+--                                 OneOf
+--                                     { choices = List.map (Choice parentId) expectations
+--                                     , child = Found range found
+--                                     , id = parentId
+--                                     }
+--                             Err ( pos, unexpected ) ->
+--                                 OneOf
+--                                     { choices = List.map (Choice parentId) expectations
+--                                     , child =
+--                                         Unexpected
+--                                             { range = pos
+--                                             , problem = unexpected
+--                                             }
+--                                     , id = parentId
+--                                     }
+--                     )
+--                     |= Parse.withRange
+--                         (Parser.oneOf
+--                             (blockParser :: List.reverse (unexpectedInOneOf expectations :: children.childValues))
+--                         )
+--                 )
+--         }
+-- {-| Many blocks that are all at the same indentation level.
+-- -}
+-- manyOf :
+--     { view :
+--         { parent : Id ManyOptions
+--         , index : Int
+--         , options : List (Choice (Id ManyOptions) Expectation)
+--         }
+--         -> a
+--         -> b
+--     , error :
+--         { parent : Id ManyOptions
+--         , index : Int
+--         , options : List (Choice (Id ManyOptions) Expectation)
+--         , range : Range
+--         , problem : Error.Error
+--         }
+--         -> b
+--     , merge :
+--         { parent : Id ManyOptions
+--         , options : List (Choice (Id ManyOptions) Expectation)
+--         }
+--         -> List b
+--         -> final
+--     }
+--     -> List (Block a)
+--     -> Block (List final)
+-- manyOf manyOfDetails blocks =
+--     let
+--         expectations =
+--             List.map getBlockExpectation blocks
+--     in
+--     Value
+--         { expect = ExpectManyOf expectations
+--         , converter =
+--             \desc ->
+--                 Failure NoMatch
+--         -- let
+--         --     applyDesc description blck found =
+--         --         case found of
+--         --             Nothing ->
+--         --                 case renderBlock blck description of
+--         --                     Failure _ ->
+--         --                         found
+--         --                     Success rendered ->
+--         --                         Just rendered
+--         --                     _ ->
+--         --                         found
+--         --             _ ->
+--         --                 found
+--         --     -- getRendered : Found Description -> Result AstError (List a) -> Result AstError (List a)
+--         --     getRendered id choices found ( existingResult, index ) =
+--         --         case existingResult of
+--         --             Err err ->
+--         --                 ( Err err, index + 1 )
+--         --             Ok existing ->
+--         --                 case found of
+--         --                     Unexpected unexpected ->
+--         --                         ( uncertain unexpected
+--         --                             (manyOfDetails.error
+--         --                                 { parent = id
+--         --                                 , options = choices
+--         --                                 , index = index
+--         --                                 , range = unexpected.range
+--         --                                 , problem = unexpected.problem
+--         --                                 }
+--         --                                 :: existing
+--         --                             )
+--         --                         , index + 1
+--         --                         )
+--         --                     Found range child ->
+--         --                         case List.foldl (applyDesc child) Nothing blocks of
+--         --                             Nothing ->
+--         --                                 ( Failure NoMatch, index + 1 )
+--         --                             Just (Success result) ->
+--         --                                 ( Success
+--         --                                     (manyOfDetails.view
+--         --                                         { parent = id
+--         --                                         , options = choices
+--         --                                         , index = index
+--         --                                         }
+--         --                                         result
+--         --                                         :: existing
+--         --                                     )
+--         --                                 , index + 1
+--         --                                 )
+--         --                             Just (Almost (Recovered err result)) ->
+--         --                                 ( Almost
+--         --                                     (Recovered err
+--         --                                         (manyOfDetails.view
+--         --                                             { parent = id
+--         --                                             , options = choices
+--         --                                             , index = index
+--         --                                             }
+--         --                                             result
+--         --                                             :: existing
+--         --                                         )
+--         --                                     )
+--         --                                 , index + 1
+--         --                                 )
+--         --                             Just (Almost (Uncertain err)) ->
+--         --                                 ( Almost (Uncertain err)
+--         --                                 , index + 1
+--         --                                 )
+--         --                             Just (Failure err) ->
+--         --                                 ( Failure err
+--         --                                 , index + 1
+--         --                                 )
+--         -- in
+--         -- case desc of
+--         --     ManyOf many ->
+--         --         List.foldl (getRendered many.id many.choices) ( Ok [], 0 ) many.children
+--         --             |> Tuple.first
+--         --             |> Result.map
+--         --                 (\items ->
+--         --                     Success
+--         --                         (manyOfDetails.merge
+--         --                             { parent = many.id
+--         --                             , options = many.choices
+--         --                             }
+--         --                             (List.reverse items)
+--         --                         )
+--         --                 )
+--         --     _ ->
+--         --         Failure NoMatch
+--         , parser =
+--             \seed ->
+--                 let
+--                     ( parentId, newSeed ) =
+--                         Id.step seed
+--                     ( _, childStart ) =
+--                         Id.step newSeed
+--                     reseeded =
+--                         Id.reseed childStart
+--                 in
+--                 ( reseeded
+--                 , Parser.succeed
+--                     (\( range, results ) ->
+--                         ManyOf
+--                             { choices = List.map (Choice parentId) expectations
+--                             , id = parentId
+--                             , range = range
+--                             , children = List.map resultToFound results
+--                             }
+--                     )
+--                     |= Parse.withRange
+--                         (Parser.getIndent
+--                             |> Parser.andThen
+--                                 (\indentation ->
+--                                     Parser.loop
+--                                         { parsedSomething = False
+--                                         , found = []
+--                                         , seed = childStart
+--                                         }
+--                                         (blocksOrNewlines
+--                                             indentation
+--                                             blocks
+--                                         )
+--                                 )
+--                         )
+--                 )
+--         }
