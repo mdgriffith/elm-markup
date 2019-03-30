@@ -5,6 +5,7 @@ module Mark.Internal.Description exposing
     , Parsed(..), startingPoint, descriptionToString, toString
     , create
     , Styling, emptyStyles
+    , inlineExample
     )
 
 {-|
@@ -20,6 +21,8 @@ module Mark.Internal.Description exposing
 @docs create
 
 @docs Styling, emptyStyles
+
+@docs inlineExample
 
 -}
 
@@ -173,7 +176,8 @@ type Proved
 type TextDescription
     = Styled Range Text
     | InlineAnnotation
-        { range : Range
+        { name : String
+        , range : Range
         , text : List Text
         , attributes : List InlineAttribute
         }
@@ -269,6 +273,27 @@ type AttrExpectation
 
 -- | ExpectAttr
 -- | ExpectInlineText
+
+
+inlineExample : InlineExpectation -> String
+inlineExample inline =
+    let
+        inlineAttrExamples attrs =
+            attrs
+                |> List.map renderAttr
+                |> String.join ", "
+
+        renderAttr attr =
+            case attr of
+                ExpectAttrString name ->
+                    name ++ " = A String"
+    in
+    case inline of
+        ExpectAnnotation name attrs ->
+            "[some /styled/ text]{" ++ inlineAttrExamples attrs ++ "}"
+
+        ExpectToken name attrs ->
+            "{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
 
 
 choiceExpectation (Choice id exp) =

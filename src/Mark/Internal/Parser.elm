@@ -222,7 +222,8 @@ styledTextLoop options meaningful untilStrings found =
                         let
                             note =
                                 InlineAnnotation
-                                    { text = noteText
+                                    { name = name
+                                    , text = noteText
                                     , range =
                                         { start = start
                                         , end = end

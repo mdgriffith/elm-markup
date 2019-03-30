@@ -9,7 +9,7 @@ module Mark exposing
     , block
     , oneOf, manyOf, startWith, nested
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
-    , text, replacement, balanced, Replacement
+    , text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, attrString
     , Range, Position
     , Error, errorToString, errorToHtml, Theme(..)
@@ -63,7 +63,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Handling Text and Inline
 
-@docs text, replacement, balanced, Replacement
+@docs text, textWith, replacement, balanced, Replacement
 
 @docs Inline, token, annotation, attrString
 
@@ -1082,6 +1082,28 @@ blockNameParser name =
         |. Parser.chompIf (\c -> c == '\n') Newline
 
 
+mergeWith fn one two =
+    case ( one, two ) of
+        ( Success renderedOne, Success renderedTwo ) ->
+            Success (fn renderedOne renderedTwo)
+
+        ( Almost (Recovered firstErrs fst), Almost (Recovered secondErrs snd) ) ->
+            Almost
+                (Recovered
+                    (mergeErrors firstErrs secondErrs)
+                    (fn fst snd)
+                )
+
+        ( Almost (Uncertain unexpected), _ ) ->
+            Almost (Uncertain unexpected)
+
+        ( _, Almost (Uncertain unexpected) ) ->
+            Almost (Uncertain unexpected)
+
+        _ ->
+            Failure NoMatch
+
+
 {-| -}
 startWith :
     (start -> rest -> result)
@@ -1095,25 +1117,9 @@ startWith fn startBlock endBlock =
             \desc ->
                 case desc of
                     StartsWith range start end ->
-                        case ( renderBlock startBlock start.found, renderBlock endBlock end.found ) of
-                            ( Success renderedStart, Success renderedEnd ) ->
-                                Success (fn renderedStart renderedEnd)
-
-                            ( Almost (Recovered firstErrs fst), Almost (Recovered secondErrs snd) ) ->
-                                Almost
-                                    (Recovered
-                                        (mergeErrors firstErrs secondErrs)
-                                        (fn fst snd)
-                                    )
-
-                            ( Almost (Uncertain unexpected), _ ) ->
-                                Almost (Uncertain unexpected)
-
-                            ( _, Almost (Uncertain unexpected) ) ->
-                                Almost (Uncertain unexpected)
-
-                            _ ->
-                                Failure NoMatch
+                        mergeWith fn
+                            (renderBlock startBlock start.found)
+                            (renderBlock endBlock end.found)
 
                     _ ->
                         Failure NoMatch
@@ -2562,33 +2568,61 @@ type alias Styles =
     }
 
 
+{-|
+
+    Mark.text (\styles string -> Html.span [] [ Html.text string ])
+
+-}
+text :
+    (Styles -> String -> rendered)
+    -> Block (List rendered)
+text view =
+    Value
+        { expect = ExpectText []
+        , converter =
+            renderText
+                { view = view
+                , inlines = []
+                , replacements = []
+                }
+        , parser =
+            \seed ->
+                -- TODO:  probably need a seed for text editing.
+                ( seed
+                , Parse.getPosition
+                    |> Parser.andThen
+                        (\pos ->
+                            Parse.styledText
+                                { inlines = []
+                                , replacements = []
+                                }
+                                seed
+                                pos
+                                emptyStyles
+                                []
+                        )
+                )
+        }
+
+
 {-| Handling formatted text is a little more involved than may be initially apparent.
-
 Text styling can be overlapped such as
-
-    /My italicized sentence can have *bold*/
-
+/My italicized sentence can have _bold_/
 In order to render this, the above sentence is chopped up into `Text` fragments that can have multiple styles active.
 
   - `view` is the function to render an individual fragment.
   - `inlines` are custom inline blocks. These are how links are implemented in `Mark.Default`!
   - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
-
-**Note** check out `Mark.Default.text` to see an example.
+    **Note** check out `Mark.Default.text` to see an example.
 
 -}
-text :
-    { view : { range : Range } -> Styles -> String -> rendered
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> rendered
+textWith :
+    { view : Styles -> String -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
     }
     -> Block (List rendered)
-text options =
+textWith options =
     Value
         { expect = ExpectText (List.map getInlineExpectation options.inlines)
         , converter = renderText options
@@ -2612,79 +2646,134 @@ text options =
         }
 
 
+type alias Cursor data =
+    Outcome AstError (Uncertain data) data
+
+
 renderText :
-    { view : { range : Range } -> Styles -> String -> rendered
-    , error : UnexpectedDetails -> rendered
+    { view : Styles -> String -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
     }
     -> Description
-    -> Outcome AstError (Uncertain (List rendered)) (List rendered)
+    -> Cursor (List rendered)
 renderText options description =
     case description of
         DescribeText details ->
-            -- List.foldl (convertTextDescription options) [] details.text
-            --     |> (Found details.range << List.reverse)
-            --     |> Success
-            Success []
+            List.foldl (convertTextDescription options) (Success []) details.text
+                |> mapSuccessAndRecovered List.reverse
 
         _ ->
             Failure NoMatch
 
 
+textToTuple (Text styling txt) =
+    ( styling, txt )
+
+
 convertTextDescription :
-    { view : { range : Range } -> Styles -> String -> rendered
-    , error : UnexpectedDetails -> rendered
+    { view : Styles -> String -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
     }
     -> TextDescription
-    -> List rendered
-    -> List rendered
-convertTextDescription options comp found =
-    -- case comp of
-    --     Styled range textEl ->
-    --         options.view { range = range } textEl :: found
-    --     InlineToken details ->
-    --         let
-    --             convertedInline =
-    --                 List.foldl
-    --                     (convertMatchedInline details.attributes)
-    --                     (Failure NoMatch)
-    --                     options.inlines
-    --         in
-    --         case convertedInline of
-    --             Err err ->
-    --                 options.error
-    --                     { range = details.range
-    --                     , problem = Error.UnknownInline (List.map (getInlineName << getInlineExpectation) options.inlines)
-    --                     }
-    --                     :: found
-    --             Ok list ->
-    --                 list ++ found
-    --     InlineAnnotation details ->
-    --         case List.foldl (renderInline details.name (List.reverse details.attributes)) (Failure NoMatch) options.inlines of
-    --             Err err ->
-    --                 options.error
-    --                     { range = details.range
-    --                     , problem = Error.UnknownInline (List.map (getInlineName << getInlineExpectation) options.inlines)
-    --                     }
-    --                     :: found
-    --             Ok list ->
-    --                 list ++ found
-    --     -- DescribeInline name range foundInline ->
-    --     -- case List.foldl (renderInline name range (List.reverse foundInline)) (Failure NoMatch) options.inlines of
-    --     --     Err err ->
-    --     --         options.error
-    --     --             { range = range
-    --     --             , problem = Error.UnknownInline (List.map (getInlineName << getInlineExpectation) options.inlines)
-    --     --             }
-    --     --             :: found
-    --     --     Ok list ->
-    --     --         list ++ found
-    --     UnexpectedInline details ->
-    --         options.error details :: found
-    []
+    -> Cursor (List rendered)
+    -> Cursor (List rendered)
+convertTextDescription options comp cursor =
+    case comp of
+        Styled range (Text styling str) ->
+            mergeWith (::) (Success (options.view styling str)) cursor
+
+        InlineToken details ->
+            let
+                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+                    case maybeFound of
+                        Nothing ->
+                            if name == inlineDetails.name && isToken inline then
+                                Just inlineDetails
+
+                            else
+                                Nothing
+
+                        _ ->
+                            maybeFound
+
+                maybeMatched =
+                    List.foldl
+                        (matchInlineName details.name)
+                        Nothing
+                        options.inlines
+            in
+            case maybeMatched of
+                Nothing ->
+                    uncertain
+                        { range = details.range
+                        , problem =
+                            Error.UnknownInline
+                                (List.map
+                                    (Mark.Internal.Description.inlineExample
+                                        << getInlineExpectation
+                                    )
+                                    options.inlines
+                                )
+                        }
+
+                Just matchedInline ->
+                    mergeWith (++)
+                        (matchedInline.converter [] details.attributes)
+                        cursor
+
+        InlineAnnotation details ->
+            let
+                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+                    case maybeFound of
+                        Nothing ->
+                            if name == inlineDetails.name && not (isToken inline) then
+                                Just inlineDetails
+
+                            else
+                                Nothing
+
+                        _ ->
+                            maybeFound
+
+                maybeMatched =
+                    List.foldl
+                        (matchInlineName details.name)
+                        Nothing
+                        options.inlines
+            in
+            case maybeMatched of
+                Just matchedInline ->
+                    mergeWith (++)
+                        (matchedInline.converter (List.map textToTuple details.text) details.attributes)
+                        cursor
+
+                Nothing ->
+                    uncertain
+                        { range = details.range
+                        , problem =
+                            Error.UnknownInline
+                                (List.map
+                                    (Mark.Internal.Description.inlineExample
+                                        << getInlineExpectation
+                                    )
+                                    options.inlines
+                                )
+                        }
+
+        UnexpectedInline details ->
+            uncertain details
+
+
+
+-- case cursor of
+--     Success found ->
+--         capture found Success
+--     Almost (Recovered errs found) ->
+--         capture found (\new -> Almost (Recovered errs new))
+--     _ ->
+--         cursor
 
 
 convertMatchedInline : List InlineAttribute -> Inline rendered -> Result AstError rendered -> Result AstError rendered
@@ -2710,13 +2799,6 @@ type alias Replacement =
 
 
 
--- {-| -}
--- type Inline data
---     = Inline
---         String
---         { converter : List InlineDescription -> Result AstError (List data)
---         , expect : InlineExpectation
---         }
 {- Inline Rewrite
 
    Valid States:
@@ -2741,8 +2823,9 @@ type alias Replacement =
 
 type Inline data
     = Inline
-        { converter : List InlineAttribute -> Outcome AstError (Uncertain (List data)) (List data)
+        { converter : List ( Styling, String ) -> List InlineAttribute -> Outcome AstError (Uncertain (List data)) (List data)
         , expect : InlineExpectation
+        , name : String
         }
 
 
@@ -2751,22 +2834,34 @@ token : String -> result -> Inline result
 token name result =
     Inline
         { converter =
-            \descriptor ->
+            \_ attrs ->
                 Success [ result ]
         , expect =
             ExpectToken name []
+        , name = name
         }
 
 
+isToken : Inline data -> Bool
+isToken (Inline inline) =
+    case inline.expect of
+        ExpectToken _ _ ->
+            True
+
+        _ ->
+            False
+
+
 {-| -}
-annotation : String -> result -> Inline result
+annotation : String -> (List ( Styles, String ) -> result) -> Inline result
 annotation name result =
     Inline
         { converter =
-            \descriptor ->
-                Success [ result ]
+            \textPieces attrs ->
+                Success [ result textPieces ]
         , expect =
             ExpectAnnotation name []
+        , name = name
         }
 
 
@@ -2777,13 +2872,13 @@ attrString name newInline =
         Inline details ->
             Inline
                 { converter =
-                    \descriptors ->
-                        case descriptors of
+                    \_ attrs ->
+                        case attrs of
                             [] ->
                                 Failure NoMatch
 
                             (AttrString attr) :: remaining ->
-                                details.converter remaining
+                                details.converter [] remaining
                                     |> mapSuccessAndRecovered (List.map (\x -> x attr.value))
                 , expect =
                     case details.expect of
@@ -2792,6 +2887,7 @@ attrString name newInline =
 
                         ExpectAnnotation noteName attrs ->
                             ExpectAnnotation noteName (ExpectAttrString name :: attrs)
+                , name = details.name
                 }
 
 
