@@ -1,15 +1,13 @@
 module Mark exposing
     ( Document
     , Outcome(..), Partial
-    , parse, Parsed, toString
-    , compile, render
+    , compile, parse, Parsed, toString, render
     , document
-    , Block, map
+    , Block, map, verify, onError
     , string, int, float, bool, multiline
-    , block
-    , oneOf, manyOf, startWith, nested
+    , block, oneOf, manyOf, startWith, nested
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
-    , text, textWith, replacement, balanced, Replacement
+    , Text(..), Styles, text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, attrString
     , Range, Position
     , Error, errorToString, errorToHtml, Theme(..)
@@ -35,25 +33,24 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs Outcome, Partial
 
-@docs parse, Parsed, toString
-
-@docs compile, render
+@docs compile, parse, Parsed, toString, render
 
 
 ## Building Documents
 
 @docs document
 
-@docs Block, map
+@docs Block, map, verify, onError
 
 
 ## Primitives
 
 @docs string, int, float, bool, date, multiline
 
-@docs block
 
-@docs oneOf, manyOf, startWith, nested
+## Higher Level
+
+@docs block, oneOf, manyOf, startWith, nested
 
 
 ## Records
@@ -63,7 +60,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Handling Text and Inline
 
-@docs text, textWith, replacement, balanced, Replacement
+@docs Text, Styles, text, textWith, replacement, balanced, Replacement
 
 @docs Inline, token, annotation, attrString
 
@@ -80,7 +77,7 @@ import Html
 import Html.Attributes
 import Iso8601
 import Mark.Format as Format
-import Mark.Internal.Description exposing (..)
+import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Parser as Parse
@@ -90,7 +87,7 @@ import Time
 
 {-| -}
 type alias Parsed =
-    Mark.Internal.Description.Parsed
+    Desc.Parsed
 
 
 
@@ -100,7 +97,7 @@ type alias Parsed =
 {-| -}
 toString : Parsed -> String
 toString =
-    Mark.Internal.Description.toString
+    Desc.toString
 
 
 {-| -}
@@ -2568,13 +2565,18 @@ type alias Styles =
     }
 
 
+{-| -}
+type Text
+    = Text Styles String
+
+
 {-|
 
     Mark.text (\styles string -> Html.span [] [ Html.text string ])
 
 -}
 text :
-    (Styles -> String -> rendered)
+    (Text -> rendered)
     -> Block (List rendered)
 text view =
     Value
@@ -2617,7 +2619,7 @@ In order to render this, the above sentence is chopped up into `Text` fragments 
 
 -}
 textWith :
-    { view : Styles -> String -> rendered
+    { view : Text -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
     }
@@ -2651,7 +2653,7 @@ type alias Cursor data =
 
 
 renderText :
-    { view : Styles -> String -> rendered
+    { view : Text -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
     }
@@ -2667,12 +2669,12 @@ renderText options description =
             Failure NoMatch
 
 
-textToTuple (Text styling txt) =
-    ( styling, txt )
+textToText (Desc.Text styling txt) =
+    Text styling txt
 
 
 convertTextDescription :
-    { view : Styles -> String -> rendered
+    { view : Text -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
     }
@@ -2681,8 +2683,8 @@ convertTextDescription :
     -> Cursor (List rendered)
 convertTextDescription options comp cursor =
     case comp of
-        Styled range (Text styling str) ->
-            mergeWith (::) (Success (options.view styling str)) cursor
+        Styled range (Desc.Text styling str) ->
+            mergeWith (::) (Success (options.view (Text styling str))) cursor
 
         InlineToken details ->
             let
@@ -2711,7 +2713,7 @@ convertTextDescription options comp cursor =
                         , problem =
                             Error.UnknownInline
                                 (List.map
-                                    (Mark.Internal.Description.inlineExample
+                                    (Desc.inlineExample
                                         << getInlineExpectation
                                     )
                                     options.inlines
@@ -2746,7 +2748,7 @@ convertTextDescription options comp cursor =
             case maybeMatched of
                 Just matchedInline ->
                     mergeWith (++)
-                        (matchedInline.converter (List.map textToTuple details.text) details.attributes)
+                        (matchedInline.converter (List.map textToText details.text) details.attributes)
                         cursor
 
                 Nothing ->
@@ -2755,7 +2757,7 @@ convertTextDescription options comp cursor =
                         , problem =
                             Error.UnknownInline
                                 (List.map
-                                    (Mark.Internal.Description.inlineExample
+                                    (Desc.inlineExample
                                         << getInlineExpectation
                                     )
                                     options.inlines
@@ -2823,7 +2825,7 @@ type alias Replacement =
 
 type Inline data
     = Inline
-        { converter : List ( Styling, String ) -> List InlineAttribute -> Outcome AstError (Uncertain (List data)) (List data)
+        { converter : List Text -> List InlineAttribute -> Outcome AstError (Uncertain (List data)) (List data)
         , expect : InlineExpectation
         , name : String
         }
@@ -2853,7 +2855,7 @@ isToken (Inline inline) =
 
 
 {-| -}
-annotation : String -> (List ( Styles, String ) -> result) -> Inline result
+annotation : String -> (List Text -> result) -> Inline result
 annotation name result =
     Inline
         { converter =
