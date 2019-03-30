@@ -1208,96 +1208,42 @@ manyOf blocks =
         { expect = ExpectManyOf expectations
         , converter =
             \desc ->
-                Outcome.Failure NoMatch
+                let
+                    matchBlock description blck found =
+                        case found of
+                            Outcome.Failure _ ->
+                                case renderBlock blck description of
+                                    Outcome.Failure _ ->
+                                        found
 
-        -- let
-        --     applyDesc description blck found =
-        --         case found of
-        --             Nothing ->
-        --                 case renderBlock blck description of
-        --                     Outcome.Failure _ ->
-        --                         found
-        --                     Outcome.Success rendered ->
-        --                         Just rendered
-        --                     _ ->
-        --                         found
-        --             _ ->
-        --                 found
-        --     -- getRendered : Found Description -> Result AstError (List a) -> Result AstError (List a)
-        --     getRendered id choices found ( existingResult, index ) =
-        --         case existingResult of
-        --             Err err ->
-        --                 ( Err err, index + 1 )
-        --             Ok existing ->
-        --                 case found of
-        --                     Unexpected unexpected ->
-        --                         ( uncertain unexpected
-        --                             (manyOfDetails.error
-        --                                 { parent = id
-        --                                 , options = choices
-        --                                 , index = index
-        --                                 , range = unexpected.range
-        --                                 , problem = unexpected.problem
-        --                                 }
-        --                                 :: existing
-        --                             )
-        --                         , index + 1
-        --                         )
-        --                     Found range child ->
-        --                         case List.foldl (applyDesc child) Nothing blocks of
-        --                             Nothing ->
-        --                                 ( Outcome.Failure NoMatch, index + 1 )
-        --                             Just (Outcome.Success result) ->
-        --                                 ( Outcome.Success
-        --                                     (manyOfDetails.view
-        --                                         { parent = id
-        --                                         , options = choices
-        --                                         , index = index
-        --                                         }
-        --                                         result
-        --                                         :: existing
-        --                                     )
-        --                                 , index + 1
-        --                                 )
-        --                             Just (Outcome.Almost (Recovered err result)) ->
-        --                                 ( Outcome.Almost
-        --                                     (Recovered err
-        --                                         (manyOfDetails.view
-        --                                             { parent = id
-        --                                             , options = choices
-        --                                             , index = index
-        --                                             }
-        --                                             result
-        --                                             :: existing
-        --                                         )
-        --                                     )
-        --                                 , index + 1
-        --                                 )
-        --                             Just (Outcome.Almost (Uncertain err)) ->
-        --                                 ( Outcome.Almost (Uncertain err)
-        --                                 , index + 1
-        --                                 )
-        --                             Just (Outcome.Failure err) ->
-        --                                 ( Outcome.Failure err
-        --                                 , index + 1
-        --                                 )
-        -- in
-        -- case desc of
-        --     ManyOf many ->
-        --         List.foldl (getRendered many.id many.choices) ( Ok [], 0 ) many.children
-        --             |> Tuple.first
-        --             |> Result.map
-        --                 (\items ->
-        --                     Outcome.Success
-        --                         (manyOfDetails.merge
-        --                             { parent = many.id
-        --                             , options = many.choices
-        --                             }
-        --                             (List.reverse items)
-        --                         )
-        --                 )
-        --     _ ->
-        --         Outcome.Failure NoMatch
+                                    otherwise ->
+                                        otherwise
+
+                            _ ->
+                                found
+
+                    getRendered id choices found ( existingResult, index ) =
+                        case found of
+                            Unexpected unexpected ->
+                                ( uncertain unexpected
+                                , index + 1
+                                )
+
+                            Found range child ->
+                                ( mergeWith (::)
+                                    (List.foldl (matchBlock child) (Outcome.Failure NoMatch) blocks)
+                                    existingResult
+                                , index + 1
+                                )
+                in
+                case desc of
+                    ManyOf many ->
+                        List.foldl (getRendered many.id many.choices) ( Outcome.Success [], 0 ) many.children
+                            |> Tuple.first
+                            |> mapSuccessAndRecovered List.reverse
+
+                    _ ->
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
