@@ -594,7 +594,9 @@ changeStyle (TextCursor cursor) styleToken =
                     txt
 
         newText =
-            flipStyle styleToken cursor.current
+            cursor.current
+                |> flipStyle styleToken
+                |> clearText
     in
     if cursorText == "" then
         TextCursor
@@ -621,6 +623,10 @@ changeStyle (TextCursor cursor) styleToken =
             , current = newText
             , balancedReplacements = cursor.balancedReplacements
             }
+
+
+clearText (Text styles _) =
+    Text styles ""
 
 
 flipStyle newStyle textStyle =

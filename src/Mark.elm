@@ -2872,13 +2872,13 @@ attrString name newInline =
         Inline details ->
             Inline
                 { converter =
-                    \_ attrs ->
+                    \textPieces attrs ->
                         case attrs of
                             [] ->
                                 Failure NoMatch
 
                             (AttrString attr) :: remaining ->
-                                details.converter [] remaining
+                                details.converter textPieces remaining
                                     |> mapSuccessAndRecovered (List.map (\x -> x attr.value))
                 , expect =
                     case details.expect of
