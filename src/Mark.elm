@@ -1197,31 +1197,9 @@ humanReadableExpectations expect =
 {-| Many blocks that are all at the same indentation level.
 -}
 manyOf :
-    { view :
-        { parent : Id ManyOptions
-        , index : Int
-        , options : List (Choice (Id ManyOptions) Expectation)
-        }
-        -> a
-        -> b
-    , error :
-        { parent : Id ManyOptions
-        , index : Int
-        , options : List (Choice (Id ManyOptions) Expectation)
-        , range : Range
-        , problem : Error.Error
-        }
-        -> b
-    , merge :
-        { parent : Id ManyOptions
-        , options : List (Choice (Id ManyOptions) Expectation)
-        }
-        -> List b
-        -> final
-    }
-    -> List (Block a)
-    -> Block (List final)
-manyOf manyOfDetails blocks =
+    List (Block a)
+    -> Block (List a)
+manyOf blocks =
     let
         expectations =
             List.map getBlockExpectation blocks
