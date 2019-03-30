@@ -1915,11 +1915,11 @@ compile (Document blocks) source =
                                 }
 
                         Almost (Uncertain ( err, remainError )) ->
-                            Failure ((err :: remainError) ++ parsedDetails.errors)
+                            Failure (err :: remainError)
 
                         Almost (Recovered ( err, remainError ) result) ->
                             Almost
-                                { errors = (err :: remainError) ++ parsedDetails.errors
+                                { errors = err :: remainError
                                 , result = result
                                 }
 
@@ -1992,11 +1992,11 @@ render (Document blocks) ((Parsed parsedDetails) as parsed) =
                         }
 
                 Almost (Uncertain ( err, remainError )) ->
-                    Failure ((err :: remainError) ++ parsedDetails.errors)
+                    Failure (err :: remainError)
 
                 Almost (Recovered ( err, remainError ) result) ->
                     Almost
-                        { errors = (err :: remainError) ++ parsedDetails.errors
+                        { errors = err :: remainError
                         , result = result
                         }
 
