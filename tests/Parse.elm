@@ -12,6 +12,18 @@ import Parser.Advanced as Parser
 import Test exposing (..)
 
 
+emptyStyles =
+    { italic = False, bold = False, strike = False }
+
+
+italic =
+    { emptyStyles | italic = True }
+
+
+bold =
+    { emptyStyles | bold = True }
+
+
 suite =
     describe "Inline parsing"
         [ test "Parse string attribute" <|
@@ -114,7 +126,7 @@ text =
                             }
                             Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
-                            []
+                            emptyStyles
                             []
                         )
                         "Here is my /styled/ *text*."
@@ -125,15 +137,15 @@ text =
                             , range = { end = { column = 28, line = 1, offset = 27 }, start = { column = 1, line = 1, offset = 0 } }
                             , text =
                                 [ Description.Styled { end = { column = 12, line = 1, offset = 11 }, start = { column = 1, line = 1, offset = 0 } }
-                                    (Description.Text [] "Here is my ")
+                                    (Description.Text emptyStyles "Here is my ")
                                 , Description.Styled { end = { column = 18, line = 1, offset = 17 }, start = { column = 12, line = 1, offset = 11 } }
-                                    (Description.Text [ Description.Italic ] "styled")
+                                    (Description.Text italic "styled")
                                 , Description.Styled { end = { column = 19, line = 1, offset = 18 }, start = { column = 18, line = 1, offset = 17 } }
-                                    (Description.Text [] " ")
+                                    (Description.Text emptyStyles " ")
                                 , Description.Styled { end = { column = 23, line = 1, offset = 22 }, start = { column = 19, line = 1, offset = 18 } }
-                                    (Description.Text [ Description.Bold ] "text")
+                                    (Description.Text bold "text")
                                 , Description.Styled { end = { column = 24, line = 1, offset = 23 }, start = { column = 23, line = 1, offset = 22 } }
-                                    (Description.Text [] ".")
+                                    (Description.Text emptyStyles ".")
                                 ]
                             }
                         )
@@ -151,7 +163,7 @@ text =
                             }
                             Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
-                            []
+                            emptyStyles
                             []
                         )
                         "Here is my /styled/ *text*.  And a {test}."
@@ -166,27 +178,27 @@ text =
                                     { end = { column = 12, line = 1, offset = 11 }
                                     , start = { column = 1, line = 1, offset = 0 }
                                     }
-                                    (Description.Text [] "Here is my ")
+                                    (Description.Text emptyStyles "Here is my ")
                                 , Description.Styled
                                     { end = { column = 18, line = 1, offset = 17 }
                                     , start = { column = 12, line = 1, offset = 11 }
                                     }
-                                    (Description.Text [ Description.Italic ] "styled")
+                                    (Description.Text italic "styled")
                                 , Description.Styled
                                     { end = { column = 19, line = 1, offset = 18 }
                                     , start = { column = 18, line = 1, offset = 17 }
                                     }
-                                    (Description.Text [] " ")
+                                    (Description.Text emptyStyles " ")
                                 , Description.Styled
                                     { end = { column = 23, line = 1, offset = 22 }
                                     , start = { column = 19, line = 1, offset = 18 }
                                     }
-                                    (Description.Text [ Description.Bold ] "text")
+                                    (Description.Text bold "text")
                                 , Description.Styled
                                     { end = { column = 32, line = 1, offset = 31 }
                                     , start = { column = 23, line = 1, offset = 22 }
                                     }
-                                    (Description.Text [] ".  And a ")
+                                    (Description.Text emptyStyles ".  And a ")
                                 , Description.InlineToken
                                     { attributes = []
                                     , name = "test"
@@ -199,7 +211,7 @@ text =
                                     { end = { column = 43, line = 1, offset = 42 }
                                     , start = { column = 42, line = 1, offset = 41 }
                                     }
-                                    (Description.Text [] ".")
+                                    (Description.Text emptyStyles ".")
                                 ]
                             }
                         )
@@ -218,7 +230,7 @@ text =
                             }
                             Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
-                            []
+                            emptyStyles
                             []
                         )
                         "Here is my /styled/ *text*.  And a {test|attr = my string}."
@@ -232,27 +244,27 @@ text =
                                     { end = { column = 12, line = 1, offset = 11 }
                                     , start = { column = 1, line = 1, offset = 0 }
                                     }
-                                    (Description.Text [] "Here is my ")
+                                    (Description.Text emptyStyles "Here is my ")
                                 , Description.Styled
                                     { end = { column = 18, line = 1, offset = 17 }
                                     , start = { column = 12, line = 1, offset = 11 }
                                     }
-                                    (Description.Text [ Description.Italic ] "styled")
+                                    (Description.Text italic "styled")
                                 , Description.Styled
                                     { end = { column = 19, line = 1, offset = 18 }
                                     , start = { column = 18, line = 1, offset = 17 }
                                     }
-                                    (Description.Text [] " ")
+                                    (Description.Text emptyStyles " ")
                                 , Description.Styled
                                     { end = { column = 23, line = 1, offset = 22 }
                                     , start = { column = 19, line = 1, offset = 18 }
                                     }
-                                    (Description.Text [ Description.Bold ] "text")
+                                    (Description.Text bold "text")
                                 , Description.Styled
                                     { end = { column = 32, line = 1, offset = 31 }
                                     , start = { column = 23, line = 1, offset = 22 }
                                     }
-                                    (Description.Text [] ".  And a ")
+                                    (Description.Text emptyStyles ".  And a ")
                                 , Description.InlineToken
                                     { attributes =
                                         [ Description.AttrString
@@ -278,7 +290,7 @@ text =
                                     { end = { column = 60, line = 1, offset = 59 }
                                     , start = { column = 59, line = 1, offset = 58 }
                                     }
-                                    (Description.Text [] ".")
+                                    (Description.Text emptyStyles ".")
                                 ]
                             }
                         )
@@ -297,7 +309,7 @@ text =
                             }
                             Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
-                            []
+                            emptyStyles
                             []
                         )
                         "Here is my /styled/ *text*.  And a [some text]{test|attr = my string}."
@@ -312,29 +324,30 @@ text =
                                     { end = { column = 12, line = 1, offset = 11 }
                                     , start = { column = 1, line = 1, offset = 0 }
                                     }
-                                    (Description.Text [] "Here is my ")
+                                    (Description.Text emptyStyles "Here is my ")
                                 , Description.Styled
                                     { end = { column = 18, line = 1, offset = 17 }
                                     , start = { column = 12, line = 1, offset = 11 }
                                     }
-                                    (Description.Text [ Description.Italic ] "styled")
+                                    (Description.Text italic "styled")
                                 , Description.Styled
                                     { end = { column = 19, line = 1, offset = 18 }
                                     , start = { column = 18, line = 1, offset = 17 }
                                     }
-                                    (Description.Text [] " ")
+                                    (Description.Text emptyStyles " ")
                                 , Description.Styled
                                     { end = { column = 23, line = 1, offset = 22 }
                                     , start = { column = 19, line = 1, offset = 18 }
                                     }
-                                    (Description.Text [ Description.Bold ] "text")
+                                    (Description.Text bold "text")
                                 , Description.Styled
                                     { end = { column = 32, line = 1, offset = 31 }
                                     , start = { column = 23, line = 1, offset = 22 }
                                     }
-                                    (Description.Text [] ".  And a ")
+                                    (Description.Text emptyStyles ".  And a ")
                                 , Description.InlineAnnotation
-                                    { attributes =
+                                    { name = "text"
+                                    , attributes =
                                         [ Description.AttrString
                                             { name = "attr"
                                             , range =
@@ -348,13 +361,13 @@ text =
                                         { end = { column = 70, line = 1, offset = 69 }
                                         , start = { column = 36, line = 1, offset = 35 }
                                         }
-                                    , text = [ Description.Text [] "some text" ]
+                                    , text = [ Description.Text emptyStyles "some text" ]
                                     }
                                 , Description.Styled
                                     { end = { column = 71, line = 1, offset = 70 }
                                     , start = { column = 70, line = 1, offset = 69 }
                                     }
-                                    (Description.Text [] ".")
+                                    (Description.Text emptyStyles ".")
                                 ]
                             }
                         )
@@ -373,7 +386,7 @@ text =
                             }
                             Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
-                            []
+                            emptyStyles
                             []
                         )
                         "Here is my /styled/ *text*.  /And a [some text/]{test|attr = my string}."
@@ -388,34 +401,35 @@ text =
                                     { end = { column = 12, line = 1, offset = 11 }
                                     , start = { column = 1, line = 1, offset = 0 }
                                     }
-                                    (Description.Text [] "Here is my ")
+                                    (Description.Text emptyStyles "Here is my ")
                                 , Description.Styled
                                     { end = { column = 18, line = 1, offset = 17 }
                                     , start = { column = 12, line = 1, offset = 11 }
                                     }
-                                    (Description.Text [ Description.Italic ] "styled")
+                                    (Description.Text italic "styled")
                                 , Description.Styled
                                     { end = { column = 19, line = 1, offset = 18 }
                                     , start = { column = 18, line = 1, offset = 17 }
                                     }
-                                    (Description.Text [] " ")
+                                    (Description.Text emptyStyles " ")
                                 , Description.Styled
                                     { end = { column = 23, line = 1, offset = 22 }
                                     , start = { column = 19, line = 1, offset = 18 }
                                     }
-                                    (Description.Text [ Description.Bold ] "text")
+                                    (Description.Text bold "text")
                                 , Description.Styled
                                     { end = { column = 26, line = 1, offset = 25 }
                                     , start = { column = 23, line = 1, offset = 22 }
                                     }
-                                    (Description.Text [] ".  ")
+                                    (Description.Text emptyStyles ".  ")
                                 , Description.Styled
                                     { end = { column = 32, line = 1, offset = 31 }
                                     , start = { column = 26, line = 1, offset = 25 }
                                     }
-                                    (Description.Text [ Description.Italic ] "And a ")
+                                    (Description.Text italic "And a ")
                                 , Description.InlineAnnotation
-                                    { attributes =
+                                    { name = "test"
+                                    , attributes =
                                         [ Description.AttrString
                                             { name = "attr"
                                             , range =
@@ -429,13 +443,13 @@ text =
                                         { end = { column = 72, line = 1, offset = 71 }
                                         , start = { column = 37, line = 1, offset = 36 }
                                         }
-                                    , text = [ Description.Text [ Description.Italic ] "some text" ]
+                                    , text = [ Description.Text italic "some text" ]
                                     }
                                 , Description.Styled
                                     { end = { column = 73, line = 1, offset = 72 }
                                     , start = { column = 72, line = 1, offset = 71 }
                                     }
-                                    (Description.Text [] ".")
+                                    (Description.Text emptyStyles ".")
                                 ]
                             }
                         )

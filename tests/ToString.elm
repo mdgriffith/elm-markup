@@ -244,7 +244,6 @@ edits =
                                             , Description.ExpectString "hello"
                                             , Description.ExpectString "hello"
                                             ]
-                                , focus = Nothing
                                 }
                             )
                 in
@@ -283,7 +282,6 @@ edits =
                                         , Description.ExpectString "hello"
                                         , Description.ExpectString "hello"
                                         ]
-                                , focus = Nothing
                                 }
                             )
                 in
@@ -315,7 +313,6 @@ edits =
                                         , Description.ExpectString "hello"
                                         , Description.ExpectString "hello"
                                         ]
-                                , focus = Nothing
                                 }
                             )
                 in
@@ -347,7 +344,6 @@ edits =
                                         , Description.ExpectString "hello"
                                         , Description.ExpectString "hello"
                                         ]
-                                , focus = Nothing
                                 }
                             )
                 in
@@ -379,7 +375,6 @@ edits =
                                         , Description.ExpectString "hello"
                                         , Description.ExpectString "hello"
                                         ]
-                                , focus = Nothing
                                 }
                             )
                 in
