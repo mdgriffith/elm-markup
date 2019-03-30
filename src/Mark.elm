@@ -798,28 +798,22 @@ skipSeed parser seed =
 
 {-| -}
 block :
-    { name : String
-    , view : child -> result
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> result
-    }
+    String
+    -> (child -> result)
     -> Block child
     -> Block result
-block blockDetails child =
-    Block blockDetails.name
-        { expect = ExpectBlock blockDetails.name (getBlockExpectation child)
+block name view child =
+    Block name
+        { expect = ExpectBlock name (getBlockExpectation child)
         , converter =
             \desc ->
                 case desc of
                     DescribeBlock details ->
-                        if details.name == blockDetails.name then
+                        if details.name == name then
                             case details.found of
                                 Found range found ->
                                     renderBlock child found
-                                        |> mapSuccessAndRecovered blockDetails.view
+                                        |> mapSuccessAndRecovered view
 
                                 Unexpected unexpected ->
                                     uncertain unexpected
@@ -843,19 +837,19 @@ block blockDetails child =
                             Ok value ->
                                 DescribeBlock
                                     { found = Found range value
-                                    , name = blockDetails.name
-                                    , expected = ExpectBlock blockDetails.name (getBlockExpectation child)
+                                    , name = name
+                                    , expected = ExpectBlock name (getBlockExpectation child)
                                     }
 
                             Err ( pos, errorMessage ) ->
                                 DescribeBlock
-                                    { name = blockDetails.name
+                                    { name = name
                                     , found =
                                         Unexpected
                                             { range = pos
                                             , problem = errorMessage
                                             }
-                                    , expected = ExpectBlock blockDetails.name (getBlockExpectation child)
+                                    , expected = ExpectBlock name (getBlockExpectation child)
                                     }
                     )
                   <|
@@ -865,8 +859,8 @@ block blockDetails child =
                                 (\indentation ->
                                     Parser.succeed identity
                                         |. Parser.keyword
-                                            (Parser.Token blockDetails.name
-                                                (ExpectingBlockName blockDetails.name)
+                                            (Parser.Token name
+                                                (ExpectingBlockName name)
                                             )
                                         |. Parser.chompWhile (\c -> c == ' ')
                                         |. skipBlankLineWith ()
@@ -897,7 +891,7 @@ block blockDetails child =
                                                             , Parser.map Ok <|
                                                                 Parser.withIndent
                                                                     (indentation + 4)
-                                                                    (Parser.inContext (InBlock blockDetails.name) childParser)
+                                                                    (Parser.inContext (InBlock name) childParser)
                                                             ]
                                                     )
 
@@ -1657,38 +1651,33 @@ type alias New =
 
 {-| -}
 record2 :
-    { name : String
-    , view :
-        one
-        -> two
-        -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    ->
+        (one
+         -> two
+         -> data
+        )
     -> Field one
     -> Field two
     -> Block data
-record2 record field1 field2 =
+record2 name view field1 field2 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> renderRecordResult pos
@@ -1711,7 +1700,7 @@ record2 record field1 field2 =
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
@@ -1720,37 +1709,31 @@ record2 record field1 field2 =
 
 {-| -}
 record3 :
-    { name : String
-    , view : one -> two -> three -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    -> (one -> two -> three -> data)
     -> Field one
     -> Field two
     -> Field three
     -> Block data
-record3 record field1 field2 field3 =
+record3 name view field1 field2 field3 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 , fieldExpectation field3
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -1775,7 +1758,7 @@ record3 record field1 field2 field3 =
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
@@ -1784,39 +1767,33 @@ record3 record field1 field2 field3 =
 
 {-| -}
 record4 :
-    { name : String
-    , view : one -> two -> three -> four -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    -> (one -> two -> three -> four -> data)
     -> Field one
     -> Field two
     -> Field three
     -> Field four
     -> Block data
-record4 record field1 field2 field3 field4 =
+record4 name view field1 field2 field3 field4 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 , fieldExpectation field3
                 , fieldExpectation field4
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -1843,7 +1820,7 @@ record4 record field1 field2 field3 field4 =
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
@@ -1852,24 +1829,18 @@ record4 record field1 field2 field3 field4 =
 
 {-| -}
 record5 :
-    { name : String
-    , view : one -> two -> three -> four -> five -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    -> (one -> two -> three -> four -> five -> data)
     -> Field one
     -> Field two
     -> Field three
     -> Field four
     -> Field five
     -> Block data
-record5 record field1 field2 field3 field4 field5 =
+record5 name view field1 field2 field3 field4 field5 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 , fieldExpectation field3
@@ -1877,16 +1848,16 @@ record5 record field1 field2 field3 field4 field5 =
                 , fieldExpectation field5
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -1915,7 +1886,7 @@ record5 record field1 field2 field3 field4 field5 =
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
@@ -1924,14 +1895,8 @@ record5 record field1 field2 field3 field4 field5 =
 
 {-| -}
 record6 :
-    { name : String
-    , view : one -> two -> three -> four -> five -> six -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    -> (one -> two -> three -> four -> five -> six -> data)
     -> Field one
     -> Field two
     -> Field three
@@ -1939,10 +1904,10 @@ record6 :
     -> Field five
     -> Field six
     -> Block data
-record6 record field1 field2 field3 field4 field5 field6 =
+record6 name view field1 field2 field3 field4 field5 field6 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 , fieldExpectation field3
@@ -1951,16 +1916,16 @@ record6 record field1 field2 field3 field4 field5 field6 =
                 , fieldExpectation field6
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -1991,7 +1956,7 @@ record6 record field1 field2 field3 field4 field5 field6 =
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
@@ -2000,14 +1965,8 @@ record6 record field1 field2 field3 field4 field5 field6 =
 
 {-| -}
 record7 :
-    { name : String
-    , view : one -> two -> three -> four -> five -> six -> seven -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    -> (one -> two -> three -> four -> five -> six -> seven -> data)
     -> Field one
     -> Field two
     -> Field three
@@ -2016,10 +1975,10 @@ record7 :
     -> Field six
     -> Field seven
     -> Block data
-record7 record field1 field2 field3 field4 field5 field6 field7 =
+record7 name view field1 field2 field3 field4 field5 field6 field7 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 , fieldExpectation field3
@@ -2029,16 +1988,16 @@ record7 record field1 field2 field3 field4 field5 field6 field7 =
                 , fieldExpectation field7
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -2071,7 +2030,7 @@ record7 record field1 field2 field3 field4 field5 field6 field7 =
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
@@ -2080,14 +2039,8 @@ record7 record field1 field2 field3 field4 field5 field6 field7 =
 
 {-| -}
 record8 :
-    { name : String
-    , view : one -> two -> three -> four -> five -> six -> seven -> eight -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> data)
     -> Field one
     -> Field two
     -> Field three
@@ -2097,10 +2050,10 @@ record8 :
     -> Field seven
     -> Field eight
     -> Block data
-record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
+record8 name view field1 field2 field3 field4 field5 field6 field7 field8 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 , fieldExpectation field3
@@ -2111,16 +2064,16 @@ record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
                 , fieldExpectation field8
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -2155,7 +2108,7 @@ record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
@@ -2164,14 +2117,8 @@ record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
 
 {-| -}
 record9 :
-    { name : String
-    , view : one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> data)
     -> Field one
     -> Field two
     -> Field three
@@ -2182,10 +2129,10 @@ record9 :
     -> Field eight
     -> Field nine
     -> Block data
-record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
+record9 name view field1 field2 field3 field4 field5 field6 field7 field8 field9 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 , fieldExpectation field3
@@ -2197,16 +2144,16 @@ record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
                 , fieldExpectation field9
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -2243,7 +2190,7 @@ record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
@@ -2252,14 +2199,8 @@ record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
 
 {-| -}
 record10 :
-    { name : String
-    , view : one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> ten -> data
-    , error :
-        { range : Range
-        , problem : Error.Error
-        }
-        -> data
-    }
+    String
+    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> ten -> data)
     -> Field one
     -> Field two
     -> Field three
@@ -2271,10 +2212,10 @@ record10 :
     -> Field nine
     -> Field ten
     -> Block data
-record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 field10 =
+record10 name view field1 field2 field3 field4 field5 field6 field7 field8 field9 field10 =
     let
         expectations =
-            ExpectRecord record.name
+            ExpectRecord name
                 [ fieldExpectation field1
                 , fieldExpectation field2
                 , fieldExpectation field3
@@ -2287,16 +2228,16 @@ record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 f
                 , fieldExpectation field10
                 ]
     in
-    Block record.name
+    Block name
         { expect = expectations
         , converter =
             \desc ->
                 case desc of
                     Record details ->
-                        if details.name == record.name then
+                        if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok record.view)
+                                    Ok (Ok view)
                                         |> Result.map2 applyField (getField field1 fieldDescriptions)
                                         |> Result.map2 applyField (getField field2 fieldDescriptions)
                                         |> Result.map2 applyField (getField field3 fieldDescriptions)
@@ -2335,7 +2276,7 @@ record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 f
                             ]
                 in
                 ( newSeed
-                , parseRecord record.name
+                , parseRecord name
                     expectations
                     fields
                 )
