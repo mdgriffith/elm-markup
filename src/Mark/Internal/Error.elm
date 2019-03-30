@@ -1,6 +1,7 @@
 module Mark.Internal.Error exposing
     ( Error(..), render
     , Context(..), Problem(..)
+    , AstError(..)
     )
 
 {-|
@@ -13,6 +14,10 @@ module Mark.Internal.Error exposing
 
 import Mark.Format as Format
 import Parser.Advanced as Parser
+
+
+type AstError
+    = NoMatch
 
 
 {-| -}

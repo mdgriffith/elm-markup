@@ -1,14 +1,19 @@
 module Mark.Internal.Description exposing
-    ( Found(..), Nested(..), UnexpectedDetails
+    ( parse, render, compile
+    , Found(..), Nested(..), UnexpectedDetails
     , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), AttrExpectation(..)
     , Parsed(..), startingPoint, descriptionToString, toString
     , create
     , Styling, emptyStyles
     , inlineExample
+    , Uncertain(..), ErrorWithRange
+    , Block(..), Document(..)
     )
 
 {-|
+
+@docs parse, render, compile
 
 @docs Found, Nested, UnexpectedDetails
 
@@ -24,13 +29,30 @@ module Mark.Internal.Description exposing
 
 @docs inlineExample
 
+@docs Uncertain, ErrorWithRange
+
+@docs Block, Document
+
 -}
 
 import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
+import Mark.Internal.Outcome exposing (..)
+import Parser.Advanced as Parser exposing (Parser)
 import Time
+
+
+{-| -}
+type Document data
+    = Document
+        { converter : Parsed -> Outcome Error.AstError (Uncertain data) data
+        , initialSeed : Id.Seed
+        , currentSeed : Id.Seed
+        , expect : Expectation
+        , parser : Parser Error.Context Error.Problem Parsed
+        }
 
 
 type alias Error =
@@ -43,7 +65,7 @@ type alias Error =
 {-| -}
 type Parsed
     = Parsed
-        { errors : List Error
+        { errors : List ErrorWithRange
         , found : Found Description
         , expected : Expectation
         , initialSeed : Id.Seed
@@ -88,6 +110,74 @@ type Nested item
         { content : item
         , children :
             List (Nested item)
+        }
+
+
+{-| As an error propogates up, it can gather futher context
+-}
+type alias ErrorWithRange =
+    { range : Range
+    , problem : Error.Error
+    }
+
+
+{-| With this type, we're not quite sure if we're going to be able to render or not.
+
+Scenarios:
+
+  - A field value of a record has multiple errors with it.
+  - It's caught and the error statue is rendered immediately.
+  - The document can be rendered, but we still have multiple errors to keep track of.
+
+-}
+type Uncertain data
+    = Uncertain ( ErrorWithRange, List ErrorWithRange )
+    | Recovered ( ErrorWithRange, List ErrorWithRange ) data
+
+
+{-| -}
+type
+    Block data
+    {-
+        A `Block data` is just a parser that results in `data`.
+
+       You'll be building up your `Document` in terms of the `Blocks`.
+
+       A block starts with `|` and has a name(already built into the parser)
+
+       A value is just a raw parser.
+
+       --- Error Propagation
+
+        Failure
+            -> The document has had a mismatch
+            -> This can only be recovered by `oneOf` or `manyOf`
+        Almost
+            -> An `Error` has been "raised".  It's propogated until it's resolved by `onError`
+            ->
+
+        Success
+            -> Well, this is the easy one.
+
+        Ids are only available on the element they apply to.
+
+        Recovery is done at the level above the errored block.
+
+        So, if there is a record with a string that is constrained
+
+        If the constraint fails, the record can say "Here's the reset"
+
+    -}
+    = Block
+        String
+        { converter : Description -> Outcome Error.AstError (Uncertain data) data
+        , expect : Expectation
+        , parser : Id.Seed -> ( Id.Seed, Parser Error.Context Error.Problem Description )
+        }
+    | Value
+        { converter : Description -> Outcome Error.AstError (Uncertain data) data
+        , expect : Expectation
+        , parser : Id.Seed -> ( Id.Seed, Parser Error.Context Error.Problem Description )
         }
 
 
@@ -1742,3 +1832,178 @@ createField currentIndent ( name, exp ) current =
                 :: current.fields
         , seed = multiline.seed
         }
+
+
+{-| -}
+parse : Document data -> String -> Result (List (Parser.DeadEnd Error.Context Error.Problem)) Parsed
+parse (Document blocks) source =
+    Parser.run blocks.parser source
+
+
+{-| -}
+type alias Partial data =
+    { errors : List Error
+    , result : data
+    }
+
+
+{-| -}
+startDocRange : Range
+startDocRange =
+    { start =
+        { offset = 0
+        , line = 1
+        , column = 1
+        }
+    , end =
+        { offset = 0
+        , line = 1
+        , column = 1
+        }
+    }
+
+
+errorsToList ( fst, remain ) =
+    fst :: remain
+
+
+{-| -}
+compile :
+    Document data
+    -> String
+    ->
+        Outcome (List ErrorWithRange)
+            { errors : List ErrorWithRange
+            , result : data
+            }
+            data
+compile (Document blocks) source =
+    case Parser.run blocks.parser source of
+        Ok ((Parsed parsedDetails) as parsed) ->
+            case parsedDetails.errors of
+                [] ->
+                    case blocks.converter parsed of
+                        Success rendered ->
+                            Success rendered
+
+                        Almost (Recovered errors rendered) ->
+                            Almost
+                                { errors = errorsToList errors
+                                , result = rendered
+                                }
+
+                        Almost (Uncertain errors) ->
+                            -- now we're certain :/
+                            Failure (errorsToList errors)
+
+                        Failure Error.NoMatch ->
+                            -- Invalid Ast.
+                            -- This should never happen because
+                            -- we definitely have the same document in both parsing and converting.
+                            Failure
+                                [ { problem = Error.DocumentMismatch
+                                  , range = startDocRange
+                                  }
+                                ]
+
+                _ ->
+                    case blocks.converter parsed of
+                        Success rendered ->
+                            Almost
+                                { errors = parsedDetails.errors
+                                , result = rendered
+                                }
+
+                        Almost (Uncertain ( err, remainError )) ->
+                            Failure ((err :: remainError) ++ parsedDetails.errors)
+
+                        Almost (Recovered ( err, remainError ) result) ->
+                            Almost
+                                { errors = (err :: remainError) ++ parsedDetails.errors
+                                , result = result
+                                }
+
+                        Failure noMatch ->
+                            Failure
+                                ({ problem = Error.DocumentMismatch
+                                 , range = startDocRange
+                                 }
+                                    :: parsedDetails.errors
+                                )
+
+        Err deadEnds ->
+            Failure <|
+                [ { problem = Error.ParsingIssue deadEnds
+                  , range =
+                        case List.head deadEnds of
+                            Nothing ->
+                                startDocRange
+
+                            Just deadEnd ->
+                                { start =
+                                    { offset = 0
+                                    , line = deadEnd.row
+                                    , column = deadEnd.col
+                                    }
+                                , end =
+                                    { offset = 0
+                                    , line = deadEnd.row
+                                    , column = deadEnd.col
+                                    }
+                                }
+                  }
+                ]
+
+
+{-| -}
+render :
+    Document data
+    -> Parsed
+    -> Outcome (List ErrorWithRange) { errors : List ErrorWithRange, result : data } data
+render (Document blocks) ((Parsed parsedDetails) as parsed) =
+    case parsedDetails.errors of
+        [] ->
+            case blocks.converter parsed of
+                Success rendered ->
+                    Success rendered
+
+                Almost (Uncertain ( err, remainError )) ->
+                    Failure (err :: remainError)
+
+                Almost (Recovered ( err, remainError ) result) ->
+                    Almost
+                        { errors = err :: remainError
+                        , result = result
+                        }
+
+                Failure noMatch ->
+                    Failure
+                        [ { problem = Error.DocumentMismatch
+                          , range = startDocRange
+                          }
+                        ]
+
+        _ ->
+            case blocks.converter parsed of
+                Success rendered ->
+                    Almost
+                        { errors = parsedDetails.errors
+                        , result = rendered
+                        }
+
+                Almost (Uncertain ( err, remainError )) ->
+                    Failure ((err :: remainError) ++ parsedDetails.errors)
+
+                Almost (Recovered ( err, remainError ) result) ->
+                    Almost
+                        { errors = (err :: remainError) ++ parsedDetails.errors
+                        , result = result
+                        }
+
+                Failure noMatch ->
+                    Failure
+                        ({ problem = Error.DocumentMismatch
+                         , range = startDocRange
+                         }
+                            :: parsedDetails.errors
+                        )

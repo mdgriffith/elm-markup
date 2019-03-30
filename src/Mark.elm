@@ -78,8 +78,9 @@ import Html.Attributes
 import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Description as Desc exposing (..)
-import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
+import Mark.Internal.Error as Error exposing (AstError(..), Context(..), Problem(..))
 import Mark.Internal.Id as Id exposing (..)
+import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 import Time
@@ -101,12 +102,9 @@ toString =
 
 
 {-| -}
-parse :
-    Document data
-    -> String
-    -> Outcome Error (Partial Parsed) Parsed
-parse (Document blocks) source =
-    case Parser.run blocks.parser source of
+parse : Document data -> String -> Outcome Error (Partial Parsed) Parsed
+parse doc source =
+    case Desc.parse doc source of
         Ok ((Parsed parsedDetails) as parsed) ->
             case parsedDetails.errors of
                 [] ->
@@ -114,14 +112,13 @@ parse (Document blocks) source =
 
                 _ ->
                     Almost
-                        { errors = parsedDetails.errors
+                        { errors = List.map (Error.render source) parsedDetails.errors
                         , result = parsed
                         }
 
         Err deadEnds ->
             Failure <|
-                Error.render
-                    source
+                Error.render source
                     { problem = Error.ParsingIssue deadEnds
                     , range =
                         case List.head deadEnds of
@@ -181,155 +178,34 @@ errorsToList ( fst, remain ) =
 
 
 {-| -}
-compile : Document data -> String -> Outcome (List Error) (Partial data) data
-compile (Document blocks) source =
-    case Parser.run blocks.parser source of
-        Ok ((Parsed parsedDetails) as parsed) ->
-            case parsedDetails.errors of
-                [] ->
-                    case blocks.converter parsed of
-                        Success rendered ->
-                            Success rendered
-
-                        Almost (Recovered errors rendered) ->
-                            Almost
-                                { errors = List.map (Error.render source) (errorsToList errors)
-                                , result = rendered
-                                }
-
-                        Almost (Uncertain errors) ->
-                            -- now we're certain :/
-                            Failure (List.map (Error.render source) (errorsToList errors))
-
-                        Failure NoMatch ->
-                            -- Invalid Ast.
-                            -- This should never happen because
-                            -- we definitely have the same document in both parsing and converting.
-                            Failure
-                                [ Error.render source
-                                    { problem = Error.DocumentMismatch
-                                    , range = startDocRange
-                                    }
-                                ]
-
-                _ ->
-                    case blocks.converter parsed of
-                        Success rendered ->
-                            Almost
-                                { errors = parsedDetails.errors
-                                , result = rendered
-                                }
-
-                        Almost (Uncertain ( err, remainError )) ->
-                            Failure (List.map (Error.render "") (err :: remainError) ++ parsedDetails.errors)
-
-                        Almost (Recovered ( err, remainError ) result) ->
-                            Almost
-                                { errors = List.map (Error.render "") (err :: remainError) ++ parsedDetails.errors
-                                , result = result
-                                }
-
-                        Failure noMatch ->
-                            Failure
-                                (Error.render ""
-                                    { problem = Error.DocumentMismatch
-                                    , range = startDocRange
-                                    }
-                                    :: parsedDetails.errors
-                                )
-
-        Err deadEnds ->
-            Failure <|
-                [ Error.render
-                    source
-                    { problem = Error.ParsingIssue deadEnds
-                    , range =
-                        case List.head deadEnds of
-                            Nothing ->
-                                startDocRange
-
-                            Just deadEnd ->
-                                { start =
-                                    { offset = 0
-                                    , line = deadEnd.row
-                                    , column = deadEnd.col
-                                    }
-                                , end =
-                                    { offset = 0
-                                    , line = deadEnd.row
-                                    , column = deadEnd.col
-                                    }
-                                }
-                    }
-                ]
-
-
-{-| -}
 render : Document data -> Parsed -> Outcome (List Error) (Partial data) data
-render (Document blocks) ((Parsed parsedDetails) as parsed) =
-    case parsedDetails.errors of
-        [] ->
-            case blocks.converter parsed of
-                Success rendered ->
-                    Success rendered
-
-                Almost (Uncertain ( err, remainError )) ->
-                    Failure (List.map (Error.render "") (err :: remainError))
-
-                Almost (Recovered ( err, remainError ) result) ->
-                    Almost
-                        { errors = List.map (Error.render "") (err :: remainError)
-                        , result = result
-                        }
-
-                Failure noMatch ->
-                    Failure
-                        [ Error.render ""
-                            { problem = Error.DocumentMismatch
-                            , range = startDocRange
-                            }
-                        ]
-
-        _ ->
-            case blocks.converter parsed of
-                Success rendered ->
-                    Almost
-                        { errors = parsedDetails.errors
-                        , result = rendered
-                        }
-
-                Almost (Uncertain ( err, remainError )) ->
-                    Failure (List.map (Error.render "") (err :: remainError) ++ parsedDetails.errors)
-
-                Almost (Recovered ( err, remainError ) result) ->
-                    Almost
-                        { errors = List.map (Error.render "") (err :: remainError) ++ parsedDetails.errors
-                        , result = result
-                        }
-
-                Failure noMatch ->
-                    Failure
-                        (Error.render ""
-                            { problem = Error.DocumentMismatch
-                            , range = startDocRange
-                            }
-                            :: parsedDetails.errors
-                        )
+render doc ((Parsed parsedDetails) as parsed) =
+    Desc.render doc parsed
+        |> errorsToMessages
 
 
 {-| -}
-type Document data
-    = Document
-        { converter : Parsed -> Outcome AstError (Uncertain data) data
-        , initialSeed : Id.Seed
-        , currentSeed : Id.Seed
-        , expect : Expectation
-        , parser : Parser Context Problem Parsed
-        }
+compile : Document data -> String -> Outcome (List Error) (Partial data) data
+compile doc source =
+    Desc.compile doc source
+        |> errorsToMessages
 
 
-type AstError
-    = NoMatch
+errorsToMessages outcome =
+    case outcome of
+        Outcome.Success s ->
+            Success s
+
+        Outcome.Almost { errors, result } ->
+            Almost { errors = List.map (Error.render "") errors, result = result }
+
+        Outcome.Failure errors ->
+            Failure (List.map (Error.render "") errors)
+
+
+{-| -}
+type alias Document data =
+    Desc.Document data
 
 
 {-| -}
@@ -339,135 +215,104 @@ type Outcome failure almost success
     | Failure failure
 
 
-mapSuccess : (success -> otherSuccess) -> Outcome f a success -> Outcome f a otherSuccess
+mapSuccess : (success -> otherSuccess) -> Outcome.Outcome f a success -> Outcome.Outcome f a otherSuccess
 mapSuccess fn outcome =
     case outcome of
-        Success s ->
-            Success (fn s)
+        Outcome.Success s ->
+            Outcome.Success (fn s)
 
-        Almost a ->
-            Almost a
+        Outcome.Almost a ->
+            Outcome.Almost a
 
-        Failure f ->
-            Failure f
+        Outcome.Failure f ->
+            Outcome.Failure f
 
 
 {-| This doesn't cause something to completely fail, but logs the error.
 -}
 logErrors :
     ( ErrorWithRange, List ErrorWithRange )
-    -> Outcome f (Uncertain success) success
-    -> Outcome f (Uncertain success) success
+    -> Outcome.Outcome f (Uncertain success) success
+    -> Outcome.Outcome f (Uncertain success) success
 logErrors (( fst, remainingErrs ) as err) outcome =
     case outcome of
-        Success s ->
-            Almost (Recovered err s)
+        Outcome.Success s ->
+            Outcome.Almost (Recovered err s)
 
-        Almost (Uncertain u) ->
-            Almost (Uncertain (mergeErrors u err))
+        Outcome.Almost (Uncertain u) ->
+            Outcome.Almost (Uncertain (mergeErrors u err))
 
-        Almost (Recovered e a) ->
-            Almost (Recovered (mergeErrors e err) a)
+        Outcome.Almost (Recovered e a) ->
+            Outcome.Almost (Recovered (mergeErrors e err) a)
 
-        Failure failures ->
-            Failure failures
+        Outcome.Failure failures ->
+            Outcome.Failure failures
 
 
 mapSuccessAndRecovered :
     (success -> otherSuccess)
-    -> Outcome f (Uncertain success) success
-    -> Outcome f (Uncertain otherSuccess) otherSuccess
+    -> Outcome.Outcome f (Uncertain success) success
+    -> Outcome.Outcome f (Uncertain otherSuccess) otherSuccess
 mapSuccessAndRecovered fn outcome =
     case outcome of
-        Success s ->
-            Success (fn s)
+        Outcome.Success s ->
+            Outcome.Success (fn s)
 
-        Almost (Uncertain u) ->
-            Almost (Uncertain u)
+        Outcome.Almost (Uncertain u) ->
+            Outcome.Almost (Uncertain u)
 
-        Almost (Recovered e a) ->
-            Almost (Recovered e (fn a))
+        Outcome.Almost (Recovered e a) ->
+            Outcome.Almost (Recovered e (fn a))
 
-        Failure f ->
-            Failure f
-
-
-{-| As an error propogates up, it can gather futher context
--}
-type alias ErrorWithRange =
-    { range : Range
-    , problem : Error.Error
-    }
-
-
-{-| With this type, we're not quite sure if we're going to be able to render or not.
-
-Scenarios:
-
-  - A field value of a record has multiple errors with it.
-  - It's caught and the error statue is rendered immediately.
-  - The document can be rendered, but we still have multiple errors to keep track of.
-
--}
-type Uncertain data
-    = Uncertain ( ErrorWithRange, List ErrorWithRange )
-    | Recovered ( ErrorWithRange, List ErrorWithRange ) data
+        Outcome.Failure f ->
+            Outcome.Failure f
 
 
 {-| -}
-uncertain : ErrorWithRange -> Outcome AstError (Uncertain data) data
+uncertain : ErrorWithRange -> Outcome.Outcome AstError (Uncertain data) data
 uncertain err =
-    Almost (Uncertain ( err, [] ))
+    Outcome.Almost (Uncertain ( err, [] ))
 
 
 {-| -}
-type
-    Block data
-    {-
-        A `Block data` is just a parser that results in `data`.
-
-       You'll be building up your `Document` in terms of the `Blocks`.
-
-       A block starts with `|` and has a name(already built into the parser)
-
-       A value is just a raw parser.
-
-       --- Error Propagation
-
-        Failure
-            -> The document has had a mismatch
-            -> This can only be recovered by `oneOf` or `manyOf`
-        Almost
-            -> An `Error` has been "raised".  It's propogated until it's resolved by `onError`
-            ->
-
-        Success
-            -> Well, this is the easy one.
-
-        Ids are only available on the element they apply to.
-
-        Recovery is done at the level above the errored block.
-
-        So, if there is a record with a string that is constrained
-
-        If the constraint fails, the record can say "Here's the reset"
+type alias Block data =
+    Desc.Block data
 
 
 
-
-
-    -}
-    = Block
-        String
-        { converter : Description -> Outcome AstError (Uncertain data) data
-        , expect : Expectation
-        , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
-        }
-    | Value
-        { converter : Description -> Outcome AstError (Uncertain data) data
-        , expect : Expectation
-        , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
-        }
+-- {-| -}
+-- type
+--     Block data
+--     {-
+--         A `Block data` is just a parser that results in `data`.
+--        You'll be building up your `Document` in terms of the `Blocks`.
+--        A block starts with `|` and has a name(already built into the parser)
+--        A value is just a raw parser.
+--        --- Error Propagation
+--         Outcome.Failure
+--             -> The document has had a mismatch
+--             -> This can only be recovered by `oneOf` or `manyOf`
+--         Outcome.Almost
+--             -> An `Error` has been "raised".  It's propogated until it's resolved by `onError`
+--             ->
+--         Outcome.Success
+--             -> Well, this is the easy one.
+--         Ids are only available on the element they apply to.
+--         Recovery is done at the level above the errored block.
+--         So, if there is a record with a string that is constrained
+--         If the constraint fails, the record can say "Here's the reset"
+--     -}
+--     = Block
+--         String
+--         { converter : Description -> Outcome.Outcome AstError (Uncertain data) data
+--         , expect : Expectation
+--         , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
+--         }
+--     | Value
+--         { converter : Description -> Outcome.Outcome AstError (Uncertain data) data
+--         , expect : Expectation
+--         , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
+--         }
 
 
 getParser : Id.Seed -> Block data -> ( Id.Seed, Parser Context Problem Description )
@@ -499,7 +344,7 @@ blockName fromBlock =
             Nothing
 
 
-renderBlock : Block data -> Description -> Outcome AstError (Uncertain data) data
+renderBlock : Block data -> Description -> Outcome.Outcome AstError (Uncertain data) data
 renderBlock fromBlock =
     case fromBlock of
         Block name { converter } ->
@@ -691,25 +536,25 @@ document view child =
                 case parsed.found of
                     Found range childDesc ->
                         case renderBlock child childDesc of
-                            Success renderedChild ->
-                                Success (view renderedChild)
+                            Outcome.Success renderedChild ->
+                                Outcome.Success (view renderedChild)
 
-                            Failure err ->
-                                Failure err
+                            Outcome.Failure err ->
+                                Outcome.Failure err
 
-                            Almost (Uncertain unexpected) ->
-                                Almost (Uncertain unexpected)
+                            Outcome.Almost (Uncertain unexpected) ->
+                                Outcome.Almost (Uncertain unexpected)
 
-                            Almost (Recovered errors renderedChild) ->
-                                Almost (Recovered errors (view renderedChild))
+                            Outcome.Almost (Recovered errors renderedChild) ->
+                                Outcome.Almost (Recovered errors (view renderedChild))
 
                     Unexpected unexpected ->
-                        Almost (Uncertain ( unexpected, [] ))
+                        Outcome.Almost (Uncertain ( unexpected, [] ))
         , parser =
             Parser.succeed
                 (\source ( range, val ) ->
                     Parsed
-                        { errors = List.map (Error.render source) (getUnexpecteds val)
+                        { errors = getUnexpecteds val
                         , found = Found range val
                         , expected = getBlockExpectation child
                         , initialSeed = seed
@@ -778,10 +623,10 @@ verify fn myBlock =
                 , converter =
                     \desc ->
                         case details.converter desc of
-                            Success a ->
+                            Outcome.Success a ->
                                 case fn a of
                                     Ok new ->
-                                        Success new
+                                        Outcome.Success new
 
                                     Err newErr ->
                                         uncertain
@@ -789,10 +634,10 @@ verify fn myBlock =
                                             , range = startDocRange
                                             }
 
-                            Almost (Recovered err a) ->
+                            Outcome.Almost (Recovered err a) ->
                                 case fn a of
                                     Ok new ->
-                                        Almost (Recovered err new)
+                                        Outcome.Almost (Recovered err new)
 
                                     Err newErr ->
                                         uncertain
@@ -800,11 +645,11 @@ verify fn myBlock =
                                             , range = startDocRange
                                             }
 
-                            Almost (Uncertain x) ->
-                                Almost (Uncertain x)
+                            Outcome.Almost (Uncertain x) ->
+                                Outcome.Almost (Uncertain x)
 
-                            Failure f ->
-                                Failure f
+                            Outcome.Failure f ->
+                                Outcome.Failure f
                 }
 
         Value details ->
@@ -814,10 +659,10 @@ verify fn myBlock =
                 , converter =
                     \desc ->
                         case details.converter desc of
-                            Success a ->
+                            Outcome.Success a ->
                                 case fn a of
                                     Ok new ->
-                                        Success new
+                                        Outcome.Success new
 
                                     Err newErr ->
                                         uncertain
@@ -825,10 +670,10 @@ verify fn myBlock =
                                             , range = startDocRange
                                             }
 
-                            Almost (Recovered err a) ->
+                            Outcome.Almost (Recovered err a) ->
                                 case fn a of
                                     Ok new ->
-                                        Almost (Recovered err new)
+                                        Outcome.Almost (Recovered err new)
 
                                     Err newErr ->
                                         uncertain
@@ -836,11 +681,11 @@ verify fn myBlock =
                                             , range = startDocRange
                                             }
 
-                            Almost (Uncertain x) ->
-                                Almost (Uncertain x)
+                            Outcome.Almost (Uncertain x) ->
+                                Outcome.Almost (Uncertain x)
 
-                            Failure f ->
-                                Failure f
+                            Outcome.Failure f ->
+                                Outcome.Failure f
                 }
 
 
@@ -855,17 +700,17 @@ onError recover myBlock =
                 , converter =
                     \desc ->
                         case details.converter desc of
-                            Success a ->
-                                Success a
+                            Outcome.Success a ->
+                                Outcome.Success a
 
-                            Almost (Recovered err a) ->
-                                Almost (Recovered err a)
+                            Outcome.Almost (Recovered err a) ->
+                                Outcome.Almost (Recovered err a)
 
-                            Almost (Uncertain x) ->
-                                Almost (Recovered x (recover (errorsToList x)))
+                            Outcome.Almost (Uncertain x) ->
+                                Outcome.Almost (Recovered x (recover (errorsToList x)))
 
-                            Failure f ->
-                                Failure f
+                            Outcome.Failure f ->
+                                Outcome.Failure f
                 }
 
         Value details ->
@@ -875,17 +720,17 @@ onError recover myBlock =
                 , converter =
                     \desc ->
                         case details.converter desc of
-                            Success a ->
-                                Success a
+                            Outcome.Success a ->
+                                Outcome.Success a
 
-                            Almost (Recovered err a) ->
-                                Almost (Recovered err a)
+                            Outcome.Almost (Recovered err a) ->
+                                Outcome.Almost (Recovered err a)
 
-                            Almost (Uncertain x) ->
-                                Almost (Recovered x (recover (errorsToList x)))
+                            Outcome.Almost (Uncertain x) ->
+                                Outcome.Almost (Recovered x (recover (errorsToList x)))
 
-                            Failure f ->
-                                Failure f
+                            Outcome.Failure f ->
+                                Outcome.Failure f
                 }
 
 
@@ -923,11 +768,11 @@ mapFound fn found =
 --                                 Found range _ ->
 --                                     Ok (Found range (renderer range))
 --                                 Unexpected unexpected ->
---                                     Almost unexpected
+--                                     Outcome.Almost unexpected
 --                         else
---                             Failure NoMatch
+--                             Outcome.Failure NoMatch
 --                     _ ->
---                         Failure NoMatch
+--                         Outcome.Failure NoMatch
 --         , parser =
 --             skipSeed <|
 --                 Parser.map
@@ -981,10 +826,10 @@ block blockDetails child =
 
                         else
                             -- This is not the block that was expected.
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1081,24 +926,24 @@ blockNameParser name =
 
 mergeWith fn one two =
     case ( one, two ) of
-        ( Success renderedOne, Success renderedTwo ) ->
-            Success (fn renderedOne renderedTwo)
+        ( Outcome.Success renderedOne, Outcome.Success renderedTwo ) ->
+            Outcome.Success (fn renderedOne renderedTwo)
 
-        ( Almost (Recovered firstErrs fst), Almost (Recovered secondErrs snd) ) ->
-            Almost
+        ( Outcome.Almost (Recovered firstErrs fst), Outcome.Almost (Recovered secondErrs snd) ) ->
+            Outcome.Almost
                 (Recovered
                     (mergeErrors firstErrs secondErrs)
                     (fn fst snd)
                 )
 
-        ( Almost (Uncertain unexpected), _ ) ->
-            Almost (Uncertain unexpected)
+        ( Outcome.Almost (Uncertain unexpected), _ ) ->
+            Outcome.Almost (Uncertain unexpected)
 
-        ( _, Almost (Uncertain unexpected) ) ->
-            Almost (Uncertain unexpected)
+        ( _, Outcome.Almost (Uncertain unexpected) ) ->
+            Outcome.Almost (Uncertain unexpected)
 
         _ ->
-            Failure NoMatch
+            Outcome.Failure NoMatch
 
 
 {-| -}
@@ -1119,7 +964,7 @@ startWith fn startBlock endBlock =
                             (renderBlock endBlock end.found)
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1165,9 +1010,9 @@ oneOf blocks =
     let
         matchBlock description blck found =
             case found of
-                Failure _ ->
+                Outcome.Failure _ ->
                     case renderBlock blck description of
-                        Failure _ ->
+                        Outcome.Failure _ ->
                             found
 
                         otherwise ->
@@ -1187,13 +1032,13 @@ oneOf blocks =
                     OneOf details ->
                         case details.child of
                             Found rng found ->
-                                List.foldl (matchBlock found) (Failure NoMatch) blocks
+                                List.foldl (matchBlock found) (Outcome.Failure NoMatch) blocks
 
                             Unexpected unexpected ->
                                 uncertain unexpected
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1391,16 +1236,16 @@ manyOf manyOfDetails blocks =
         { expect = ExpectManyOf expectations
         , converter =
             \desc ->
-                Failure NoMatch
+                Outcome.Failure NoMatch
 
         -- let
         --     applyDesc description blck found =
         --         case found of
         --             Nothing ->
         --                 case renderBlock blck description of
-        --                     Failure _ ->
+        --                     Outcome.Failure _ ->
         --                         found
-        --                     Success rendered ->
+        --                     Outcome.Success rendered ->
         --                         Just rendered
         --                     _ ->
         --                         found
@@ -1429,9 +1274,9 @@ manyOf manyOfDetails blocks =
         --                     Found range child ->
         --                         case List.foldl (applyDesc child) Nothing blocks of
         --                             Nothing ->
-        --                                 ( Failure NoMatch, index + 1 )
-        --                             Just (Success result) ->
-        --                                 ( Success
+        --                                 ( Outcome.Failure NoMatch, index + 1 )
+        --                             Just (Outcome.Success result) ->
+        --                                 ( Outcome.Success
         --                                     (manyOfDetails.view
         --                                         { parent = id
         --                                         , options = choices
@@ -1442,8 +1287,8 @@ manyOf manyOfDetails blocks =
         --                                     )
         --                                 , index + 1
         --                                 )
-        --                             Just (Almost (Recovered err result)) ->
-        --                                 ( Almost
+        --                             Just (Outcome.Almost (Recovered err result)) ->
+        --                                 ( Outcome.Almost
         --                                     (Recovered err
         --                                         (manyOfDetails.view
         --                                             { parent = id
@@ -1456,12 +1301,12 @@ manyOf manyOfDetails blocks =
         --                                     )
         --                                 , index + 1
         --                                 )
-        --                             Just (Almost (Uncertain err)) ->
-        --                                 ( Almost (Uncertain err)
+        --                             Just (Outcome.Almost (Uncertain err)) ->
+        --                                 ( Outcome.Almost (Uncertain err)
         --                                 , index + 1
         --                                 )
-        --                             Just (Failure err) ->
-        --                                 ( Failure err
+        --                             Just (Outcome.Failure err) ->
+        --                                 ( Outcome.Failure err
         --                                 , index + 1
         --                                 )
         -- in
@@ -1471,7 +1316,7 @@ manyOf manyOfDetails blocks =
         --             |> Tuple.first
         --             |> Result.map
         --                 (\items ->
-        --                     Success
+        --                     Outcome.Success
         --                         (manyOfDetails.merge
         --                             { parent = many.id
         --                             , options = many.choices
@@ -1480,7 +1325,7 @@ manyOf manyOfDetails blocks =
         --                         )
         --                 )
         --     _ ->
-        --         Failure NoMatch
+        --         Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1707,7 +1552,7 @@ nested config =
                                 reduceRender (renderTreeNodeSmall config) nestedDescriptors
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 -- TODO: AHHHH, A NEW SEED NEEDS TO GET CREATED
@@ -1852,10 +1697,10 @@ record2 record field1 field2 =
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1915,10 +1760,10 @@ record3 record field1 field2 field3 =
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -1982,10 +1827,10 @@ record4 record field1 field2 field3 field4 =
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2053,10 +1898,10 @@ record5 record field1 field2 field3 field4 field5 =
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2128,10 +1973,10 @@ record6 record field1 field2 field3 field4 field5 field6 =
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2207,10 +2052,10 @@ record7 record field1 field2 field3 field4 field5 field6 field7 =
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2290,10 +2135,10 @@ record8 record field1 field2 field3 field4 field5 field6 field7 field8 =
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2377,10 +2222,10 @@ record9 record field1 field2 field3 field4 field5 field6 field7 field8 field9 =
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2468,10 +2313,10 @@ record10 record field1 field2 field3 field4 field5 field6 field7 field8 field9 f
                                     uncertain unexpected
 
                         else
-                            Failure NoMatch
+                            Outcome.Failure NoMatch
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2593,7 +2438,7 @@ textWith options =
 
 
 type alias Cursor data =
-    Outcome AstError (Uncertain data) data
+    Outcome.Outcome AstError (Uncertain data) data
 
 
 renderText :
@@ -2606,11 +2451,11 @@ renderText :
 renderText options description =
     case description of
         DescribeText details ->
-            List.foldl (convertTextDescription options) (Success []) details.text
+            List.foldl (convertTextDescription options) (Outcome.Success []) details.text
                 |> mapSuccessAndRecovered List.reverse
 
         _ ->
-            Failure NoMatch
+            Outcome.Failure NoMatch
 
 
 textToText (Desc.Text styling txt) =
@@ -2628,7 +2473,7 @@ convertTextDescription :
 convertTextDescription options comp cursor =
     case comp of
         Styled range (Desc.Text styling str) ->
-            mergeWith (::) (Success (options.view (Text styling str))) cursor
+            mergeWith (::) (Outcome.Success (options.view (Text styling str))) cursor
 
         InlineToken details ->
             let
@@ -2714,10 +2559,10 @@ convertTextDescription options comp cursor =
 
 
 -- case cursor of
---     Success found ->
---         capture found Success
---     Almost (Recovered errs found) ->
---         capture found (\new -> Almost (Recovered errs new))
+--     Outcome.Success found ->
+--         capture found Outcome.Success
+--     Outcome.Almost (Recovered errs found) ->
+--         capture found (\new -> Outcome.Almost (Recovered errs new))
 --     _ ->
 --         cursor
 
@@ -2769,7 +2614,7 @@ type alias Replacement =
 
 type Inline data
     = Inline
-        { converter : List Text -> List InlineAttribute -> Outcome AstError (Uncertain (List data)) (List data)
+        { converter : List Text -> List InlineAttribute -> Outcome.Outcome AstError (Uncertain (List data)) (List data)
         , expect : InlineExpectation
         , name : String
         }
@@ -2781,7 +2626,7 @@ token name result =
     Inline
         { converter =
             \_ attrs ->
-                Success [ result ]
+                Outcome.Success [ result ]
         , expect =
             ExpectToken name []
         , name = name
@@ -2804,7 +2649,7 @@ annotation name result =
     Inline
         { converter =
             \textPieces attrs ->
-                Success [ result textPieces ]
+                Outcome.Success [ result textPieces ]
         , expect =
             ExpectAnnotation name []
         , name = name
@@ -2821,7 +2666,7 @@ attrString name newInline =
                     \textPieces attrs ->
                         case attrs of
                             [] ->
-                                Failure NoMatch
+                                Outcome.Failure NoMatch
 
                             (AttrString attr) :: remaining ->
                                 details.converter textPieces remaining
@@ -2854,10 +2699,10 @@ multiline =
             \desc ->
                 case desc of
                     DescribeMultiline id range str ->
-                        Success str
+                        Outcome.Success str
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2890,10 +2735,10 @@ string =
             \desc ->
                 case desc of
                     DescribeString id range str ->
-                        Success str
+                        Outcome.Success str
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -2934,9 +2779,9 @@ string =
 --             \desc ->
 --                 case desc of
 --                     DescribeDate found ->
---                         Success (mapFound (\( str_, fl ) -> details.view found.id fl) found.found)
+--                         Outcome.Success (mapFound (\( str_, fl ) -> details.view found.id fl) found.found)
 --                     _ ->
---                         Failure NoMatch
+--                         Outcome.Failure NoMatch
 --         , parser =
 --             \seed ->
 --                 let
@@ -3003,9 +2848,9 @@ foundToResult found err =
 --                         if key == existingKey then
 --                             Ok (Found range value)
 --                         else
---                             Failure NoMatch
+--                             Outcome.Failure NoMatch
 --                     _ ->
---                         Failure NoMatch
+--                         Outcome.Failure NoMatch
 --         , parser =
 --             skipSeed
 --                 (Parser.succeed
@@ -3032,7 +2877,7 @@ bool =
                         foundToOutcome details.found
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
@@ -3074,10 +2919,10 @@ bool =
 foundToOutcome found =
     case found of
         Found rng i ->
-            Success i
+            Outcome.Success i
 
         Unexpected unexpected ->
-            Almost (Uncertain ( unexpected, [] ))
+            Outcome.Almost (Uncertain ( unexpected, [] ))
 
 
 {-| Parse an `Int` block.
@@ -3092,7 +2937,7 @@ int =
                         foundToOutcome details.found
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , expect = ExpectInteger 0
         , parser =
             \seed ->
@@ -3125,7 +2970,7 @@ float =
                             |> mapSuccess Tuple.second
 
                     _ ->
-                        Failure NoMatch
+                        Outcome.Failure NoMatch
         , expect = ExpectFloat 0
         , parser =
             \seed ->
@@ -3172,7 +3017,7 @@ float =
 --                     DescribeIntBetween details ->
 --                         Ok (mapFound (bounds.view details.id) details.found)
 --                     _ ->
---                         Failure NoMatch
+--                         Outcome.Failure NoMatch
 --         , parser =
 --             \seed ->
 --                 let
@@ -3235,7 +3080,7 @@ float =
 --                     DescribeFloatBetween details ->
 --                         Ok (mapFound (\( str_, fl ) -> bounds.view details.id fl) details.found)
 --                     _ ->
---                         Failure NoMatch
+--                         Outcome.Failure NoMatch
 --         , parser =
 --             \seed ->
 --                 let
@@ -3667,7 +3512,7 @@ renderRecordResult pos result =
         Ok parsedCorrectly ->
             case parsedCorrectly of
                 Ok rendered ->
-                    Success rendered
+                    Outcome.Success rendered
 
                 Err unexpected ->
                     uncertain unexpected
@@ -3696,7 +3541,7 @@ type Indented thing
 {-| Either:
 
     1. Parses indent ++ parser ++ newline
-        -> Success!
+        -> Outcome.Success!
     2. Parses many spaces ++ newline
         -> Ignore completely
     3. Parses some number of spaces ++ some not newlines ++ newline
@@ -3941,13 +3786,13 @@ matchField targetName targetBlock ( name, foundDescription ) existing =
                 case foundDescription of
                     Found rng description ->
                         case renderBlock targetBlock description of
-                            Success rendered ->
+                            Outcome.Success rendered ->
                                 Ok (Found rng rendered)
 
-                            Almost invalidAst ->
+                            Outcome.Almost invalidAst ->
                                 Err err
 
-                            Failure _ ->
+                            Outcome.Failure _ ->
                                 Err err
 
                     Unexpected unexpected ->
@@ -4037,35 +3882,35 @@ emptyTreeBuilder =
 
 
 reduceRender :
-    (thing -> Outcome AstError (Uncertain other) other)
+    (thing -> Outcome.Outcome AstError (Uncertain other) other)
     -> List thing
-    -> Outcome AstError (Uncertain (List other)) (List other)
+    -> Outcome.Outcome AstError (Uncertain (List other)) (List other)
 reduceRender fn list =
     list
         |> List.foldl
             (\x gathered ->
                 case gathered of
-                    Success remain ->
+                    Outcome.Success remain ->
                         case fn x of
-                            Success newThing ->
-                                Success (newThing :: remain)
+                            Outcome.Success newThing ->
+                                Outcome.Success (newThing :: remain)
 
-                            Almost (Uncertain err) ->
-                                Almost (Uncertain err)
+                            Outcome.Almost (Uncertain err) ->
+                                Outcome.Almost (Uncertain err)
 
-                            Almost (Recovered err data) ->
-                                Almost
+                            Outcome.Almost (Recovered err data) ->
+                                Outcome.Almost
                                     (Recovered err
                                         (data :: remain)
                                     )
 
-                            Failure f ->
-                                Failure f
+                            Outcome.Failure f ->
+                                Outcome.Failure f
 
                     almostOrfailure ->
                         almostOrfailure
             )
-            (Success [])
+            (Outcome.Success [])
         |> mapSuccess List.reverse
 
 
@@ -4078,7 +3923,7 @@ renderTreeNodeSmall :
     , start : Block icon
     }
     -> Nested ( Description, List Description )
-    -> Outcome AstError (Uncertain (Nested ( icon, List item ))) (Nested ( icon, List item ))
+    -> Outcome.Outcome AstError (Uncertain (Nested ( icon, List item ))) (Nested ( icon, List item ))
 renderTreeNodeSmall config (Nested cursor) =
     let
         renderedChildren =
@@ -4092,7 +3937,7 @@ renderTreeNodeSmall config (Nested cursor) =
                     )
     in
     case renderedContent of
-        ( Success icon, Success content ) ->
+        ( Outcome.Success icon, Outcome.Success content ) ->
             mapSuccessAndRecovered
                 (\children ->
                     Nested
@@ -4102,7 +3947,7 @@ renderTreeNodeSmall config (Nested cursor) =
                 )
                 renderedChildren
 
-        ( Success icon, Almost (Recovered contentErrors content) ) ->
+        ( Outcome.Success icon, Outcome.Almost (Recovered contentErrors content) ) ->
             renderedChildren
                 |> mapSuccessAndRecovered
                     (\children ->
@@ -4113,7 +3958,7 @@ renderTreeNodeSmall config (Nested cursor) =
                     )
                 |> logErrors contentErrors
 
-        ( Almost (Recovered iconErrors icon), Success content ) ->
+        ( Outcome.Almost (Recovered iconErrors icon), Outcome.Success content ) ->
             renderedChildren
                 |> mapSuccessAndRecovered
                     (\children ->
@@ -4124,10 +3969,10 @@ renderTreeNodeSmall config (Nested cursor) =
                     )
                 |> logErrors iconErrors
 
-        ( Almost (Recovered iconErrors icon), Almost (Recovered contentErrors content) ) ->
+        ( Outcome.Almost (Recovered iconErrors icon), Outcome.Almost (Recovered contentErrors content) ) ->
             case renderedChildren of
-                Success successfullyRenderedChildren ->
-                    Almost
+                Outcome.Success successfullyRenderedChildren ->
+                    Outcome.Almost
                         (Recovered
                             (mergeErrors iconErrors contentErrors)
                             (Nested
@@ -4137,8 +3982,8 @@ renderTreeNodeSmall config (Nested cursor) =
                             )
                         )
 
-                Almost (Recovered errors result) ->
-                    Almost
+                Outcome.Almost (Recovered errors result) ->
+                    Outcome.Almost
                         (Recovered
                             (mergeErrors errors (mergeErrors iconErrors contentErrors))
                             (Nested
@@ -4148,23 +3993,23 @@ renderTreeNodeSmall config (Nested cursor) =
                             )
                         )
 
-                Almost (Uncertain errs) ->
-                    Almost (Uncertain errs)
+                Outcome.Almost (Uncertain errs) ->
+                    Outcome.Almost (Uncertain errs)
 
-                Failure failure ->
-                    Failure failure
+                Outcome.Failure failure ->
+                    Outcome.Failure failure
 
-        ( Almost (Uncertain unexpected), _ ) ->
-            Almost (Uncertain unexpected)
+        ( Outcome.Almost (Uncertain unexpected), _ ) ->
+            Outcome.Almost (Uncertain unexpected)
 
-        ( _, Almost (Uncertain unexpected) ) ->
-            Almost (Uncertain unexpected)
+        ( _, Outcome.Almost (Uncertain unexpected) ) ->
+            Outcome.Almost (Uncertain unexpected)
 
-        ( Failure err, _ ) ->
-            Failure err
+        ( Outcome.Failure err, _ ) ->
+            Outcome.Failure err
 
-        ( _, Failure err ) ->
-            Failure err
+        ( _, Outcome.Failure err ) ->
+            Outcome.Failure err
 
 
 buildTree baseIndent items =
