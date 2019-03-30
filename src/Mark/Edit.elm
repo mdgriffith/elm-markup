@@ -23,12 +23,10 @@ module Mark.Edit exposing
 
 -}
 
-import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
-import Time
 
 
 type alias Error =
@@ -115,7 +113,6 @@ move =
 type Edit
     = UpdateFloat (Id Float) Float
     | UpdateString (Id String) String
-    | UpdateDate (Id Time.Posix) Time.Posix
     | UpdateBool (Id Bool) Bool
     | UpdateInt (Id Int) Int
     | ReplaceOneOf (Choice (Id Options) Expectation)
@@ -304,14 +301,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeDate foundPosix ->
-            case exp of
-                ExpectDate _ ->
-                    True
-
-                _ ->
-                    False
-
         DescribeNothing ->
             False
 
@@ -367,9 +356,6 @@ matchExpected subExp expected =
         ( ExpectStringExactly oneName, ExpectStringExactly twoName ) ->
             oneName == twoName
 
-        ( ExpectDate _, ExpectDate _ ) ->
-            True
-
         ( ExpectTree oneIcon oneContent, ExpectTree twoIcon twoContent ) ->
             True
 
@@ -397,17 +383,6 @@ matchFields valid ( targetFieldName, targetFieldExpectation ) =
 update : Edit -> Parsed -> Parsed
 update edit (Parsed original) =
     case edit of
-        UpdateDate id newDate ->
-            Parsed
-                { original
-                    | found =
-                        makeFoundEdit
-                            { makeEdit = \i pos desc -> updateFoundDate id newDate desc
-                            , indentation = 0
-                            }
-                            original.found
-                }
-
         UpdateBool id newBool ->
             Parsed
                 { original
@@ -660,9 +635,6 @@ makeEdit cursor desc =
 
         DescribeStringExactly rng str ->
             replacePrimitive cursor rng.start desc
-
-        DescribeDate details ->
-            replacePrimitive cursor (foundStart details.found) desc
 
         DescribeNothing ->
             desc
@@ -1042,38 +1014,6 @@ replaceOption id new desc =
             Nothing
 
 
-updateFoundDate id newDate desc =
-    case desc of
-        DescribeDate details ->
-            if details.id == id then
-                case details.found of
-                    Found dateRng fl ->
-                        Just
-                            (DescribeDate
-                                { id = details.id
-                                , found =
-                                    Found dateRng
-                                        ( Iso8601.fromTime newDate, newDate )
-                                }
-                            )
-
-                    Unexpected unexpected ->
-                        Just
-                            (DescribeDate
-                                { id = details.id
-                                , found =
-                                    Found unexpected.range
-                                        ( Iso8601.fromTime newDate, newDate )
-                                }
-                            )
-
-            else
-                Nothing
-
-        _ ->
-            Nothing
-
-
 updateFoundBool id newBool desc =
     case desc of
         DescribeBoolean details ->
@@ -1407,9 +1347,6 @@ isPrimitive description =
         DescribeStringExactly _ _ ->
             True
 
-        DescribeDate found ->
-            True
-
         DescribeNothing ->
             True
 
@@ -1528,13 +1465,6 @@ getContainingDescriptions description offset =
 
         DescribeStringExactly rng str ->
             if withinOffsetRange offset rng then
-                [ description ]
-
-            else
-                []
-
-        DescribeDate details ->
-            if withinFoundLeaf offset details.found then
                 [ description ]
 
             else

@@ -45,7 +45,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Primitives
 
-@docs string, int, float, bool, date, multiline
+@docs string, int, float, bool, multiline
 
 
 ## Higher Level
@@ -75,7 +75,6 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 import Html
 import Html.Attributes
-import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error exposing (AstError(..), Context(..), Problem(..))
@@ -449,9 +448,6 @@ getUnexpecteds description =
 
         DescribeStringExactly rng str ->
             []
-
-        DescribeDate details ->
-            unexpectedFromFound details.found
 
         DescribeNothing ->
             []
@@ -1182,9 +1178,6 @@ humanReadableExpectations expect =
 
         ExpectStringExactly exact ->
             exact
-
-        ExpectDate _ ->
-            "A DateTime"
 
         ExpectTree icon content ->
             "A tree starting with "
@@ -2627,68 +2620,6 @@ string =
                     |= Parse.getPosition
                 )
         }
-
-
-
--- {-| Parse an ISO-8601 date string.
--- Format: `YYYY-MM-DDTHH:mm:ss.SSSZ`
--- Though you don't need to specify all segments, so `YYYY-MM-DD` works as well.
--- Results in a `Posix` integer, which works well with [elm/time](https://package.elm-lang.org/packages/elm/time/latest/).
--- -}
--- date :
---      Block Time.Posix
--- date =
---     Value
---         { expect = ExpectDate (Time.millisToPosix 0)
---         , converter =
---             \desc ->
---                 case desc of
---                     DescribeDate found ->
---                         Outcome.Success (mapFound (\( str_, fl ) -> details.view found.id fl) found.found)
---                     _ ->
---                         Outcome.Failure NoMatch
---         , parser =
---             \seed ->
---                 let
---                     ( id, newSeed ) =
---                         Id.step seed
---                 in
---                 ( newSeed
---                 , Parser.map
---                     (\( pos, parsedPosix ) ->
---                         case parsedPosix of
---                             Err str ->
---                                 DescribeDate
---                                     { id = id
---                                     , found =
---                                         Unexpected
---                                             { range = pos
---                                             , problem = Error.BadDate str
---                                             }
---                                     }
---                             Ok ( str, posix ) ->
---                                 DescribeDate
---                                     { id = id
---                                     , found = Found pos ( str, posix )
---                                     }
---                     )
---                     (Parse.withRange
---                         (Parser.getChompedString
---                             (Parser.chompWhile
---                                 (\c -> c /= '\n')
---                             )
---                             |> Parser.andThen
---                                 (\str ->
---                                     case Iso8601.toTime str of
---                                         Err err ->
---                                             Parser.succeed (Err str)
---                                         Ok parsedPosix ->
---                                             Parser.succeed (Ok ( str, parsedPosix ))
---                                 )
---                         )
---                     )
---                 )
---         }
 
 
 foundToResult found err =

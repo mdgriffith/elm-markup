@@ -35,13 +35,11 @@ module Mark.Internal.Description exposing
 
 -}
 
-import Iso8601
 import Mark.Format as Format
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome exposing (..)
 import Parser.Advanced as Parser exposing (Parser)
-import Time
 
 
 {-| -}
@@ -250,10 +248,6 @@ type Description
     | DescribeString (Id String) Range String
     | DescribeMultiline (Id String) Range String
     | DescribeStringExactly Range String
-    | DescribeDate
-        { id : Id Time.Posix
-        , found : Found ( String, Time.Posix )
-        }
     | DescribeNothing
 
 
@@ -344,7 +338,6 @@ type Expectation
     | ExpectString String
     | ExpectMultiline String
     | ExpectStringExactly String
-    | ExpectDate Time.Posix
     | ExpectTree Expectation Expectation
     | ExpectNothing
 
@@ -512,14 +505,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeDate foundPosix ->
-            case exp of
-                ExpectDate _ ->
-                    True
-
-                _ ->
-                    False
-
 
 {-| Is the first expectation a subset of the second?
 -}
@@ -571,9 +556,6 @@ matchExpected subExp expected =
 
         ( ExpectStringExactly oneName, ExpectStringExactly twoName ) ->
             oneName == twoName
-
-        ( ExpectDate _, ExpectDate _ ) ->
-            True
 
         ( ExpectTree oneIcon oneContent, ExpectTree twoIcon twoContent ) ->
             True
@@ -797,9 +779,6 @@ isPrimitive description =
         DescribeStringExactly rng str ->
             True
 
-        DescribeDate found ->
-            True
-
         DescribeNothing ->
             False
 
@@ -915,13 +894,6 @@ getContainingDescriptions description offset =
 
         DescribeStringExactly rng str ->
             if withinOffsetRange offset rng then
-                [ description ]
-
-            else
-                []
-
-        DescribeDate details ->
-            if withinFoundLeaf offset details.found then
                 [ description ]
 
             else
@@ -1190,9 +1162,6 @@ writeDescription description cursor =
             cursor
                 |> advanceTo range
                 |> write str
-
-        DescribeDate details ->
-            writeFound (writeWith Tuple.first) details.found cursor
 
         DescribeTree tree ->
             case tree.found of
