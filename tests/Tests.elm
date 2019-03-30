@@ -547,12 +547,9 @@ Then some text.
                             """| Test
   Only two spaces(should be four)
                         """
-
-                        expectedProblem =
-                            Error.ExpectingIndent 4
                     in
                     Expect.equal (toResult textDoc doc1)
-                        (Err [ expectedProblem ])
+                        (Err [ Error.ExpectingIndent 4 ])
             , test "Start with Metadata" <|
                 \_ ->
                     let
@@ -727,12 +724,9 @@ Finally, a sentence
   one = hello
   two = world
                         """
-
-                        expectedProblem =
-                            Error.ExpectingIndent 4
                     in
                     Expect.equal (toResult recordDoc doc1)
-                        (Err [ expectedProblem ])
+                        (Err [ Error.ExpectingIndent 4 ])
             , test "Incorrect Indentation v2" <|
                 \_ ->
                     let
@@ -741,12 +735,9 @@ Finally, a sentence
     one = hello
   two = world
                         """
-
-                        expectedProblem =
-                            Error.ExpectingIndent 4
                     in
                     Expect.equal (toResult recordDoc doc1)
-                        (Err [ expectedProblem ])
+                        (Err [ Error.ExpectingIndent 4 ])
             , test "Additional fields should error" <|
                 \_ ->
                     let
@@ -757,16 +748,16 @@ Finally, a sentence
     three = Yo
     four = huh?
                         """
-
-                        expectedProblem =
-                            Error.UnexpectedField
+                    in
+                    Expect.equal (toResult recordDoc doc1)
+                        (Err
+                            [ Error.UnexpectedField
                                 { options = [ "one", "two", "three" ]
                                 , found = "four"
                                 , recordName = "Test"
                                 }
-                    in
-                    Expect.equal (toResult recordDoc doc1)
-                        (Err [ expectedProblem ])
+                            ]
+                        )
             , test "Order of fields in source shouldn't matter" <|
                 \_ ->
                     let
@@ -785,8 +776,8 @@ Finally, a sentence
                         """
 
                         parsed =
-                            ( Mark.parse recordDoc doc1
-                            , Mark.parse recordDoc doc2
+                            ( Mark.compile recordDoc doc1
+                            , Mark.compile recordDoc doc2
                             )
                     in
                     Expect.all

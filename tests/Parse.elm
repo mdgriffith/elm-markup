@@ -346,7 +346,7 @@ text =
                                     }
                                     (Description.Text emptyStyles ".  And a ")
                                 , Description.InlineAnnotation
-                                    { name = "text"
+                                    { name = "test"
                                     , attributes =
                                         [ Description.AttrString
                                             { name = "attr"
