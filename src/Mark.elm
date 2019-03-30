@@ -1160,37 +1160,18 @@ manyBlankLines lineCount =
 
 
 {-| -}
-oneOf :
-    { view :
-        { id : Id Options
-        , options : List (Choice (Id Options) Expectation)
-        }
-        -> a
-        -> b
-    , error :
-        { id : Id Options
-        , options : List (Choice (Id Options) Expectation)
-        , range : Range
-        , problem : Error.Error
-        }
-        -> b
-    }
-    -> List (Block a)
-    -> Block b
-oneOf oneOfDetails blocks =
+oneOf : List (Block a) -> Block a
+oneOf blocks =
     let
-        applyDesc description blck found =
+        matchBlock description blck found =
             case found of
-                Nothing ->
+                Failure _ ->
                     case renderBlock blck description of
-                        Success rendered ->
-                            Just rendered
-
                         Failure _ ->
                             found
 
-                        _ ->
-                            found
+                        otherwise ->
+                            otherwise
 
                 _ ->
                     found
@@ -1202,54 +1183,17 @@ oneOf oneOfDetails blocks =
         { expect = ExpectOneOf expectations
         , converter =
             \desc ->
-                Failure NoMatch
+                case desc of
+                    OneOf details ->
+                        case details.child of
+                            Found rng found ->
+                                List.foldl (matchBlock found) (Failure NoMatch) blocks
 
-        -- case desc of
-        --     OneOf details ->
-        --         case details.child of
-        --             Found rng found ->
-        --                 case List.foldl (applyDesc found) Nothing blocks of
-        --                     Nothing ->
-        --                         Failure NoMatch
-        --                     Just foundResult ->
-        --                         case foundResult of
-        --                             Found r child ->
-        --                                 Ok
-        --                                     (Found r
-        --                                         (oneOfDetails.view
-        --                                             { id = details.id
-        --                                             , options =
-        --                                                 List.map (Choice details.id) expectations
-        --                                             }
-        --                                             child
-        --                                         )
-        --                                     )
-        --                             Unexpected unexpected ->
-        --                                 Ok
-        --                                     (Found unexpected.range
-        --                                         (oneOfDetails.error
-        --                                             { id = details.id
-        --                                             , range = unexpected.range
-        --                                             , problem = unexpected.problem
-        --                                             , options =
-        --                                                 List.map (Choice details.id) expectations
-        --                                             }
-        --                                         )
-        --                                     )
-        --             Unexpected unexpected ->
-        --                 Ok
-        --                     (Found unexpected.range
-        --                         (oneOfDetails.error
-        --                             { id = details.id
-        --                             , problem = unexpected.problem
-        --                             , range = unexpected.range
-        --                             , options =
-        --                                 List.map (Choice details.id) expectations
-        --                             }
-        --                         )
-        --                     )
-        --     _ ->
-        --         Failure NoMatch
+                            Unexpected unexpected ->
+                                uncertain unexpected
+
+                    _ ->
+                        Failure NoMatch
         , parser =
             \seed ->
                 let
