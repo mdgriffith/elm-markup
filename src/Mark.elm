@@ -533,6 +533,8 @@ document view child =
                 |= Parser.getSource
                 |= Parse.withRange
                     (Parser.withIndent 0 blockParser)
+                |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
+                |. Parser.end End
         }
 
 
@@ -1416,7 +1418,7 @@ tree name view contentBlock =
         expectation =
             ExpectTree (getBlockExpectation contentBlock)
     in
-    Value
+    Block name
         { expect = expectation
         , converter =
             \description ->
@@ -1437,26 +1439,33 @@ tree name view contentBlock =
                 , Parser.getIndent
                     |> Parser.andThen
                         (\baseIndent ->
-                            Parser.map
-                                (\( pos, result ) ->
-                                    DescribeTree
-                                        { found = ( pos, buildTree baseIndent result )
-                                        , expected = expectation
-                                        }
-                                )
-                                (Parse.withRange
-                                    (Parser.loop
-                                        ( { base = baseIndent
-                                          , prev = baseIndent
-                                          }
-                                        , []
-                                        )
-                                        (indentedBlocksOrNewlines
-                                            seed
-                                            contentBlock
+                            Parser.succeed identity
+                                |. Parser.keyword
+                                    (Parser.Token name
+                                        (ExpectingBlockName name)
+                                    )
+                                |. Parser.chompWhile (\c -> c == ' ')
+                                |. skipBlankLineWith ()
+                                |= Parser.map
+                                    (\( pos, result ) ->
+                                        DescribeTree
+                                            { found = ( pos, buildTree (baseIndent + 4) result )
+                                            , expected = expectation
+                                            }
+                                    )
+                                    (Parse.withRange
+                                        (Parser.loop
+                                            ( { base = baseIndent + 4
+                                              , prev = baseIndent + 4
+                                              }
+                                            , []
+                                            )
+                                            (indentedBlocksOrNewlines
+                                                seed
+                                                contentBlock
+                                            )
                                         )
                                     )
-                                )
                         )
                 )
         }
@@ -3801,97 +3810,69 @@ indentedBlocksOrNewlines seed item ( indentation, existing ) =
 
         -- Whitespace Line
         , skipBlankLineWith (Parser.Loop ( indentation, existing ))
-        , case existing of
-            [] ->
-                let
-                    ( itemSeed, itemParser ) =
-                        getParser seed item
-                in
-                -- Indent is already parsed by the block constructor for first element, skip it
-                Parser.succeed
-                    (\foundIcon foundBlock ->
+        , Parser.oneOf
+            [ -- block with required indent
+              expectIndentation indentation.base indentation.prev
+                |> Parser.andThen
+                    (\newIndent ->
                         let
-                            newIndex =
-                                { prev = indentation.base
-                                , base = indentation.base
-                                }
+                            ( itemSeed, itemParser ) =
+                                getParser seed item
                         in
-                        Parser.Loop
-                            ( newIndex
-                            , { indent = indentation.base
-                              , icon = Just foundIcon
-                              , content = foundBlock
-                              }
-                                :: existing
-                            )
-                    )
-                    |= iconParser
-                    |= itemParser
-
-            _ ->
-                Parser.oneOf
-                    [ -- block with required indent
-                      expectIndentation indentation.base indentation.prev
-                        |> Parser.andThen
-                            (\newIndent ->
-                                let
-                                    ( itemSeed, itemParser ) =
-                                        getParser seed item
-                                in
-                                -- If the indent has changed, then the delimiter is required
-                                Parser.withIndent newIndent <|
-                                    Parser.oneOf
-                                        ((Parser.succeed
-                                            (\iconResult itemResult ->
-                                                let
-                                                    newIndex =
-                                                        { prev = newIndent
-                                                        , base = indentation.base
-                                                        }
-                                                in
-                                                Parser.Loop
-                                                    ( newIndex
-                                                    , { indent = newIndent
-                                                      , icon = Just iconResult
-                                                      , content = itemResult
-                                                      }
-                                                        :: existing
-                                                    )
+                        -- If the indent has changed, then the delimiter is required
+                        Parser.withIndent newIndent <|
+                            Parser.oneOf
+                                ((Parser.succeed
+                                    (\iconResult itemResult ->
+                                        let
+                                            newIndex =
+                                                { prev = newIndent
+                                                , base = indentation.base
+                                                }
+                                        in
+                                        Parser.Loop
+                                            ( newIndex
+                                            , { indent = newIndent
+                                              , icon = Just iconResult
+                                              , content = itemResult
+                                              }
+                                                :: existing
                                             )
-                                            |= iconParser
-                                            |= itemParser
-                                         )
-                                            :: (if newIndent - 4 == indentation.prev then
-                                                    [ itemParser
-                                                        |> Parser.map
-                                                            (\foundBlock ->
-                                                                let
-                                                                    newIndex =
-                                                                        { prev = indentation.prev
-                                                                        , base = indentation.base
-                                                                        }
-                                                                in
-                                                                Parser.Loop
-                                                                    ( newIndex
-                                                                    , { indent = indentation.prev
-                                                                      , icon = Nothing
-                                                                      , content = foundBlock
-                                                                      }
-                                                                        :: existing
-                                                                    )
+                                    )
+                                    |= iconParser
+                                    |= itemParser
+                                 )
+                                    :: (if newIndent - 4 == indentation.prev then
+                                            [ itemParser
+                                                |> Parser.map
+                                                    (\foundBlock ->
+                                                        let
+                                                            newIndex =
+                                                                { prev = indentation.prev
+                                                                , base = indentation.base
+                                                                }
+                                                        in
+                                                        Parser.Loop
+                                                            ( newIndex
+                                                            , { indent = indentation.prev
+                                                              , icon = Nothing
+                                                              , content = foundBlock
+                                                              }
+                                                                :: existing
                                                             )
-                                                    ]
+                                                    )
+                                            ]
 
-                                                else
-                                                    []
-                                               )
-                                        )
-                            )
+                                        else
+                                            []
+                                       )
+                                )
+                    )
 
-                    -- We reach here because the indentation parsing was not successful,
-                    -- This means any issues are handled by whatever parser comes next.
-                    , Parser.succeed (Parser.Done (List.reverse existing))
-                    ]
+            -- We reach here because the indentation parsing was not successful,
+            -- This means any issues are handled by whatever parser comes next.
+            , Parser.succeed (Parser.Done (List.reverse existing))
+            ]
         ]
 
 
