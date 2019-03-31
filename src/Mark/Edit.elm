@@ -356,7 +356,7 @@ matchExpected subExp expected =
         ( ExpectStringExactly oneName, ExpectStringExactly twoName ) ->
             oneName == twoName
 
-        ( ExpectTree oneIcon oneContent, ExpectTree twoIcon twoContent ) ->
+        ( ExpectTree oneContent, ExpectTree twoContent ) ->
             True
 
         _ ->
@@ -1472,14 +1472,14 @@ getContainingDescriptions description offset =
 
 
 getWithinNested offset (Nested nest) =
-    case nest.content of
-        ( desc, items ) ->
-            getContainingDescriptions desc offset
-                ++ List.concatMap
-                    (\item ->
-                        getContainingDescriptions item offset
-                    )
-                    items
+    -- case nest.content of
+    --     ( desc, items ) ->
+    --         getContainingDescriptions desc offset
+    List.concatMap
+        (\item ->
+            getContainingDescriptions item offset
+        )
+        nest.content
 
 
 

@@ -1,6 +1,6 @@
 module Mark.Internal.Description exposing
     ( parse, render, compile
-    , Found(..), Nested(..), UnexpectedDetails
+    , Found(..), Nested(..), Icon(..), UnexpectedDetails
     , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), AttrExpectation(..)
     , Parsed(..), startingPoint, descriptionToString, toString
@@ -15,7 +15,7 @@ module Mark.Internal.Description exposing
 
 @docs parse, render, compile
 
-@docs Found, Nested, UnexpectedDetails
+@docs Found, Nested, Icon, UnexpectedDetails
 
 @docs Description, TextDescription, InlineAttribute, Text, Style
 
@@ -102,10 +102,29 @@ type alias Range =
     }
 
 
+
+-- {-| -}
+-- type Nested item
+--     = Nested
+--         { content : item
+--         , children :
+--             List (Nested item)
+--         }
+
+
+{-| -}
+type Icon
+    = Bullet
+    | AutoNumber
+
+
 {-| -}
 type Nested item
     = Nested
-        { content : item
+        { index : Int
+        , level : List Int
+        , icon : Icon
+        , content : List item
         , children :
             List (Nested item)
         }
@@ -211,7 +230,7 @@ type Description
         , expected : Expectation
         }
     | DescribeTree
-        { found : ( Range, List (Nested ( Description, List Description )) )
+        { found : ( Range, List (Nested Description) )
         , expected : Expectation
         }
       -- Primitives
@@ -338,7 +357,7 @@ type Expectation
     | ExpectString String
     | ExpectMultiline String
     | ExpectStringExactly String
-    | ExpectTree Expectation Expectation
+    | ExpectTree Expectation
     | ExpectNothing
 
 
@@ -557,7 +576,7 @@ matchExpected subExp expected =
         ( ExpectStringExactly oneName, ExpectStringExactly twoName ) ->
             oneName == twoName
 
-        ( ExpectTree oneIcon oneContent, ExpectTree twoIcon twoContent ) ->
+        ( ExpectTree oneContent, ExpectTree twoContent ) ->
             True
 
         _ ->
@@ -904,14 +923,15 @@ getContainingDescriptions description offset =
 
 
 getWithinNested offset (Nested nest) =
-    case nest.content of
-        ( desc, items ) ->
-            getContainingDescriptions desc offset
-                ++ List.concatMap
-                    (\item ->
-                        getContainingDescriptions item offset
-                    )
-                    items
+    -- case nest.content of
+    --     ( desc, items ) ->
+    --         getContainingDescriptions desc offset
+    --             ++
+    List.concatMap
+        (\item ->
+            getContainingDescriptions item offset
+        )
+        nest.content
 
 
 
@@ -1050,6 +1070,17 @@ dedent cursor =
     { cursor | indent = max 0 cursor.indent - 1 }
 
 
+writeIcon icon cursor =
+    case icon of
+        Bullet ->
+            cursor
+                |> write "-"
+
+        AutoNumber ->
+            cursor
+                |> write "#."
+
+
 {-| -}
 writeDescription : Description -> PrintCursor -> PrintCursor
 writeDescription description cursor =
@@ -1173,8 +1204,8 @@ writeDescription description cursor =
 
 writeNested (Nested node) cursor =
     cursor
-        |> writeDescription (Tuple.first node.content)
-        |> (\curs -> List.foldl writeDescription curs (Tuple.second node.content))
+        |> writeIcon node.icon
+        |> (\curs -> List.foldl writeDescription curs node.content)
         |> indent
         |> (\curs -> List.foldl writeNested curs node.children)
         |> dedent
@@ -1362,7 +1393,7 @@ create current =
             , seed = new.seed
             }
 
-        ExpectTree icon content ->
+        ExpectTree content ->
             let
                 range =
                     { start = current.base

@@ -416,8 +416,10 @@ getUnexpecteds description =
             getUnexpecteds fst.found ++ getUnexpecteds snd.found
 
         DescribeTree details ->
-            List.concatMap getNestedUnexpecteds (Tuple.second details.found)
+            -- TODO: Get unexpecteds!!
+            []
 
+        -- List.concatMap getNestedUnexpecteds (Tuple.second details.found)
         -- Primitives
         DescribeStub name found ->
             unexpectedFromFound found
@@ -453,13 +455,14 @@ getUnexpecteds description =
             []
 
 
-getNestedUnexpecteds (Nested nest) =
-    case nest.content of
-        ( desc, items ) ->
-            getUnexpecteds desc
-                ++ List.concatMap
-                    getUnexpecteds
-                    items
+
+-- getNestedUnexpecteds (Nested nest) =
+--     case nest.content of
+--         ( desc, items ) ->
+--             getUnexpecteds desc
+--                 ++ List.concatMap
+--                     getUnexpecteds
+--                     nest.content
 
 
 spelunkUnexpectedsFromFound found =
@@ -1179,10 +1182,8 @@ humanReadableExpectations expect =
         ExpectStringExactly exact ->
             exact
 
-        ExpectTree icon content ->
-            "A tree starting with "
-                ++ humanReadableExpectations icon
-                ++ " and with "
+        ExpectTree content ->
+            "A tree starting of "
                 ++ humanReadableExpectations content
                 ++ " content"
 
@@ -1419,51 +1420,59 @@ makeBlocksParser blocks seed =
         )
 
 
-{-| It can be useful to parse a tree structure. For example, here's a nested list.
-| List
 
-  - item one
-  - item two
-  - nested item two
-    additional text for nested item two
-  - item three
-  - nested item three
-    In order to parse the above, you could define a block as
-    Mark.block "List"
-    ((Nested nested) ->
-    -- Do something with nested.content and nested.children
-    )
-    (Mark.nested
-    { item = text
-    , start = Mark.exactly "-" ()
-    }
-    )
+-- {-| -}
+-- type alias Index =
+--     { index : Int
+--     , level : List Int
+--     }
+-- | Number Int
+
+
+{-| It can be useful to parse a tree structure. For example, here's a nested list.
+
+    | List
+        - item one
+        - item two
+            - nested item two
+
+            additional text for nested item two
+        - item three
+            - nested item three
+
+In order to parse the above, you could define a block as
+
+    Mark.nested "List"
+        ((Nested nested) ->
+        -- Do something with nested.content and nested.children
+        )
+        text
     **Note** the indentation is always a multiple of 4.
-    **Another Note** `text` in the above code is defined elsewhere.
 
 -}
 nested :
-    { item : Block item
-    , start : Block icon
-    }
-    -> Block (List (Nested ( icon, List item )))
-nested config =
+    String
+    -> (Nested item -> result)
+    -> Block item
+    -> Block (List result)
+nested name view contentBlock =
     let
         expectation =
-            ExpectTree (getBlockExpectation config.start) (getBlockExpectation config.item)
+            ExpectTree (getBlockExpectation contentBlock)
     in
     Value
         { expect = expectation
         , converter =
             \description ->
-                case description of
-                    DescribeTree details ->
-                        case details.found of
-                            ( pos, nestedDescriptors ) ->
-                                reduceRender (renderTreeNodeSmall config) nestedDescriptors
-
-                    _ ->
-                        Outcome.Failure NoMatch
+                -- case description of
+                --     DescribeTree details ->
+                --         case details.found of
+                --             ( pos, nestedDescriptors ) ->
+                --                 reduceRender
+                --                     (renderTreeNodeSmall config)
+                --                     nestedDescriptors
+                --     _ ->
+                Outcome.Failure NoMatch
         , parser =
             \seed ->
                 -- TODO: AHHHH, A NEW SEED NEEDS TO GET CREATED
@@ -1485,7 +1494,10 @@ nested config =
                                           }
                                         , []
                                         )
-                                        (indentedBlocksOrNewlines seed config.start config.item)
+                                        (indentedBlocksOrNewlines
+                                            seed
+                                            contentBlock
+                                        )
                                     )
                                 )
                         )
@@ -1493,9 +1505,15 @@ nested config =
         }
 
 
-mapNested : (a -> b) -> Nested a -> Nested b
-mapNested fn (Nested node) =
-    Debug.todo "map it"
+iconParser =
+    Parser.oneOf
+        [ Parser.succeed Bullet
+            |. Parser.chompIf (\c -> c == '-') (Expecting "-")
+            |. Parser.chompWhile (\c -> c == '-')
+        , Parser.succeed AutoNumber
+            |. Parser.chompIf (\c -> c == '#') (Expecting "#")
+            |. Parser.chompWhile (\c -> c == '.')
+        ]
 
 
 {-| -}
@@ -1503,67 +1521,36 @@ type alias Index =
     List Int
 
 
-{-| -}
-replaceNested : (Index -> a -> List b -> b) -> Nested a -> b
-replaceNested =
-    replaceNestedHelper []
 
-
-replaceNestedHelper : Index -> (Index -> a -> List b -> b) -> Nested a -> b
-replaceNestedHelper index fn (Nested node) =
-    let
-        newIndex =
-            1 :: index
-
-        children =
-            List.foldl
-                (\child ( i, gathered ) ->
-                    ( i + 1, replaceNestedHelper (i :: newIndex) fn child :: gathered )
-                )
-                ( 1, [] )
-                node.children
-    in
-    fn newIndex node.content (Tuple.second children)
-
-
-{-| -}
-foldNestedList : (Index -> a -> b -> b) -> b -> List (Nested a) -> b
-foldNestedList fn accum nodes =
-    List.foldl
-        (\child ( i, gathered ) ->
-            ( i + 1, foldNestedHelper [ i ] fn gathered child )
-        )
-        ( 1, accum )
-        nodes
-        |> Tuple.second
-
-
-{-| -}
-foldNested : (Index -> a -> b -> b) -> b -> Nested a -> b
-foldNested fn accum node =
-    foldNestedHelper [ 1 ] fn accum node
-
-
-foldNestedHelper : Index -> (Index -> a -> b -> b) -> b -> Nested a -> b
-foldNestedHelper index fn accum (Nested node) =
-    let
-        newIndex =
-            1 :: index
-
-        advanced =
-            fn newIndex node.content accum
-    in
-    List.foldl
-        (\child ( i, gathered ) ->
-            ( i + 1, foldNestedHelper (i :: newIndex) fn gathered child )
-        )
-        ( 1, advanced )
-        node.children
-        |> Tuple.second
-
-
-type alias New =
-    Expectation
+-- {-| -}
+-- foldNestedList : (Index -> a -> b -> b) -> b -> List (Nested a) -> b
+-- foldNestedList fn accum nodes =
+--     List.foldl
+--         (\child ( i, gathered ) ->
+--             ( i + 1, foldNestedHelper [ i ] fn gathered child )
+--         )
+--         ( 1, accum )
+--         nodes
+--         |> Tuple.second
+-- {-| -}
+-- foldNested : (Index -> a -> b -> b) -> b -> Nested a -> b
+-- foldNested fn accum node =
+--     foldNestedHelper [ 1 ] fn accum node
+-- foldNestedHelper : Index -> (Index -> a -> b -> b) -> b -> Nested a -> b
+-- foldNestedHelper index fn accum (Nested node) =
+--     let
+--         newIndex =
+--             1 :: index
+--         advanced =
+--             fn newIndex node.content accum
+--     in
+--     List.foldl
+--         (\child ( i, gathered ) ->
+--             ( i + 1, foldNestedHelper (i :: newIndex) fn gathered child )
+--         )
+--         ( 1, advanced )
+--         node.children
+--         |> Tuple.second
 
 
 {-| -}
@@ -3655,21 +3642,21 @@ A list item started with a list icon.
         ]
 
 -}
-type TreeBuilder item
+type TreeBuilder
     = TreeBuilder
         { previousIndent : Int
         , levels :
             -- (mostRecent :: remaining)
-            List (Level item)
+            List (Level Description)
         }
 
 
 {-| -}
 type Level item
-    = Level (List (Nested item))
+    = Level (Nested item)
 
 
-emptyTreeBuilder : TreeBuilder item
+emptyTreeBuilder : TreeBuilder
 emptyTreeBuilder =
     TreeBuilder
         { previousIndent = 0
@@ -3714,114 +3701,109 @@ mergeErrors ( h1, r1 ) ( h2, r2 ) =
     ( h1, r1 ++ h2 :: r2 )
 
 
-renderTreeNodeSmall :
-    { item : Block item
-    , start : Block icon
-    }
-    -> Nested ( Description, List Description )
-    -> Outcome.Outcome AstError (Uncertain (Nested ( icon, List item ))) (Nested ( icon, List item ))
-renderTreeNodeSmall config (Nested cursor) =
-    let
-        renderedChildren =
-            reduceRender (renderTreeNodeSmall config) cursor.children
 
-        renderedContent =
-            case cursor.content of
-                ( icon, content ) ->
-                    ( renderBlock config.start icon
-                    , reduceRender (renderBlock config.item) content
-                    )
-    in
-    case renderedContent of
-        ( Outcome.Success icon, Outcome.Success content ) ->
-            mapSuccessAndRecovered
-                (\children ->
-                    Nested
-                        { content = ( icon, content )
-                        , children = children
-                        }
-                )
-                renderedChildren
-
-        ( Outcome.Success icon, Outcome.Almost (Recovered contentErrors content) ) ->
-            renderedChildren
-                |> mapSuccessAndRecovered
-                    (\children ->
-                        Nested
-                            { content = ( icon, content )
-                            , children = children
-                            }
-                    )
-                |> logErrors contentErrors
-
-        ( Outcome.Almost (Recovered iconErrors icon), Outcome.Success content ) ->
-            renderedChildren
-                |> mapSuccessAndRecovered
-                    (\children ->
-                        Nested
-                            { content = ( icon, content )
-                            , children = children
-                            }
-                    )
-                |> logErrors iconErrors
-
-        ( Outcome.Almost (Recovered iconErrors icon), Outcome.Almost (Recovered contentErrors content) ) ->
-            case renderedChildren of
-                Outcome.Success successfullyRenderedChildren ->
-                    Outcome.Almost
-                        (Recovered
-                            (mergeErrors iconErrors contentErrors)
-                            (Nested
-                                { content = ( icon, content )
-                                , children = successfullyRenderedChildren
-                                }
-                            )
-                        )
-
-                Outcome.Almost (Recovered errors result) ->
-                    Outcome.Almost
-                        (Recovered
-                            (mergeErrors errors (mergeErrors iconErrors contentErrors))
-                            (Nested
-                                { content = ( icon, content )
-                                , children = result
-                                }
-                            )
-                        )
-
-                Outcome.Almost (Uncertain errs) ->
-                    Outcome.Almost (Uncertain errs)
-
-                Outcome.Failure failure ->
-                    Outcome.Failure failure
-
-        ( Outcome.Almost (Uncertain unexpected), _ ) ->
-            Outcome.Almost (Uncertain unexpected)
-
-        ( _, Outcome.Almost (Uncertain unexpected) ) ->
-            Outcome.Almost (Uncertain unexpected)
-
-        ( Outcome.Failure err, _ ) ->
-            Outcome.Failure err
-
-        ( _, Outcome.Failure err ) ->
-            Outcome.Failure err
+-- renderTreeNodeSmall :
+--     { item : Block item
+--     , start : Block icon
+--     }
+--     -> Nested ( Description, List Description )
+--     -> Outcome.Outcome AstError (Uncertain (Nested ( icon, List item ))) (Nested ( icon, List item ))
+-- renderTreeNodeSmall config (Nested cursor) =
+--     let
+--         renderedChildren =
+--             reduceRender (renderTreeNodeSmall config) cursor.children
+--         renderedContent =
+--             case cursor.content of
+--                 ( icon, content ) ->
+--                     ( renderBlock config.start icon
+--                     , reduceRender (renderBlock config.item) content
+--                     )
+--     in
+--     case renderedContent of
+--         ( Outcome.Success icon, Outcome.Success content ) ->
+--             mapSuccessAndRecovered
+--                 (\children ->
+--                     Nested
+--                         { icon = Bullet
+--                         , index =
+--                         , level =
+--                         , content = content
+--                         , children = children
+--                         }
+--                 )
+--                 renderedChildren
+--         ( Outcome.Success icon, Outcome.Almost (Recovered contentErrors content) ) ->
+--             renderedChildren
+--                 |> mapSuccessAndRecovered
+--                     (\children ->
+--                         Nested
+--                             { content = ( icon, content )
+--                             , children = children
+--                             }
+--                     )
+--                 |> logErrors contentErrors
+--         ( Outcome.Almost (Recovered iconErrors icon), Outcome.Success content ) ->
+--             renderedChildren
+--                 |> mapSuccessAndRecovered
+--                     (\children ->
+--                         Nested
+--                             { content = ( icon, content )
+--                             , children = children
+--                             }
+--                     )
+--                 |> logErrors iconErrors
+--         ( Outcome.Almost (Recovered iconErrors icon), Outcome.Almost (Recovered contentErrors content) ) ->
+--             case renderedChildren of
+--                 Outcome.Success successfullyRenderedChildren ->
+--                     Outcome.Almost
+--                         (Recovered
+--                             (mergeErrors iconErrors contentErrors)
+--                             (Nested
+--                                 { content = ( icon, content )
+--                                 , children = successfullyRenderedChildren
+--                                 }
+--                             )
+--                         )
+--                 Outcome.Almost (Recovered errors result) ->
+--                     Outcome.Almost
+--                         (Recovered
+--                             (mergeErrors errors (mergeErrors iconErrors contentErrors))
+--                             (Nested
+--                                 { content = ( icon, content )
+--                                 , children = result
+--                                 }
+--                             )
+--                         )
+--                 Outcome.Almost (Uncertain errs) ->
+--                     Outcome.Almost (Uncertain errs)
+--                 Outcome.Failure failure ->
+--                     Outcome.Failure failure
+--         ( Outcome.Almost (Uncertain unexpected), _ ) ->
+--             Outcome.Almost (Uncertain unexpected)
+--         ( _, Outcome.Almost (Uncertain unexpected) ) ->
+--             Outcome.Almost (Uncertain unexpected)
+--         ( Outcome.Failure err, _ ) ->
+--             Outcome.Failure err
+--         ( _, Outcome.Failure err ) ->
+--             Outcome.Failure err
 
 
+buildTree : Int -> List FlatCursor -> List (Nested Description)
 buildTree baseIndent items =
     let
-        gather ( indentation, icon, item ) (TreeBuilder builder) =
-            addItem (indentation - baseIndent) ( icon, item ) (TreeBuilder builder)
+        -- gather ( indentation, icon, item ) (TreeBuilder builder) =
+        gather item builder =
+            addItem (item.indent - baseIndent) item.icon item.content builder
 
-        groupByIcon ( indentation, maybeIcon, item ) maybeCursor =
+        groupByIcon item maybeCursor =
             case maybeCursor of
                 Nothing ->
-                    case maybeIcon of
+                    case item.icon of
                         Just icon ->
                             Just
-                                { indent = indentation
+                                { indent = item.indent
                                 , icon = icon
-                                , items = [ item ]
+                                , items = [ item.content ]
                                 , accumulated = []
                                 }
 
@@ -3832,20 +3814,23 @@ buildTree baseIndent items =
 
                 Just cursor ->
                     Just <|
-                        case maybeIcon of
+                        case item.icon of
                             Nothing ->
                                 { indent = cursor.indent
                                 , icon = cursor.icon
-                                , items = item :: cursor.items
+                                , items = item.content :: cursor.items
                                 , accumulated = cursor.accumulated
                                 }
 
                             Just icon ->
-                                { indent = indentation
+                                { indent = item.indent
                                 , icon = icon
-                                , items = [ item ]
+                                , items = [ item.content ]
                                 , accumulated =
-                                    ( cursor.indent, cursor.icon, cursor.items )
+                                    { indent = cursor.indent
+                                    , icon = cursor.icon
+                                    , content = cursor.items
+                                    }
                                         :: cursor.accumulated
                                 }
 
@@ -3860,7 +3845,10 @@ buildTree baseIndent items =
                             cursor.accumulated
 
                         _ ->
-                            ( cursor.indent, cursor.icon, cursor.items )
+                            { indent = cursor.indent
+                            , icon = cursor.icon
+                            , content = cursor.items
+                            }
                                 :: cursor.accumulated
 
         tree =
@@ -3881,6 +3869,13 @@ type alias NestedIndex =
     }
 
 
+type alias FlatCursor =
+    { icon : Maybe Icon
+    , indent : Int
+    , content : Description
+    }
+
+
 {-| Results in a flattened version of the parsed list.
 
     ( 0, (), [ "item one" ] )
@@ -3896,11 +3891,10 @@ type alias NestedIndex =
 -}
 indentedBlocksOrNewlines :
     Id.Seed
-    -> Block icon
     -> Block thing
-    -> ( NestedIndex, List ( Int, Maybe Description, Description ) )
-    -> Parser Context Problem (Parser.Step ( NestedIndex, List ( Int, Maybe Description, Description ) ) (List ( Int, Maybe Description, Description )))
-indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
+    -> ( NestedIndex, List FlatCursor )
+    -> Parser Context Problem (Parser.Step ( NestedIndex, List FlatCursor ) (List FlatCursor))
+indentedBlocksOrNewlines seed item ( indentation, existing ) =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -3913,11 +3907,8 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
         , case existing of
             [] ->
                 let
-                    ( iconSeed, iconParser ) =
-                        getParser seed icon
-
                     ( itemSeed, itemParser ) =
-                        getParser iconSeed item
+                        getParser seed item
                 in
                 -- Indent is already parsed by the block constructor for first element, skip it
                 Parser.succeed
@@ -3928,7 +3919,14 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
                                 , base = indentation.base
                                 }
                         in
-                        Parser.Loop ( newIndex, ( indentation.base, Just foundIcon, foundBlock ) :: existing )
+                        Parser.Loop
+                            ( newIndex
+                            , { indent = indentation.base
+                              , icon = Just foundIcon
+                              , content = foundBlock
+                              }
+                                :: existing
+                            )
                     )
                     |= iconParser
                     |= itemParser
@@ -3940,11 +3938,8 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
                         |> Parser.andThen
                             (\newIndent ->
                                 let
-                                    ( iconSeed, iconParser ) =
-                                        getParser seed icon
-
                                     ( itemSeed, itemParser ) =
-                                        getParser iconSeed item
+                                        getParser seed item
                                 in
                                 -- If the indent has changed, then the delimiter is required
                                 Parser.withIndent newIndent <|
@@ -3959,7 +3954,11 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
                                                 in
                                                 Parser.Loop
                                                     ( newIndex
-                                                    , ( newIndent, Just iconResult, itemResult ) :: existing
+                                                    , { indent = newIndent
+                                                      , icon = Just iconResult
+                                                      , content = itemResult
+                                                      }
+                                                        :: existing
                                                     )
                                             )
                                             |= iconParser
@@ -3977,7 +3976,11 @@ indentedBlocksOrNewlines seed icon item ( indentation, existing ) =
                                                                 in
                                                                 Parser.Loop
                                                                     ( newIndex
-                                                                    , ( indentation.prev, Nothing, foundBlock ) :: existing
+                                                                    , { indent = indentation.prev
+                                                                      , icon = Nothing
+                                                                      , content = foundBlock
+                                                                      }
+                                                                        :: existing
                                                                     )
                                                             )
                                                     ]
@@ -4109,14 +4112,19 @@ if ident decreases
 -}
 addItem :
     Int
-    -> node
-    -> TreeBuilder node
-    -> TreeBuilder node
-addItem indentation content (TreeBuilder builder) =
+    -> Icon
+    -> List Description
+    -> TreeBuilder
+    -> TreeBuilder
+addItem indentation icon content (TreeBuilder builder) =
     let
+        newItem : Nested Description
         newItem =
             Nested
-                { children = []
+                { index = 0
+                , level = []
+                , icon = icon
+                , children = []
                 , content = content
                 }
 
@@ -4127,12 +4135,11 @@ addItem indentation content (TreeBuilder builder) =
         addToLevel brandNewItem levels =
             case levels of
                 [] ->
-                    [ Level
-                        [ brandNewItem ]
+                    [ Level brandNewItem
                     ]
 
                 (Level lvl) :: remaining ->
-                    Level (newItem :: lvl)
+                    Level (addToChildren newItem lvl)
                         :: remaining
     in
     case builder.levels of
@@ -4141,7 +4148,7 @@ addItem indentation content (TreeBuilder builder) =
                 { previousIndent = indentation
                 , levels =
                     [ Level
-                        [ newItem ]
+                        newItem
                     ]
                 }
 
@@ -4151,7 +4158,7 @@ addItem indentation content (TreeBuilder builder) =
                 TreeBuilder
                     { previousIndent = indentation
                     , levels =
-                        Level (newItem :: lvl)
+                        Level (addToChildren newItem lvl)
                             :: remaining
                     }
 
@@ -4160,7 +4167,7 @@ addItem indentation content (TreeBuilder builder) =
                 TreeBuilder
                     { previousIndent = indentation
                     , levels =
-                        Level [ newItem ]
+                        Level newItem
                             :: Level lvl
                             :: remaining
                     }
@@ -4174,6 +4181,11 @@ addItem indentation content (TreeBuilder builder) =
                         collapseLevel (abs deltaLevel // 4) builder.levels
                             |> addToLevel newItem
                     }
+
+
+addToChildren : Nested Description -> Nested Description -> Nested Description
+addToChildren child (Nested parent) =
+    Nested { parent | children = child :: parent.children }
 
 
 {-|
@@ -4202,7 +4214,7 @@ addItem indentation content (TreeBuilder builder) =
     ]
 
 -}
-collapseLevel : Int -> List (Level item) -> List (Level item)
+collapseLevel : Int -> List (Level Description) -> List (Level Description)
 collapseLevel num levels =
     if num == 0 then
         levels
@@ -4212,14 +4224,12 @@ collapseLevel num levels =
             [] ->
                 levels
 
-            (Level topLevel) :: (Level ((Nested lowerItem) :: lower)) :: remaining ->
+            (Level topLevel) :: (Level lowerItem) :: remaining ->
                 collapseLevel (num - 1) <|
                     Level
-                        (Nested
-                            { lowerItem
-                                | children = topLevel ++ lowerItem.children
-                            }
-                            :: lower
+                        (addToChildren
+                            lowerItem
+                            topLevel
                         )
                         :: remaining
 
@@ -4227,6 +4237,7 @@ collapseLevel num levels =
                 levels
 
 
+renderLevels : List (Level Description) -> List (Nested Description)
 renderLevels levels =
     case levels of
         [] ->
@@ -4239,12 +4250,16 @@ renderLevels levels =
 
                 (Level top) :: ignore ->
                     -- We just collapsed everything down to the top level.
-                    List.foldl rev [] top
+                    -- List.foldl rev [] top
+                    [ reverseTree top ]
 
 
 reverseTree (Nested nest) =
     Nested
-        { content = Tuple.mapSecond List.reverse nest.content
+        { index = nest.index
+        , level = nest.level
+        , icon = nest.icon
+        , content = List.reverse nest.content
         , children =
             List.foldl rev [] nest.children
         }
