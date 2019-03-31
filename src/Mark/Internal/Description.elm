@@ -111,8 +111,7 @@ type Icon
 {-| -}
 type Nested item
     = Nested
-        { index : Int
-        , level : List Int
+        { index : List Int
         , icon : Icon
         , content : List item
         , children :
@@ -382,7 +381,7 @@ inlineExample inline =
     in
     case inline of
         ExpectAnnotation name attrs ->
-            "[some /styled/ text]{" ++ inlineAttrExamples attrs ++ "}"
+            "[some styled text]{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
 
         ExpectToken name attrs ->
             "{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"

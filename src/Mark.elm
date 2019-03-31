@@ -1377,8 +1377,7 @@ makeBlocksParser blocks seed =
 {-| -}
 type Tree item
     = Tree
-        { index : Int
-        , level : List Int
+        { index : List Int
         , icon : Icon
         , content : List item
         , children :
@@ -3613,13 +3612,8 @@ type TreeBuilder
         { previousIndent : Int
         , levels :
             -- (mostRecent :: remaining)
-            List (Level Description)
+            List (Nested Description)
         }
-
-
-{-| -}
-type Level item
-    = Level (Nested item)
 
 
 emptyTreeBuilder : TreeBuilder
@@ -3685,7 +3679,6 @@ renderTreeNodeSmall contentBlock (Nested cursor) =
             Tree
                 { icon = cursor.icon
                 , index = cursor.index
-                , level = cursor.level
                 , content = content
                 , children = children
                 }
@@ -3766,7 +3759,7 @@ buildTree baseIndent items =
     in
     case newTree of
         TreeBuilder builder ->
-            renderLevels builder.levels
+            List.reverse (renderLevels builder.levels)
 
 
 type alias NestedIndex =
@@ -3784,15 +3777,15 @@ type alias FlatCursor =
 
 {-| Results in a flattened version of the parsed list.
 
-    ( 0, (), [ "item one" ] )
+    ( 0, Maybe Icon, [ "item one" ] )
 
-    ( 0, (), [ "item two" ] )
+    ( 0, Maybe Icon, [ "item two" ] )
 
-    ( 4, (), [ "nested item two", "additional text for nested item two" ] )
+    ( 4, Maybe Icon, [ "nested item two", "additional text for nested item two" ] )
 
-    ( 0, (), [ "item three" ] )
+    ( 0, Maybe Icon, [ "item three" ] )
 
-    ( 4, (), [ "nested item three" ] )
+    ( 4, Maybe Icon, [ "nested item three" ] )
 
 -}
 indentedBlocksOrNewlines :
@@ -3988,66 +3981,33 @@ if ident decreases
     ]
 
 -}
-addItem :
-    Int
-    -> Icon
-    -> List Description
-    -> TreeBuilder
-    -> TreeBuilder
+addItem : Int -> Icon -> List Description -> TreeBuilder -> TreeBuilder
 addItem indentation icon content (TreeBuilder builder) =
     let
-        newItem : Nested Description
-        newItem =
+        newItem : Int -> Nested Description
+        newItem index =
             Nested
-                { index = 0
-                , level = []
+                { index = [ index ]
                 , icon = icon
                 , children = []
                 , content = content
                 }
-
-        deltaLevel =
-            indentation
-                - builder.previousIndent
-
-        addToLevel brandNewItem levels =
-            case levels of
-                [] ->
-                    [ Level brandNewItem
-                    ]
-
-                (Level lvl) :: remaining ->
-                    Level (addToChildren newItem lvl)
-                        :: remaining
     in
     case builder.levels of
         [] ->
             TreeBuilder
                 { previousIndent = indentation
                 , levels =
-                    [ Level
-                        newItem
-                    ]
+                    [ newItem 1 ]
                 }
 
-        (Level lvl) :: remaining ->
-            if deltaLevel == 0 then
+        lvl :: remaining ->
+            if indentation == 0 then
                 -- add to current level
                 TreeBuilder
                     { previousIndent = indentation
                     , levels =
-                        Level (addToChildren newItem lvl)
-                            :: remaining
-                    }
-
-            else if deltaLevel > 0 then
-                -- add new level
-                TreeBuilder
-                    { previousIndent = indentation
-                    , levels =
-                        Level newItem
-                            :: Level lvl
-                            :: remaining
+                        newItem (List.length remaining + 2) :: lvl :: remaining
                     }
 
             else
@@ -4056,9 +4016,69 @@ addItem indentation icon content (TreeBuilder builder) =
                 TreeBuilder
                     { previousIndent = indentation
                     , levels =
-                        collapseLevel (abs deltaLevel // 4) builder.levels
-                            |> addToLevel newItem
+                        addToLevel
+                            ((abs indentation // 4) - 1)
+                            (newItem (List.length remaining + 1))
+                            lvl
+                            :: remaining
                     }
+
+
+indentIndex (Nested nested) =
+    Nested
+        { nested
+            | index = 1 :: nested.index
+        }
+
+
+indexTo i (Nested nested) =
+    case nested.index of
+        [] ->
+            Nested { nested | index = [ i ] }
+
+        top :: tail ->
+            Nested { nested | index = i :: tail }
+
+
+addToLevel index brandNewItem (Nested parent) =
+    if index <= 0 then
+        Nested
+            { parent
+                | children =
+                    indexTo
+                        (List.length parent.children + 1)
+                        (indentIndex brandNewItem)
+                        :: parent.children
+            }
+
+    else
+        case parent.children of
+            [] ->
+                Nested parent
+
+            top :: remain ->
+                let
+                    withNewIndex =
+                        brandNewItem
+                            |> indentIndex
+                            |> indexTo (List.length parent.children)
+                in
+                Nested
+                    { parent
+                        | children =
+                            addToLevel (index - 1) withNewIndex top
+                                :: remain
+                    }
+
+
+
+--
+-- case levels of
+--     [] ->
+--         [ brandNewItem ]
+--     lvl :: remaining ->
+--         addToChildren newItem lvl
+--             :: remaining
 
 
 addToChildren : Nested Description -> Nested Description -> Nested Description
@@ -4092,7 +4112,7 @@ addToChildren child (Nested parent) =
     ]
 
 -}
-collapseLevel : Int -> List (Level Description) -> List (Level Description)
+collapseLevel : Int -> List (Nested Description) -> List (Nested Description)
 collapseLevel num levels =
     if num == 0 then
         levels
@@ -4102,49 +4122,61 @@ collapseLevel num levels =
             [] ->
                 levels
 
-            (Level topLevel) :: (Level lowerItem) :: remaining ->
+            topLevel :: lowerItem :: remaining ->
                 collapseLevel (num - 1) <|
-                    Level
-                        (addToChildren
-                            lowerItem
-                            topLevel
-                        )
+                    addToChildren lowerItem topLevel
                         :: remaining
 
             _ ->
                 levels
 
 
-renderLevels : List (Level Description) -> List (Nested Description)
+type alias TreeIndex =
+    { index : Int
+    , level : List Int
+    }
+
+
+dive cursor =
+    { cursor
+        | index = 0
+        , level = cursor.index :: cursor.level
+    }
+
+
+next cursor =
+    { cursor
+        | index = cursor.index + 1
+    }
+
+
+renderLevels : List (Nested Description) -> List (Nested Description)
 renderLevels levels =
     case levels of
         [] ->
             []
 
         _ ->
-            case collapseLevel (List.length levels - 1) levels of
-                [] ->
-                    []
-
-                (Level top) :: ignore ->
-                    -- We just collapsed everything down to the top level.
-                    -- List.foldl rev [] top
-                    [ reverseTree top ]
+            List.indexedMap
+                (\index level ->
+                    reverseTree { index = index, level = [] } level
+                )
+                levels
 
 
-reverseTree (Nested nest) =
+reverseTree cursor (Nested nest) =
     Nested
         { index = nest.index
-        , level = nest.level
         , icon = nest.icon
         , content = List.reverse nest.content
         , children =
-            List.foldl rev [] nest.children
+            List.foldl rev ( dive cursor, [] ) nest.children
+                |> Tuple.second
         }
 
 
-rev nest found =
-    reverseTree nest :: found
+rev nest ( cursor, found ) =
+    ( next cursor, reverseTree cursor nest :: found )
 
 
 {-| Replace a string with another string. This can be useful to have shortcuts to unicode characters.
