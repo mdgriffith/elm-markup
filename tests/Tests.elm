@@ -371,7 +371,7 @@ suite =
             , test "Inline elements should maintain escaped italics" <|
                 \_ ->
                     Expect.equal
-                        (toResult inlines "{Highlight|my //} highlighted {Highlight|sentence} {Highlight|order}")
+                        (toResult inlines "[my //]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
                             [ [ Mark.Text emptyStyles "my /" ]
                             , [ Mark.Text emptyStyles " highlighted " ]
@@ -383,7 +383,7 @@ suite =
             , test "Inline elements should maintain multiple replacements" <|
                 \_ ->
                     Expect.equal
-                        (toResult inlines "{Highlight|my ////} highlighted {Highlight|sentence} {Highlight|order}")
+                        (toResult inlines "[my ////]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
                             [ [ Mark.Text emptyStyles "my //" ]
                             , [ Mark.Text emptyStyles " highlighted " ]
@@ -395,7 +395,7 @@ suite =
             , test "Inline elements should maintain escaped characters" <|
                 \_ ->
                     Expect.equal
-                        (toResult inlines "{Highlight|my \\/} highlighted {Highlight|sentence} {Highlight|order}")
+                        (toResult inlines "[my \\/]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
                             [ [ Mark.Text emptyStyles "my /" ]
                             , [ Mark.Text emptyStyles " highlighted " ]
@@ -407,9 +407,9 @@ suite =
             , test "Incorrect inline element name" <|
                 \_ ->
                     Expect.equal
-                        (toResult inlines "{Highlurt|my} highlighted sentence")
+                        (toResult inlines "[my]{highlurt} highlighted sentence")
                         (Err
-                            [--Error.ExpectingInlineName "Highlight"
+                            [ Error.UnknownInline [ "Highlight" ]
                             ]
                         )
             ]
@@ -424,7 +424,7 @@ suite =
     Here is my fourth.
         And my indented line.
 """)
-                        (Ok "Here is my first line.\nHere is my second.\n\nHere is my third.\n\nHere is my fourth.\n\n    And my indented line.\n")
+                        (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.\n")
             , test "Parse code block and then normal text" <|
                 \_ ->
                     Expect.equal
@@ -436,7 +436,7 @@ suite =
         And my indented line.
 Then some text.
 """)
-                        (Ok "Here is my first line.\nHere is my second.\n\nHere is my third.\n\nHere is my fourth.\n\n    And my indented line.\n\n:text")
+                        (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.\n:text")
             ]
 
         -- , describe "Nested"
