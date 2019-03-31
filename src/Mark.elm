@@ -5,7 +5,8 @@ module Mark exposing
     , document
     , Block, map, verify, onError
     , string, int, float, bool, multiline
-    , block, oneOf, manyOf, startWith, nested
+    , block, oneOf, manyOf, startWith
+    , tree, Tree(..)
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
     , Text(..), Styles, text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, attrString
@@ -50,7 +51,12 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Higher Level
 
-@docs block, oneOf, manyOf, startWith, nested
+@docs block, oneOf, manyOf, startWith
+
+
+## Trees
+
+@docs tree, Tree
 
 
 ## Records
@@ -276,42 +282,6 @@ uncertain err =
 {-| -}
 type alias Block data =
     Desc.Block data
-
-
-
--- {-| -}
--- type
---     Block data
---     {-
---         A `Block data` is just a parser that results in `data`.
---        You'll be building up your `Document` in terms of the `Blocks`.
---        A block starts with `|` and has a name(already built into the parser)
---        A value is just a raw parser.
---        --- Error Propagation
---         Outcome.Failure
---             -> The document has had a mismatch
---             -> This can only be recovered by `oneOf` or `manyOf`
---         Outcome.Almost
---             -> An `Error` has been "raised".  It's propogated until it's resolved by `onError`
---             ->
---         Outcome.Success
---             -> Well, this is the easy one.
---         Ids are only available on the element they apply to.
---         Recovery is done at the level above the errored block.
---         So, if there is a record with a string that is constrained
---         If the constraint fails, the record can say "Here's the reset"
---     -}
---     = Block
---         String
---         { converter : Description -> Outcome.Outcome AstError (Uncertain data) data
---         , expect : Expectation
---         , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
---         }
---     | Value
---         { converter : Description -> Outcome.Outcome AstError (Uncertain data) data
---         , expect : Expectation
---         , parser : Id.Seed -> ( Id.Seed, Parser Context Problem Description )
---         }
 
 
 getParser : Id.Seed -> Block data -> ( Id.Seed, Parser Context Problem Description )
@@ -586,25 +556,7 @@ map fn child =
                 }
 
 
-
-{-
-
-   myBlock =
-       Mark.string
-           |> Mark.verify
-               (\s ->
-                   if String.length >= 10 then
-                       Ok s
-                   else
-                       Err
-                           { title = "String is too short"
-                           , message = ["Yup, need a bigger string"]
-                           }
-               )
-
--}
-
-
+{-| -}
 type alias CustomError =
     { title : String
     , message : List String
@@ -1420,13 +1372,16 @@ makeBlocksParser blocks seed =
         )
 
 
-
--- {-| -}
--- type alias Index =
---     { index : Int
---     , level : List Int
---     }
--- | Number Int
+{-| -}
+type Tree item
+    = Tree
+        { index : Int
+        , level : List Int
+        , icon : Icon
+        , content : List item
+        , children :
+            List (Tree item)
+        }
 
 
 {-| It can be useful to parse a tree structure. For example, here's a nested list.
@@ -1447,15 +1402,16 @@ In order to parse the above, you could define a block as
         -- Do something with nested.content and nested.children
         )
         text
-    **Note** the indentation is always a multiple of 4.
+
+**Note** the indentation is always a multiple of 4.
 
 -}
-nested :
+tree :
     String
-    -> (Nested item -> result)
+    -> (Tree item -> result)
     -> Block item
     -> Block (List result)
-nested name view contentBlock =
+tree name view contentBlock =
     let
         expectation =
             ExpectTree (getBlockExpectation contentBlock)
@@ -1464,15 +1420,16 @@ nested name view contentBlock =
         { expect = expectation
         , converter =
             \description ->
-                -- case description of
-                --     DescribeTree details ->
-                --         case details.found of
-                --             ( pos, nestedDescriptors ) ->
-                --                 reduceRender
-                --                     (renderTreeNodeSmall config)
-                --                     nestedDescriptors
-                --     _ ->
-                Outcome.Failure NoMatch
+                case description of
+                    DescribeTree details ->
+                        case details.found of
+                            ( pos, nestedDescriptors ) ->
+                                nestedDescriptors
+                                    |> reduceRender (renderTreeNodeSmall contentBlock)
+                                    |> mapSuccessAndRecovered (List.map view)
+
+                    _ ->
+                        Outcome.Failure NoMatch
         , parser =
             \seed ->
                 -- TODO: AHHHH, A NEW SEED NEEDS TO GET CREATED
@@ -3701,91 +3658,31 @@ mergeErrors ( h1, r1 ) ( h2, r2 ) =
     ( h1, r1 ++ h2 :: r2 )
 
 
+{-| -}
+renderTreeNodeSmall :
+    Block item
+    -> Nested Description
+    -> Outcome.Outcome AstError (Uncertain (Tree item)) (Tree item)
+renderTreeNodeSmall contentBlock (Nested cursor) =
+    let
+        renderedChildren =
+            reduceRender (renderTreeNodeSmall contentBlock) cursor.children
 
--- renderTreeNodeSmall :
---     { item : Block item
---     , start : Block icon
---     }
---     -> Nested ( Description, List Description )
---     -> Outcome.Outcome AstError (Uncertain (Nested ( icon, List item ))) (Nested ( icon, List item ))
--- renderTreeNodeSmall config (Nested cursor) =
---     let
---         renderedChildren =
---             reduceRender (renderTreeNodeSmall config) cursor.children
---         renderedContent =
---             case cursor.content of
---                 ( icon, content ) ->
---                     ( renderBlock config.start icon
---                     , reduceRender (renderBlock config.item) content
---                     )
---     in
---     case renderedContent of
---         ( Outcome.Success icon, Outcome.Success content ) ->
---             mapSuccessAndRecovered
---                 (\children ->
---                     Nested
---                         { icon = Bullet
---                         , index =
---                         , level =
---                         , content = content
---                         , children = children
---                         }
---                 )
---                 renderedChildren
---         ( Outcome.Success icon, Outcome.Almost (Recovered contentErrors content) ) ->
---             renderedChildren
---                 |> mapSuccessAndRecovered
---                     (\children ->
---                         Nested
---                             { content = ( icon, content )
---                             , children = children
---                             }
---                     )
---                 |> logErrors contentErrors
---         ( Outcome.Almost (Recovered iconErrors icon), Outcome.Success content ) ->
---             renderedChildren
---                 |> mapSuccessAndRecovered
---                     (\children ->
---                         Nested
---                             { content = ( icon, content )
---                             , children = children
---                             }
---                     )
---                 |> logErrors iconErrors
---         ( Outcome.Almost (Recovered iconErrors icon), Outcome.Almost (Recovered contentErrors content) ) ->
---             case renderedChildren of
---                 Outcome.Success successfullyRenderedChildren ->
---                     Outcome.Almost
---                         (Recovered
---                             (mergeErrors iconErrors contentErrors)
---                             (Nested
---                                 { content = ( icon, content )
---                                 , children = successfullyRenderedChildren
---                                 }
---                             )
---                         )
---                 Outcome.Almost (Recovered errors result) ->
---                     Outcome.Almost
---                         (Recovered
---                             (mergeErrors errors (mergeErrors iconErrors contentErrors))
---                             (Nested
---                                 { content = ( icon, content )
---                                 , children = result
---                                 }
---                             )
---                         )
---                 Outcome.Almost (Uncertain errs) ->
---                     Outcome.Almost (Uncertain errs)
---                 Outcome.Failure failure ->
---                     Outcome.Failure failure
---         ( Outcome.Almost (Uncertain unexpected), _ ) ->
---             Outcome.Almost (Uncertain unexpected)
---         ( _, Outcome.Almost (Uncertain unexpected) ) ->
---             Outcome.Almost (Uncertain unexpected)
---         ( Outcome.Failure err, _ ) ->
---             Outcome.Failure err
---         ( _, Outcome.Failure err ) ->
---             Outcome.Failure err
+        renderedContent =
+            reduceRender (renderBlock contentBlock) cursor.content
+    in
+    mergeWith
+        (\content children ->
+            Tree
+                { icon = cursor.icon
+                , index = cursor.index
+                , level = cursor.level
+                , content = content
+                , children = children
+                }
+        )
+        renderedContent
+        renderedChildren
 
 
 buildTree : Int -> List FlatCursor -> List (Nested Description)
@@ -3851,14 +3748,14 @@ buildTree baseIndent items =
                             }
                                 :: cursor.accumulated
 
-        tree =
+        newTree =
             items
                 |> List.foldl groupByIcon Nothing
                 |> finalizeGrouping
                 |> List.reverse
                 |> List.foldl gather emptyTreeBuilder
     in
-    case tree of
+    case newTree of
         TreeBuilder builder ->
             renderLevels builder.levels
 

@@ -102,16 +102,6 @@ type alias Range =
     }
 
 
-
--- {-| -}
--- type Nested item
---     = Nested
---         { content : item
---         , children :
---             List (Nested item)
---         }
-
-
 {-| -}
 type Icon
     = Bullet
