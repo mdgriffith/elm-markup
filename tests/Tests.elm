@@ -168,31 +168,25 @@ sectionDoc =
         )
 
 
+nested : Mark.Document (List Indexed)
+nested =
+    Mark.document
+        (List.indexedMap (renderIndex []))
+        (Mark.tree
+            "Nested"
+            identity
+            (Mark.map (always True) Mark.string)
+        )
 
--- nested : Mark.Document (List Indexed)
--- nested =
---     Mark.document
---         (List.indexedMap (renderIndex []))
---         (Mark.block "Nested"
---             identity
---             (Mark.nested
---                 { start = Mark.exactly "- " True
---                 , item = Mark.exactly "*" True
---                 }
---             )
---         )
--- nestedOrdering : Mark.Document (List Ordered)
--- nestedOrdering =
---     Mark.document
---         (List.indexedMap (renderContent []))
---         (Mark.block "Nested"
---             identity
---             (Mark.nested
---                 { start = Mark.exactly "- " True
---                 , item = Mark.int
---                 }
---             )
---         )
+
+nestedOrdering : Mark.Document (List Ordered)
+nestedOrdering =
+    Mark.document
+        (List.indexedMap (renderContent []))
+        (Mark.tree "Nested"
+            identity
+            Mark.int
+        )
 
 
 type Indexed
@@ -203,19 +197,22 @@ type Ordered
     = Ordered (List Int) (List Ordered)
 
 
+renderContent stack i (Mark.Tree node) =
+    case node.children of
+        [] ->
+            Ordered node.content []
 
--- renderContent stack i (Mark.Nested node) =
---     case node.children of
---         [] ->
---             Ordered (Tuple.second node.content) []
---         _ ->
---             Ordered (Tuple.second node.content) (List.indexedMap (renderContent (i :: stack)) node.children)
--- renderIndex stack i (Mark.Nested node) =
---     case node.children of
---         [] ->
---             Indexed i []
---         _ ->
---             Indexed i (List.indexedMap (renderIndex (i :: stack)) node.children)
+        _ ->
+            Ordered node.content (List.indexedMap (renderContent (i :: stack)) node.children)
+
+
+renderIndex stack i (Mark.Tree node) =
+    case node.children of
+        [] ->
+            Indexed i []
+
+        _ ->
+            Indexed i (List.indexedMap (renderIndex (i :: stack)) node.children)
 
 
 simpleNestedOrderedDoc =
