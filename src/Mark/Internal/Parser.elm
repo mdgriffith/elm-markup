@@ -173,10 +173,13 @@ styledTextLoop options meaningful untilStrings found =
                                         , end = end
                                         }
                                     , problem =
-                                        Error.UnknownInline []
+                                        Error.UnknownInline
+                                            (options.inlines
+                                                |> List.map inlineExample
+                                            )
 
                                     -- TODO: FIX THIS
-                                    --(List.map getInlineName options.inlines)
+                                    --
                                     -- TODO: This is the wrong error
                                     -- It could be:
                                     --   unexpected attributes
@@ -248,14 +251,10 @@ styledTextLoop options meaningful untilStrings found =
                                         , end = end
                                         }
                                     , problem =
-                                        Error.UnknownInline []
-
-                                    -- TODO: FIX THIS
-                                    --(List.map getInlineName options.inlines)
-                                    -- TODO: This is the wrong error
-                                    -- It could be:
-                                    --   unexpected attributes
-                                    --   missing control characters
+                                        Error.UnknownInline
+                                            (options.inlines
+                                                |> List.map inlineExample
+                                            )
                                     }
                         in
                         found
@@ -946,6 +945,15 @@ onlyAnnotations inline =
 
         ExpectToken name attrs ->
             Nothing
+
+
+getInlineName inline =
+    case inline of
+        ExpectAnnotation name attrs ->
+            name
+
+        ExpectToken name attrs ->
+            name
 
 
 removeByIndex index list =
