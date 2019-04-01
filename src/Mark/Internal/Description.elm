@@ -381,10 +381,18 @@ inlineExample inline =
     in
     case inline of
         ExpectAnnotation name attrs ->
-            "[some styled text]{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
+            if List.isEmpty attrs then
+                "[some styled text]{" ++ name ++ "}"
+
+            else
+                "[some styled text]{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
 
         ExpectToken name attrs ->
-            "{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
+            if List.isEmpty attrs then
+                "{" ++ name ++ "}"
+
+            else
+                "{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
 
 
 choiceExpectation (Choice id exp) =
