@@ -327,29 +327,28 @@ suite : Test
 suite =
     describe "Mark"
         [ describe "Text"
-            [ test "Starts with Space" <|
+            [ -- test "Starts with Space" <|
+              -- \_ ->
+              --     Expect.equal
+              --         (toResult toplevelText " one too many spaces...")
+              --         (Err [ Error.CantStartTextWithSpace ])
+              -- , test "Unclosed Italic" <|
+              --     \_ ->
+              --         Expect.equal
+              --             (toResult toplevelText "/Start italics, but don't finish")
+              --             (Err
+              --              [ Error.Escape
+              --              , Error.Expecting "/"
+              --              , Error.Expecting "~"
+              --              , Error.Expecting "*"
+              --              , Error.InlineStart
+              --              , Error.UnclosedStyles [ Mark.Italic ]
+              --              ]
+              --             )
+              test "Inline elements should maintain their source order." <|
                 \_ ->
                     Expect.equal
-                        (toResult toplevelText " one too many spaces...")
-                        (Err [ Error.CantStartTextWithSpace ])
-
-            -- , test "Unclosed Italic" <|
-            --     \_ ->
-            --         Expect.equal
-            --             (toResult toplevelText "/Start italics, but don't finish")
-            --             (Err
-            --              [ Error.Escape
-            --              , Error.Expecting "/"
-            --              , Error.Expecting "~"
-            --              , Error.Expecting "*"
-            --              , Error.InlineStart
-            --              , Error.UnclosedStyles [ Mark.Italic ]
-            --              ]
-            --             )
-            , test "Inline elements should maintain their source order." <|
-                \_ ->
-                    Expect.equal
-                        (toResult inlines "{Highlight|my} highlighted {Highlight|sentence} {Highlight|order}")
+                        (toResult inlines "[my]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
                             [ [ Mark.Text emptyStyles "my" ]
                             , [ Mark.Text emptyStyles " highlighted " ]
@@ -409,7 +408,7 @@ suite =
                     Expect.equal
                         (toResult inlines "[my]{highlurt} highlighted sentence")
                         (Err
-                            [ Error.UnknownInline [ "Highlight" ]
+                            [ Error.UnknownInline [ "[some styled text]{highlight}" ]
                             ]
                         )
             ]
@@ -438,80 +437,68 @@ Then some text.
 """)
                         (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.\n:text")
             ]
-
-        -- , describe "Nested"
-        --     [
-        --         test "Simple list parsing.  No Nesting." <|
-        --         \_ ->
-        --             Expect.equal
-        --                 (Result.mapError (List.map .problem)
-        --                     (Mark.parse nested simpleNestedDoc)
-        --                 )
-        --                 (Ok [ Indexed 0 [], Indexed 1 [], Indexed 2 [] ])
-        --     , test "Simple list parsing, maintains order" <|
-        --         \_ ->
-        --             Expect.equal
-        --                 (Result.mapError (List.map .problem)
-        --                     (Mark.parse nestedOrdering simpleNestedOrderedDoc)
-        --                 )
-        --                 (Ok
-        --                     [ Ordered [ 1, 2 ] []
-        --                     , Ordered [ 3, 4, 5 ] []
-        --                     , Ordered [ 6 ] []
-        --                     ]
-        --                 )
-        --     , test "Complex list parsing, maintains order" <|
-        --         \_ ->
-        --             Expect.equal
-        --                 (Result.mapError (List.map .problem)
-        --                     (Mark.parse nestedOrdering complexNestedOrderedDoc)
-        --                 )
-        --                 (Ok
-        --                     [ Ordered [ 1, 2 ] []
-        --                     , Ordered [ 3, 4 ]
-        --                         [ Ordered [ 5, 6 ] []
-        --                         , Ordered [ 7, 8 ] []
-        --                         ]
-        --                     , Ordered [ 9 ] []
-        --                     ]
-        --                 )
-        --     , test "Nested list parsing" <|
-        --         \_ ->
-        --             Expect.equal
-        --                 (Result.mapError (List.map .problem)
-        --                     (Mark.parse nested complexNestedDoc)
-        --                 )
-        --                 (Ok
-        --                     [ Indexed 0
-        --                         [ Indexed 0 []
-        --                         , Indexed 1 []
-        --                         , Indexed 2 []
-        --                         , Indexed 3 [ Indexed 0 [] ]
-        --                         ]
-        --                     , Indexed 1 [ Indexed 0 [] ]
-        --                     , Indexed 2 []
-        --                     ]
-        --                 )
-        --     , test "Nested list dedenting correctly" <|
-        --         \_ ->
-        --             Expect.equal
-        --                 (Result.mapError (List.map .problem)
-        --                     (Mark.parse nested dedentingNestedDoc)
-        --                 )
-        --                 (Ok
-        --                     [ Indexed 0
-        --                         [ Indexed 0 []
-        --                         , Indexed 1 []
-        --                         , Indexed 2 []
-        --                         , Indexed 3 [ Indexed 0 [] ]
-        --                         , Indexed 4 [ Indexed 0 [] ]
-        --                         , Indexed 5 []
-        --                         ]
-        --                     , Indexed 1 [ Indexed 0 [] ]
-        --                     , Indexed 2 []
-        --                     ]
-        --                 )
-        --     ]
+        , describe "Nested"
+            [ test "Simple list parsing.  No Nesting." <|
+                \_ ->
+                    Expect.equal
+                        (toResult nested simpleNestedDoc)
+                        (Ok [ Indexed 0 [], Indexed 1 [], Indexed 2 [] ])
+            , test "Simple list parsing, maintains order" <|
+                \_ ->
+                    Expect.equal
+                        (toResult nestedOrdering simpleNestedOrderedDoc)
+                        (Ok
+                            [ Ordered [ 1, 2 ] []
+                            , Ordered [ 3, 4, 5 ] []
+                            , Ordered [ 6 ] []
+                            ]
+                        )
+            , test "Complex list parsing, maintains order" <|
+                \_ ->
+                    Expect.equal
+                        (toResult nestedOrdering complexNestedOrderedDoc)
+                        (Ok
+                            [ Ordered [ 1, 2 ] []
+                            , Ordered [ 3, 4 ]
+                                [ Ordered [ 5, 6 ] []
+                                , Ordered [ 7, 8 ] []
+                                ]
+                            , Ordered [ 9 ] []
+                            ]
+                        )
+            , test "Nested list parsing" <|
+                \_ ->
+                    Expect.equal
+                        (toResult nested complexNestedDoc)
+                        (Ok
+                            [ Indexed 0
+                                [ Indexed 0 []
+                                , Indexed 1 []
+                                , Indexed 2 []
+                                , Indexed 3 [ Indexed 0 [] ]
+                                ]
+                            , Indexed 1 [ Indexed 0 [] ]
+                            , Indexed 2 []
+                            ]
+                        )
+            , test "Nested list dedenting correctly" <|
+                \_ ->
+                    Expect.equal
+                        (toResult nested dedentingNestedDoc)
+                        (Ok
+                            [ Indexed 0
+                                [ Indexed 0 []
+                                , Indexed 1 []
+                                , Indexed 2 []
+                                , Indexed 3 [ Indexed 0 [] ]
+                                , Indexed 4 [ Indexed 0 [] ]
+                                , Indexed 5 []
+                                ]
+                            , Indexed 1 [ Indexed 0 [] ]
+                            , Indexed 2 []
+                            ]
+                        )
+            ]
         , describe "Blocks"
             [ test "Misspelled Block" <|
                 \_ ->
