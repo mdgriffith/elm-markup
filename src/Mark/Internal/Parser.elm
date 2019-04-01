@@ -2,7 +2,9 @@ module Mark.Internal.Parser exposing
     ( Replacement(..)
     , attribute
     , attributeList
+    , float
     , getPosition
+    , int
     , peek
     , styledText
     , withRange
@@ -31,6 +33,102 @@ type alias Range =
     { start : Position
     , end : Position
     }
+
+
+int : Parser Context Problem (Found Int)
+int =
+    Parser.map
+        (\( pos, intResult ) ->
+            case intResult of
+                Ok i ->
+                    Found pos i
+
+                Err str ->
+                    Unexpected
+                        { range = pos
+                        , problem = Error.BadInt str
+                        }
+        )
+        (withRange
+            (Parser.oneOf
+                [ Parser.succeed
+                    (\i str ->
+                        if str == "" then
+                            Ok (negate i)
+
+                        else
+                            Err (String.fromInt i ++ str)
+                    )
+                    |. Parser.token (Parser.Token "-" (Expecting "-"))
+                    |= Parser.int Integer InvalidNumber
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+                , Parser.succeed
+                    (\i str ->
+                        if str == "" then
+                            Ok i
+
+                        else
+                            Err (String.fromInt i ++ str)
+                    )
+                    |= Parser.int Integer InvalidNumber
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+                , Parser.succeed Err
+                    |= word
+                ]
+            )
+        )
+
+
+{-| Parses a float and must end with whitespace, not additional characters.
+-}
+float : Parser Context Problem (Found ( String, Float ))
+float =
+    Parser.map
+        (\( pos, floatResult ) ->
+            case floatResult of
+                Ok f ->
+                    Found pos f
+
+                Err str ->
+                    Unexpected
+                        { range = pos
+                        , problem = Error.BadFloat str
+                        }
+        )
+        (withRange
+            (Parser.oneOf
+                [ Parser.succeed
+                    (\start fl end src extra ->
+                        if extra == "" then
+                            Ok ( String.slice start end src, negate fl )
+
+                        else
+                            Err (String.fromFloat fl ++ extra)
+                    )
+                    |= Parser.getOffset
+                    |. Parser.token (Parser.Token "-" (Expecting "-"))
+                    |= Parser.float FloatingPoint InvalidNumber
+                    |= Parser.getOffset
+                    |= Parser.getSource
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+                , Parser.succeed
+                    (\start fl end src extra ->
+                        if extra == "" then
+                            Ok ( String.slice start end src, fl )
+
+                        else
+                            Err (String.fromFloat fl ++ extra)
+                    )
+                    |= Parser.getOffset
+                    |= Parser.float FloatingPoint InvalidNumber
+                    |= Parser.getOffset
+                    |= Parser.getSource
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+                , Parser.succeed Err
+                    |= word
+                ]
+            )
+        )
 
 
 

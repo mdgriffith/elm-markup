@@ -220,19 +220,6 @@ type Outcome failure almost success
     | Failure failure
 
 
-mapSuccess : (success -> otherSuccess) -> Outcome.Outcome f a success -> Outcome.Outcome f a otherSuccess
-mapSuccess fn outcome =
-    case outcome of
-        Outcome.Success s ->
-            Outcome.Success (fn s)
-
-        Outcome.Almost a ->
-            Outcome.Almost a
-
-        Outcome.Failure f ->
-            Outcome.Failure f
-
-
 {-| This doesn't cause something to completely fail, but logs the error.
 -}
 logErrors :
@@ -2701,7 +2688,7 @@ int =
                             , found = foundInt
                             }
                     )
-                    integer
+                    Parse.int
                 )
         }
 
@@ -2715,7 +2702,7 @@ float =
                 case desc of
                     DescribeFloat details ->
                         foundToOutcome details.found
-                            |> mapSuccess Tuple.second
+                            |> Outcome.mapSuccess Tuple.second
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -2732,7 +2719,7 @@ float =
                         DescribeFloat
                             { id = id, found = fl }
                     )
-                    floating
+                    Parse.float
                 )
         }
 
@@ -2986,102 +2973,6 @@ skipBlankLineWith x =
                 |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
             , Parser.succeed ()
             ]
-
-
-integer : Parser Context Problem (Found Int)
-integer =
-    Parser.map
-        (\( pos, intResult ) ->
-            case intResult of
-                Ok i ->
-                    Found pos i
-
-                Err str ->
-                    Unexpected
-                        { range = pos
-                        , problem = Error.BadInt str
-                        }
-        )
-        (Parse.withRange
-            (Parser.oneOf
-                [ Parser.succeed
-                    (\i str ->
-                        if str == "" then
-                            Ok (negate i)
-
-                        else
-                            Err (String.fromInt i ++ str)
-                    )
-                    |. Parser.token (Parser.Token "-" (Expecting "-"))
-                    |= Parser.int Integer InvalidNumber
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed
-                    (\i str ->
-                        if str == "" then
-                            Ok i
-
-                        else
-                            Err (String.fromInt i ++ str)
-                    )
-                    |= Parser.int Integer InvalidNumber
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed Err
-                    |= Parse.word
-                ]
-            )
-        )
-
-
-{-| Parses a float and must end with whitespace, not additional characters.
--}
-floating : Parser Context Problem (Found ( String, Float ))
-floating =
-    Parser.map
-        (\( pos, floatResult ) ->
-            case floatResult of
-                Ok f ->
-                    Found pos f
-
-                Err str ->
-                    Unexpected
-                        { range = pos
-                        , problem = Error.BadFloat str
-                        }
-        )
-        (Parse.withRange
-            (Parser.oneOf
-                [ Parser.succeed
-                    (\start fl end src extra ->
-                        if extra == "" then
-                            Ok ( String.slice start end src, negate fl )
-
-                        else
-                            Err (String.fromFloat fl ++ extra)
-                    )
-                    |= Parser.getOffset
-                    |. Parser.token (Parser.Token "-" (Expecting "-"))
-                    |= Parser.float FloatingPoint InvalidNumber
-                    |= Parser.getOffset
-                    |= Parser.getSource
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed
-                    (\start fl end src extra ->
-                        if extra == "" then
-                            Ok ( String.slice start end src, fl )
-
-                        else
-                            Err (String.fromFloat fl ++ extra)
-                    )
-                    |= Parser.getOffset
-                    |= Parser.float FloatingPoint InvalidNumber
-                    |= Parser.getOffset
-                    |= Parser.getSource
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed Err
-                    |= Parse.word
-                ]
-            )
-        )
 
 
 
@@ -3654,7 +3545,7 @@ reduceRender fn list =
                         almostOrfailure
             )
             (Outcome.Success [])
-        |> mapSuccess List.reverse
+        |> Outcome.mapSuccess List.reverse
 
 
 mergeErrors ( h1, r1 ) ( h2, r2 ) =

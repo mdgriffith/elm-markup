@@ -1,5 +1,6 @@
 module Mark.Edit exposing
-    ( update
+    ( int, float, string
+    , update
     , Edit, updateInt, updateString, replaceWith, delete, insertAt, updateFloat, move
     , setInt, setString, setFloat, setBool, setField, withinBlock
     )
@@ -8,6 +9,8 @@ module Mark.Edit exposing
 
 
 # Editable Blocks
+
+@docs int, float, string
 
 
 # Making Edits
@@ -27,13 +30,22 @@ import Mark.Format as Format
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
+import Mark.Internal.Outcome as Outcome
+import Mark.Internal.Parser as Parse
+import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
+{-| -}
 type alias Error =
     { message : List Format.Text
     , region : { start : Position, end : Position }
     , title : String
     }
+
+
+{-| -}
+type alias Id kind =
+    Id.Id kind
 
 
 {-| -}
@@ -1690,6 +1702,211 @@ setRecordField targetFieldName fieldSetter ( fieldName, fieldExp ) gathered =
 
 
 {- EDITABLE BLOCKS -}
+{- Editable blocks generally have
+
+   - Id type -> so edit events cant be emitted.
+   - Range -> To inform where in the source document you're working.
+   - Expectation ->
+
+
+-}
+
+
+{-| Parse an `Int` block.
+-}
+int : ({ id : Id Int, range : Range } -> Int -> a) -> Block a
+int view =
+    Value
+        { converter =
+            \desc ->
+                case desc of
+                    DescribeInteger details ->
+                        case details.found of
+                            Found rng i ->
+                                Outcome.Success
+                                    (view
+                                        { id = details.id
+                                        , range = rng
+                                        }
+                                        i
+                                    )
+
+                            Unexpected unexpected ->
+                                Outcome.Almost (Uncertain ( unexpected, [] ))
+
+                    _ ->
+                        Outcome.Failure Error.NoMatch
+        , expect = ExpectInteger 0
+        , parser =
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\foundInt ->
+                        DescribeInteger
+                            { id = id
+                            , found = foundInt
+                            }
+                    )
+                    Parse.int
+                )
+        }
+
+
+{-| -}
+float : ({ id : Id Float, range : Range } -> ( String, Float ) -> a) -> Block a
+float view =
+    Value
+        { converter =
+            \desc ->
+                case desc of
+                    DescribeFloat details ->
+                        case details.found of
+                            Found rng i ->
+                                Outcome.Success
+                                    (view
+                                        { id = details.id
+                                        , range = rng
+                                        }
+                                        i
+                                    )
+
+                            Unexpected unexpected ->
+                                Outcome.Almost (Uncertain ( unexpected, [] ))
+
+                    _ ->
+                        Outcome.Failure Error.NoMatch
+        , expect = ExpectFloat 0
+        , parser =
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\fl ->
+                        DescribeFloat
+                            { id = id
+                            , found = fl
+                            }
+                    )
+                    Parse.float
+                )
+        }
+
+
+{-| -}
+string : ({ id : Id String, range : Range } -> String -> a) -> Block a
+string view =
+    Value
+        { expect = ExpectString "-- Replace Me --"
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeString id range str ->
+                        Outcome.Success
+                            (view
+                                { id = id
+                                , range = range
+                                }
+                                str
+                            )
+
+                    _ ->
+                        Outcome.Failure Error.NoMatch
+        , parser =
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.succeed
+                    (\start val end ->
+                        DescribeString id
+                            { start = start
+                            , end = end
+                            }
+                            val
+                    )
+                    |= Parse.getPosition
+                    |= Parser.getChompedString
+                        (Parser.chompWhile
+                            (\c -> c /= '\n')
+                        )
+                    |= Parse.getPosition
+                )
+        }
+
+
+{-| Parse either `True` or `False`.
+-}
+bool : ({ id : Id Bool, range : Range } -> Bool -> a) -> Block a
+bool view =
+    Value
+        { expect = ExpectBoolean False
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeBoolean details ->
+                        case details.found of
+                            Found rng b ->
+                                Outcome.Success
+                                    (view
+                                        { id = details.id
+                                        , range = rng
+                                        }
+                                        b
+                                    )
+
+                            Unexpected unexpected ->
+                                Outcome.Almost (Uncertain ( unexpected, [] ))
+
+                    _ ->
+                        Outcome.Failure Error.NoMatch
+        , parser =
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\( range, boolResult ) ->
+                        DescribeBoolean
+                            { id = id
+                            , found =
+                                case boolResult of
+                                    Err err ->
+                                        Unexpected
+                                            { range = range
+                                            , problem = Error.BadBool err
+                                            }
+
+                                    Ok b ->
+                                        Found range
+                                            b
+                            }
+                    )
+                    (Parse.withRange
+                        (Parser.oneOf
+                            [ Parser.token (Parser.Token "True" (Error.Expecting "True"))
+                                |> Parser.map (always (Ok True))
+                            , Parser.token (Parser.Token "False" (Error.Expecting "False"))
+                                |> Parser.map (always (Ok False))
+                            , Parser.map Err Parse.word
+                            ]
+                        )
+                    )
+                )
+        }
+
+
+
 -- {-| -}
 -- oneOf :
 --     { view :
