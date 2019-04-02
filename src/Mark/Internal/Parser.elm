@@ -4,6 +4,7 @@ module Mark.Internal.Parser exposing
     , attributeList
     , float
     , getPosition
+    , indentedString
     , int
     , peek
     , styledText
@@ -129,6 +130,54 @@ float =
                 ]
             )
         )
+
+
+newline =
+    Parser.token (Parser.Token "\n" Newline)
+
+
+{-| -}
+indentedString : Int -> String -> Parser Context Problem (Parser.Step String String)
+indentedString indentation found =
+    Parser.oneOf
+        -- First line, indentation is already handled by the block constructor.
+        [ Parser.succeed (Parser.Done found)
+            |. Parser.end End
+        , Parser.succeed
+            (\extra ->
+                Parser.Loop <|
+                    if extra then
+                        found ++ "\n\n"
+
+                    else
+                        found ++ "\n"
+            )
+            |. newline
+            |= Parser.oneOf
+                [ Parser.succeed True
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                , Parser.succeed False
+                ]
+        , if found == "" then
+            Parser.succeed (\str -> Parser.Loop (found ++ str))
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+
+          else
+            Parser.succeed
+                (\str ->
+                    Parser.Loop (found ++ str)
+                )
+                |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
+                |= Parser.getChompedString
+                    (Parser.chompWhile
+                        (\c -> c /= '\n')
+                    )
+        , Parser.succeed (Parser.Done found)
+        ]
 
 
 

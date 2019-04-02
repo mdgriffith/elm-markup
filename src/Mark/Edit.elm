@@ -1,5 +1,5 @@
 module Mark.Edit exposing
-    ( int, float, string
+    ( int, float, string, multiline
     , update
     , Edit, updateInt, updateString, replaceWith, delete, insertAt, updateFloat, move
     , setInt, setString, setFloat, setBool, setField, withinBlock
@@ -10,7 +10,7 @@ module Mark.Edit exposing
 
 # Editable Blocks
 
-@docs int, float, string
+@docs int, float, string, multiline
 
 
 # Making Edits
@@ -1839,6 +1839,48 @@ string view =
                             (\c -> c /= '\n')
                         )
                     |= Parse.getPosition
+                )
+        }
+
+
+{-| -}
+multiline : ({ id : Id String, range : Range } -> String -> a) -> Block a
+multiline view =
+    Value
+        { expect = ExpectMultiline "REPLACE"
+        , converter =
+            \desc ->
+                case desc of
+                    DescribeMultiline id range str ->
+                        Outcome.Success
+                            (view
+                                { id = id
+                                , range = range
+                                }
+                                str
+                            )
+
+                    _ ->
+                        Outcome.Failure Error.NoMatch
+        , parser =
+            \seed ->
+                let
+                    ( id, newSeed ) =
+                        Id.step seed
+                in
+                ( newSeed
+                , Parser.map
+                    (\( pos, str ) ->
+                        DescribeMultiline id pos str
+                    )
+                    (Parse.withRange
+                        (Parser.getIndent
+                            |> Parser.andThen
+                                (\indentation ->
+                                    Parser.loop "" (Parse.indentedString indentation)
+                                )
+                        )
+                    )
                 )
         }
 

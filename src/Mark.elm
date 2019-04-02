@@ -2354,34 +2354,6 @@ convertTextDescription options comp cursor =
             uncertain details
 
 
-
--- case cursor of
---     Outcome.Success found ->
---         capture found Outcome.Success
---     Outcome.Almost (Recovered errs found) ->
---         capture found (\new -> Outcome.Almost (Recovered errs new))
---     _ ->
---         cursor
-
-
-convertMatchedInline : List InlineAttribute -> Inline rendered -> Result AstError rendered -> Result AstError rendered
-convertMatchedInline foundAttributes inline found =
-    found
-
-
-
--- renderInline name pieces (Inline inlineName details) found =
---     case found of
---         Ok _ ->
---             found
---         Err error ->
---             if name == inlineName then
---                 -- inlineRenderer
---                 details.converter pieces
---             else
---                 found
-
-
 type alias Replacement =
     Parse.Replacement
 
@@ -2515,7 +2487,7 @@ multiline =
                         (Parser.getIndent
                             |> Parser.andThen
                                 (\indentation ->
-                                    Parser.loop "" (indentedString indentation)
+                                    Parser.loop "" (Parse.indentedString indentation)
                                 )
                         )
                     )
@@ -2568,35 +2540,6 @@ foundToResult found err =
 
         _ ->
             Err err
-
-
-
--- {-| -}
--- exactly : String -> value -> Block value
--- exactly key value =
---     Value
---         { expect = ExpectStringExactly key
---         , converter =
---             \desc ->
---                 case desc of
---                     DescribeStringExactly range existingKey ->
---                         if key == existingKey then
---                             Ok (Found range value)
---                         else
---                             Outcome.Failure NoMatch
---                     _ ->
---                         Outcome.Failure NoMatch
---         , parser =
---             skipSeed
---                 (Parser.succeed
---                     (\start _ end ->
---                         DescribeStringExactly { start = start, end = end } key
---                     )
---                     |= Parse.getPosition
---                     |= Parser.token (Parser.Token key (Expecting key))
---                     |= Parse.getPosition
---                 )
---         }
 
 
 {-| Parse either `True` or `False`.
@@ -2910,50 +2853,6 @@ indentationBetween lower higher =
             )
             (List.range bottom top)
         )
-
-
-{-| -}
-indentedString : Int -> String -> Parser Context Problem (Parser.Step String String)
-indentedString indentation found =
-    Parser.oneOf
-        -- First line, indentation is already handled by the block constructor.
-        [ Parser.succeed (Parser.Done found)
-            |. Parser.end End
-        , Parser.succeed
-            (\extra ->
-                Parser.Loop <|
-                    if extra then
-                        found ++ "\n\n"
-
-                    else
-                        found ++ "\n"
-            )
-            |. newline
-            |= Parser.oneOf
-                [ Parser.succeed True
-                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
-                , Parser.succeed False
-                ]
-        , if found == "" then
-            Parser.succeed (\str -> Parser.Loop (found ++ str))
-                |= Parser.getChompedString
-                    (Parser.chompWhile
-                        (\c -> c /= '\n')
-                    )
-
-          else
-            Parser.succeed
-                (\str ->
-                    Parser.Loop (found ++ str)
-                )
-                |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
-                |= Parser.getChompedString
-                    (Parser.chompWhile
-                        (\c -> c /= '\n')
-                    )
-        , Parser.succeed (Parser.Done found)
-        ]
 
 
 type alias BlockOrNewlineCursor thing =
