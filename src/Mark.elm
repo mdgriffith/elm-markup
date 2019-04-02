@@ -241,25 +241,6 @@ logErrors (( fst, remainingErrs ) as err) outcome =
             Outcome.Failure failures
 
 
-mapSuccessAndRecovered :
-    (success -> otherSuccess)
-    -> Outcome.Outcome f (Uncertain success) success
-    -> Outcome.Outcome f (Uncertain otherSuccess) otherSuccess
-mapSuccessAndRecovered fn outcome =
-    case outcome of
-        Outcome.Success s ->
-            Outcome.Success (fn s)
-
-        Outcome.Almost (Uncertain u) ->
-            Outcome.Almost (Uncertain u)
-
-        Outcome.Almost (Recovered e a) ->
-            Outcome.Almost (Recovered e (fn a))
-
-        Outcome.Failure f ->
-            Outcome.Failure f
-
-
 {-| -}
 uncertain : ErrorWithRange -> Outcome.Outcome AstError (Uncertain data) data
 uncertain err =
@@ -269,54 +250,6 @@ uncertain err =
 {-| -}
 type alias Block data =
     Desc.Block data
-
-
-getParser : Id.Seed -> Block data -> ( Id.Seed, Parser Context Problem Description )
-getParser seed fromBlock =
-    case fromBlock of
-        Block name { parser } ->
-            let
-                ( newSeed, blockParser ) =
-                    parser seed
-            in
-            ( newSeed
-            , Parser.succeed identity
-                |. Parser.token (Parser.Token "|" (ExpectingBlockName name))
-                |. Parser.chompIf (\c -> c == ' ') Space
-                |= blockParser
-            )
-
-        Value { parser } ->
-            parser seed
-
-
-blockName : Block data -> Maybe String
-blockName fromBlock =
-    case fromBlock of
-        Block name _ ->
-            Just name
-
-        Value _ ->
-            Nothing
-
-
-renderBlock : Block data -> Description -> Outcome.Outcome AstError (Uncertain data) data
-renderBlock fromBlock =
-    case fromBlock of
-        Block name { converter } ->
-            converter
-
-        Value { converter } ->
-            converter
-
-
-getBlockExpectation fromBlock =
-    case fromBlock of
-        Block name { expect } ->
-            expect
-
-        Value { expect } ->
-            expect
 
 
 
@@ -827,7 +760,7 @@ block name view child =
                                                                 |. Parser.chompIf (\c -> c == ' ') Space
                                                                 |. Parser.chompWhile (\c -> c == ' ')
                                                                 |= Parse.getPosition
-                                                                |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                                                |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
                                                             , Parser.map Ok <|
                                                                 Parser.withIndent
                                                                     (indentation + 4)
@@ -843,7 +776,7 @@ block name view child =
                                                     Err ( pos, Error.ExpectingIndent (indentation + 4) )
                                                 )
                                                 |= Parse.withRange (Parser.chompWhile (\c -> c == ' '))
-                                                |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                                |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
                                             ]
                                 )
                         )
@@ -1022,8 +955,8 @@ oneOf blocks =
                                                             Err ( pos, Error.UnknownBlock children.blockNames )
                                                         )
                                                         |= Parse.withRange Parse.word
-                                                        |. newline
-                                                        |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                                        |. Parse.newline
+                                                        |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
                                                 )
                                        ]
                                 )
@@ -1071,62 +1004,6 @@ unexpectedInOneOf expectations =
                     )
                     |= Parse.withRange Parse.word
             )
-
-
-humanReadableExpectations expect =
-    case expect of
-        ExpectNothing ->
-            ""
-
-        ExpectBlock name exp ->
-            "| " ++ name
-
-        ExpectStub stubName ->
-            "| " ++ stubName
-
-        ExpectRecord name fields ->
-            "| " ++ name
-
-        ExpectOneOf expectations ->
-            "One of: " ++ String.join ", " (List.map humanReadableExpectations expectations)
-
-        ExpectManyOf expectations ->
-            "Many of: " ++ String.join ", " (List.map humanReadableExpectations expectations)
-
-        ExpectStartsWith start remain ->
-            humanReadableExpectations start ++ " and then " ++ humanReadableExpectations remain
-
-        ExpectBoolean _ ->
-            "A Boolean"
-
-        ExpectInteger _ ->
-            "An Int"
-
-        ExpectFloat _ ->
-            "A Float"
-
-        ExpectFloatBetween bounds ->
-            "A Float between " ++ String.fromFloat bounds.min ++ " and " ++ String.fromFloat bounds.max
-
-        ExpectIntBetween bounds ->
-            "An Int between " ++ String.fromInt bounds.min ++ " and " ++ String.fromInt bounds.max
-
-        ExpectText inlines ->
-            "Styled Text"
-
-        ExpectString _ ->
-            "A String"
-
-        ExpectMultiline _ ->
-            "A Multiline String"
-
-        ExpectStringExactly exact ->
-            exact
-
-        ExpectTree content ->
-            "A tree starting of "
-                ++ humanReadableExpectations content
-                ++ " content"
 
 
 {-| Many blocks that are all at the same indentation level.
@@ -1235,7 +1112,7 @@ blocksOrNewlines indentation blocks cursor =
                 , seed = cursor.seed
                 }
             )
-            |. newlineWith "empty newline"
+            |. Parse.newlineWith "empty Parse.newline"
         , if not cursor.parsedSomething then
             -- First thing already has indentation accounted for.
             makeBlocksParser blocks cursor.seed
@@ -1276,7 +1153,7 @@ blocksOrNewlines indentation blocks cursor =
                         }
                     )
                     |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                    |. Parser.backtrackable newline
+                    |. Parser.backtrackable Parse.newline
 
                 -- We reach here because the indentation parsing was not successful,
                 -- meaning the indentation has been lowered and the block is done
@@ -1292,7 +1169,7 @@ blocksOrNewlines indentation blocks cursor =
                 }
             )
             |. Parser.chompWhile (\c -> c == ' ')
-            |. newlineWith "ws-line"
+            |. Parse.newlineWith "ws-line"
         ]
 
 
@@ -1347,8 +1224,8 @@ makeBlocksParser blocks seed =
                                                         Err ( pos, Error.UnknownBlock children.blockNames )
                                                     )
                                                     |= Parse.withRange Parse.word
-                                                    |. newline
-                                                    |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                                    |. Parse.newline
+                                                    |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
                                             )
                                    ]
                             )
@@ -2668,191 +2545,7 @@ float =
 
 
 
--- {-| -}
--- intBetween :
---     { min : Int
---     , max : Int
---     , view : Id Int -> Int -> a
---     }
---     -> Block a
--- intBetween bounds =
---     let
---         top =
---             max bounds.min bounds.max
---         bottom =
---             min bounds.min bounds.max
---     in
---     Value
---         { expect =
---             ExpectIntBetween
---                 { min = bottom
---                 , max = top
---                 , default = bottom
---                 }
---         , converter =
---             \desc ->
---                 case desc of
---                     DescribeIntBetween details ->
---                         Ok (mapFound (bounds.view details.id) details.found)
---                     _ ->
---                         Outcome.Failure NoMatch
---         , parser =
---             \seed ->
---                 let
---                     ( id, newSeed ) =
---                         Id.step seed
---                 in
---                 ( newSeed
---                 , Parser.map
---                     (\found ->
---                         DescribeIntBetween
---                             { min = bottom
---                             , max = top
---                             , id = id
---                             , found =
---                                 case found of
---                                     Found rng i ->
---                                         if i >= bottom && i <= top then
---                                             found
---                                         else
---                                             Unexpected
---                                                 { range = rng
---                                                 , problem =
---                                                     Error.IntOutOfRange
---                                                         { found = i
---                                                         , min = bottom
---                                                         , max = top
---                                                         }
---                                                 }
---                                     _ ->
---                                         found
---                             }
---                     )
---                     integer
---                 )
---         }
--- {-| -}
--- floatBetween :
---     { min : Float
---     , max : Float
---     , view : Id Float -> Float -> a
---     }
---     -> Block a
--- floatBetween bounds =
---     let
---         top =
---             max bounds.min bounds.max
---         bottom =
---             min bounds.min bounds.max
---     in
---     Value
---         { expect =
---             ExpectFloatBetween
---                 { min = bounds.min
---                 , max = bounds.max
---                 , default = bounds.min
---                 }
---         , converter =
---             \desc ->
---                 case desc of
---                     DescribeFloatBetween details ->
---                         Ok (mapFound (\( str_, fl ) -> bounds.view details.id fl) details.found)
---                     _ ->
---                         Outcome.Failure NoMatch
---         , parser =
---             \seed ->
---                 let
---                     ( id, newSeed ) =
---                         Id.step seed
---                 in
---                 ( newSeed
---                 , Parser.map
---                     (\found ->
---                         DescribeFloatBetween
---                             { min = bottom
---                             , max = top
---                             , id = id
---                             , found =
---                                 case found of
---                                     Found rng ( str, i ) ->
---                                         if i >= bottom && i <= top then
---                                             found
---                                         else
---                                             Unexpected
---                                                 { range = rng
---                                                 , problem =
---                                                     Error.FloatOutOfRange
---                                                         { found = i
---                                                         , min = bottom
---                                                         , max = top
---                                                         }
---                                                 }
---                                     _ ->
---                                         found
---                             }
---                     )
---                     floating
---                 )
---         }
 {- Parser Heleprs -}
-
-
-{-| -}
-raggedIndentedStringAbove : Int -> String -> Parser Context Problem (Parser.Step String String)
-raggedIndentedStringAbove indentation found =
-    Parser.oneOf
-        [ Parser.succeed
-            (\extra ->
-                Parser.Loop <|
-                    if extra then
-                        found ++ "\n\n"
-
-                    else
-                        found ++ "\n"
-            )
-            |. Parser.token (Parser.Token "\n" Newline)
-            |= Parser.oneOf
-                [ Parser.succeed True
-                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
-                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
-                , Parser.succeed False
-                ]
-        , Parser.succeed
-            (\indentCount str ->
-                Parser.Loop (found ++ String.repeat indentCount " " ++ str)
-            )
-            |= Parser.oneOf
-                (indentationBetween (indentation + 1) (indentation + 4))
-            |= Parser.getChompedString
-                (Parser.chompWhile
-                    (\c -> c /= '\n')
-                )
-        , Parser.succeed (Parser.Done found)
-        ]
-
-
-{-| Parse any indentation between two bounds, inclusive.
--}
-indentationBetween : Int -> Int -> List (Parser Context Problem Int)
-indentationBetween lower higher =
-    let
-        bottom =
-            min lower higher
-
-        top =
-            max lower higher
-    in
-    List.reverse
-        (List.map
-            (\numSpaces ->
-                Parser.succeed numSpaces
-                    |. Parser.token
-                        (Parser.Token (String.repeat numSpaces " ")
-                            (ExpectingIndentation numSpaces)
-                        )
-            )
-            (List.range bottom top)
-        )
 
 
 type alias BlockOrNewlineCursor thing =
@@ -3027,7 +2720,7 @@ unexpectedField recordName options =
                         |. Parser.chompWhile (\c -> c == ' ')
                         -- TODO: parse multiline string
                         |= Parser.withIndent (indentation + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
-                     -- |. newline
+                     -- |. Parse.newline
                      -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
                     )
             )
@@ -3078,11 +2771,11 @@ type Indented thing
 
 {-| Either:
 
-    1. Parses indent ++ parser ++ newline
+    1. Parses indent ++ parser ++ Parse.newline
         -> Outcome.Success!
-    2. Parses many spaces ++ newline
+    2. Parses many spaces ++ Parse.newline
         -> Ignore completely
-    3. Parses some number of spaces ++ some not newlines ++ newline
+    3. Parses some number of spaces ++ some not Parse.newlines ++ Parse.newline
         -> Is improperly indented
 
 -}
@@ -3095,7 +2788,7 @@ indentOrSkip indentation successParser =
         [ Parser.succeed identity
             |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
             |= Parser.oneOf
-                [ Parser.map (always EmptyLine) newline
+                [ Parser.map (always EmptyLine) Parse.newline
                 , Parser.succeed
                     (\foundIndent content ->
                         if content /= "" then
@@ -3107,13 +2800,13 @@ indentOrSkip indentation successParser =
                     |. Parser.chompIf (\c -> c == ' ') Space
                     |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
                     |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
-                    |. newlineWith "indentOrSkip one"
+                    |. Parse.newlineWith "indentOrSkip one"
 
                 -- parse field
                 , Parser.succeed Indented
                     |= successParser
 
-                -- |. newlineWith "indentOrSkip two"
+                -- |. Parse.newlineWith "indentOrSkip two"
                 ]
 
         -- We're here because there is less than the desired indent.
@@ -3127,20 +2820,12 @@ indentOrSkip indentation successParser =
             )
             |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
             |= Parser.oneOf
-                [ Parser.map (always False) newline
+                [ Parser.map (always False) Parse.newline
                 , Parser.succeed True
                     |. Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
-                    |. newline
+                    |. Parse.newline
                 ]
         ]
-
-
-newlineWith x =
-    Parser.token (Parser.Token "\n" (Expecting x))
-
-
-newline =
-    Parser.token (Parser.Token "\n" Newline)
 
 
 {-| -}
@@ -3202,7 +2887,7 @@ parseFields recordName fieldNames fields =
                         |> Parser.andThen
                             (\indentation ->
                                 Parser.succeed (Parser.Done fields.found)
-                                    |. Parser.loop "" (raggedIndentedStringAbove (indentation - 4))
+                                    |. Parser.loop "" (Parse.raggedIndentedStringAbove (indentation - 4))
                             )
 
 

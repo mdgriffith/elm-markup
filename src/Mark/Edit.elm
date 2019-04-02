@@ -1948,6 +1948,159 @@ bool view =
         }
 
 
+{-| -}
+oneOf :
+    ({ id : Id Options
+     , range : Range
+     , options : List (Choice (Id Options) Expectation)
+     }
+     -> a
+     -> b
+    )
+    -> List (Block a)
+    -> Block b
+oneOf view blocks =
+    let
+        matchBlock description blck found =
+            case found of
+                Outcome.Failure _ ->
+                    case renderBlock blck description of
+                        Outcome.Failure _ ->
+                            found
+
+                        otherwise ->
+                            otherwise
+
+                _ ->
+                    found
+
+        expectations =
+            List.map getBlockExpectation blocks
+    in
+    Value
+        { expect = ExpectOneOf expectations
+        , converter =
+            \desc ->
+                case desc of
+                    OneOf details ->
+                        case details.child of
+                            Found rng found ->
+                                List.foldl (matchBlock found) (Outcome.Failure Error.NoMatch) blocks
+                                    |> mapSuccessAndRecovered
+                                        (\x ->
+                                            view
+                                                { id = details.id
+                                                , options = details.choices
+                                                , range = rng
+                                                }
+                                                x
+                                        )
+
+                            Unexpected unexpected ->
+                                uncertain unexpected
+
+                    _ ->
+                        Outcome.Failure Error.NoMatch
+        , parser =
+            \seed ->
+                let
+                    gatherParsers myBlock details =
+                        let
+                            ( currentSeed, parser ) =
+                                getParser details.seed myBlock
+                        in
+                        case blockName myBlock of
+                            Just name ->
+                                { blockNames = name :: details.blockNames
+                                , childBlocks = Parser.map Ok parser :: details.childBlocks
+                                , childValues = details.childValues
+                                , seed = currentSeed
+                                }
+
+                            Nothing ->
+                                { blockNames = details.blockNames
+                                , childBlocks = details.childBlocks
+                                , childValues = Parser.map Ok parser :: details.childValues
+                                , seed = currentSeed
+                                }
+
+                    children =
+                        List.foldl gatherParsers
+                            { blockNames = []
+                            , childBlocks = []
+                            , childValues = []
+                            , seed = newSeed
+                            }
+                            blocks
+
+                    blockParser =
+                        Parser.succeed identity
+                            |. Parser.token (Parser.Token "|" Error.BlockStart)
+                            |. Parser.oneOf
+                                [ Parser.chompIf (\c -> c == ' ') Error.Space
+                                , Parser.succeed ()
+                                ]
+                            |= Parser.oneOf
+                                (List.reverse children.childBlocks
+                                    ++ [ Parser.getIndent
+                                            |> Parser.andThen
+                                                (\indentation ->
+                                                    Parser.succeed
+                                                        (\( pos, foundWord ) ->
+                                                            Err ( pos, Error.UnknownBlock children.blockNames )
+                                                        )
+                                                        |= Parse.withRange Parse.word
+                                                        |. Parse.newline
+                                                        |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
+                                                )
+                                       ]
+                                )
+
+                    ( parentId, newSeed ) =
+                        Id.step seed
+                in
+                ( children.seed
+                , Parser.succeed
+                    (\( range, result ) ->
+                        case result of
+                            Ok found ->
+                                OneOf
+                                    { choices = List.map (Choice parentId) expectations
+                                    , child = Found range found
+                                    , id = parentId
+                                    }
+
+                            Err ( pos, unexpected ) ->
+                                OneOf
+                                    { choices = List.map (Choice parentId) expectations
+                                    , child =
+                                        Unexpected
+                                            { range = pos
+                                            , problem = unexpected
+                                            }
+                                    , id = parentId
+                                    }
+                    )
+                    |= Parse.withRange
+                        (Parser.oneOf
+                            (blockParser :: List.reverse (unexpectedInOneOf expectations :: children.childValues))
+                        )
+                )
+        }
+
+
+unexpectedInOneOf expectations =
+    Parser.getIndent
+        |> Parser.andThen
+            (\indentation ->
+                Parser.succeed
+                    (\( pos, foundWord ) ->
+                        Err ( pos, Error.FailMatchOneOf (List.map humanReadableExpectations expectations) )
+                    )
+                    |= Parse.withRange Parse.word
+            )
+
+
 
 -- {-| -}
 -- oneOf :

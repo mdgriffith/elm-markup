@@ -6,8 +6,8 @@ module Mark.Internal.Description exposing
     , Parsed(..), startingPoint, descriptionToString, toString
     , create
     , Styling, emptyStyles
-    , inlineExample
-    , Uncertain(..), ErrorWithRange
+    , inlineExample, blockName, uncertain, humanReadableExpectations
+    , Uncertain(..), ErrorWithRange, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser
     , Block(..), Document(..)
     )
 
@@ -27,9 +27,9 @@ module Mark.Internal.Description exposing
 
 @docs Styling, emptyStyles
 
-@docs inlineExample
+@docs inlineExample, blockName, uncertain, humanReadableExpectations
 
-@docs Uncertain, ErrorWithRange
+@docs Uncertain, ErrorWithRange, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser
 
 @docs Block, Document
 
@@ -39,7 +39,7 @@ import Mark.Format as Format
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome exposing (..)
-import Parser.Advanced as Parser exposing (Parser)
+import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| -}
@@ -292,6 +292,79 @@ type InlineAttribute
 
 
 -- | DescribeInlineText Range (List Text)
+
+
+{-| -}
+uncertain : ErrorWithRange -> Outcome Error.AstError (Uncertain data) data
+uncertain err =
+    Almost (Uncertain ( err, [] ))
+
+
+mapSuccessAndRecovered :
+    (success -> otherSuccess)
+    -> Outcome f (Uncertain success) success
+    -> Outcome f (Uncertain otherSuccess) otherSuccess
+mapSuccessAndRecovered fn outcome =
+    case outcome of
+        Success s ->
+            Success (fn s)
+
+        Almost (Uncertain u) ->
+            Almost (Uncertain u)
+
+        Almost (Recovered e a) ->
+            Almost (Recovered e (fn a))
+
+        Failure f ->
+            Failure f
+
+
+renderBlock : Block data -> Description -> Outcome Error.AstError (Uncertain data) data
+renderBlock fromBlock =
+    case fromBlock of
+        Block name { converter } ->
+            converter
+
+        Value { converter } ->
+            converter
+
+
+getBlockExpectation fromBlock =
+    case fromBlock of
+        Block name { expect } ->
+            expect
+
+        Value { expect } ->
+            expect
+
+
+blockName : Block data -> Maybe String
+blockName fromBlock =
+    case fromBlock of
+        Block name _ ->
+            Just name
+
+        Value _ ->
+            Nothing
+
+
+getParser : Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
+getParser seed fromBlock =
+    case fromBlock of
+        Block name { parser } ->
+            let
+                ( newSeed, blockParser ) =
+                    parser seed
+            in
+            ( newSeed
+            , Parser.succeed identity
+                |. Parser.token (Parser.Token "|" (Error.ExpectingBlockName name))
+                |. Parser.chompIf (\c -> c == ' ') Error.Space
+                |= blockParser
+            )
+
+        Value { parser } ->
+            parser seed
 
 
 {-| -}
@@ -2004,3 +2077,59 @@ render (Document blocks) ((Parsed parsedDetails) as parsed) =
                          }
                             :: parsedDetails.errors
                         )
+
+
+humanReadableExpectations expect =
+    case expect of
+        ExpectNothing ->
+            ""
+
+        ExpectBlock name exp ->
+            "| " ++ name
+
+        ExpectStub stubName ->
+            "| " ++ stubName
+
+        ExpectRecord name fields ->
+            "| " ++ name
+
+        ExpectOneOf expectations ->
+            "One of: " ++ String.join ", " (List.map humanReadableExpectations expectations)
+
+        ExpectManyOf expectations ->
+            "Many of: " ++ String.join ", " (List.map humanReadableExpectations expectations)
+
+        ExpectStartsWith start remain ->
+            humanReadableExpectations start ++ " and then " ++ humanReadableExpectations remain
+
+        ExpectBoolean _ ->
+            "A Boolean"
+
+        ExpectInteger _ ->
+            "An Int"
+
+        ExpectFloat _ ->
+            "A Float"
+
+        ExpectFloatBetween bounds ->
+            "A Float between " ++ String.fromFloat bounds.min ++ " and " ++ String.fromFloat bounds.max
+
+        ExpectIntBetween bounds ->
+            "An Int between " ++ String.fromInt bounds.min ++ " and " ++ String.fromInt bounds.max
+
+        ExpectText inlines ->
+            "Styled Text"
+
+        ExpectString _ ->
+            "A String"
+
+        ExpectMultiline _ ->
+            "A Multiline String"
+
+        ExpectStringExactly exact ->
+            exact
+
+        ExpectTree content ->
+            "A tree starting of "
+                ++ humanReadableExpectations content
+                ++ " content"

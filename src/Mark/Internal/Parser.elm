@@ -6,7 +6,10 @@ module Mark.Internal.Parser exposing
     , getPosition
     , indentedString
     , int
+    , newline
+    , newlineWith
     , peek
+    , raggedIndentedStringAbove
     , styledText
     , withRange
     , word
@@ -19,6 +22,14 @@ import Mark.Internal.Error as Error exposing (Context(..), Problem(..))
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.TolerantParser as Tolerant
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
+
+
+newlineWith x =
+    Parser.token (Parser.Token "\n" (Expecting x))
+
+
+newline =
+    Parser.token (Parser.Token "\n" Newline)
 
 
 {-| -}
@@ -132,10 +143,6 @@ float =
         )
 
 
-newline =
-    Parser.token (Parser.Token "\n" Newline)
-
-
 {-| -}
 indentedString : Int -> String -> Parser Context Problem (Parser.Step String String)
 indentedString indentation found =
@@ -178,6 +185,64 @@ indentedString indentation found =
                     )
         , Parser.succeed (Parser.Done found)
         ]
+
+
+{-| -}
+raggedIndentedStringAbove : Int -> String -> Parser Context Problem (Parser.Step String String)
+raggedIndentedStringAbove indentation found =
+    Parser.oneOf
+        [ Parser.succeed
+            (\extra ->
+                Parser.Loop <|
+                    if extra then
+                        found ++ "\n\n"
+
+                    else
+                        found ++ "\n"
+            )
+            |. Parser.token (Parser.Token "\n" Newline)
+            |= Parser.oneOf
+                [ Parser.succeed True
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+                , Parser.succeed False
+                ]
+        , Parser.succeed
+            (\indentCount str ->
+                Parser.Loop (found ++ String.repeat indentCount " " ++ str)
+            )
+            |= Parser.oneOf
+                (indentationBetween (indentation + 1) (indentation + 4))
+            |= Parser.getChompedString
+                (Parser.chompWhile
+                    (\c -> c /= '\n')
+                )
+        , Parser.succeed (Parser.Done found)
+        ]
+
+
+{-| Parse any indentation between two bounds, inclusive.
+-}
+indentationBetween : Int -> Int -> List (Parser Context Problem Int)
+indentationBetween lower higher =
+    let
+        bottom =
+            min lower higher
+
+        top =
+            max lower higher
+    in
+    List.reverse
+        (List.map
+            (\numSpaces ->
+                Parser.succeed numSpaces
+                    |. Parser.token
+                        (Parser.Token (String.repeat numSpaces " ")
+                            (ExpectingIndentation numSpaces)
+                        )
+            )
+            (List.range bottom top)
+        )
 
 
 
