@@ -604,6 +604,48 @@ Finally, a sentence
                     Expect.equal (toResult sectionDoc doc1)
                         result
             ]
+        , describe "Error Correction"
+            [ test "Verify an int" <|
+                \_ ->
+                    Expect.equal
+                        (toResult (Mark.document identity Mark.int) "5")
+                        (Ok 5)
+            , test "Verify a range on an int" <|
+                \_ ->
+                    Expect.equal
+                        (toResult
+                            (Mark.document identity
+                                (Mark.int
+                                    |> Mark.verify
+                                        (\x ->
+                                            Ok x
+                                        )
+                                )
+                            )
+                            "5"
+                        )
+                        (Ok 5)
+            , only <|
+                test "Fail a range on an int" <|
+                    \_ ->
+                        Expect.equal
+                            (toResult
+                                (Mark.document identity
+                                    (Mark.int
+                                        |> Mark.verify
+                                            (\x ->
+                                                Err
+                                                    { title = "Out of range"
+                                                    , message =
+                                                        []
+                                                    }
+                                            )
+                                    )
+                                )
+                                "5"
+                            )
+                            (Err [ Custom { message = [], title = "Out of range" } ])
+            ]
         , describe "Records"
             [ test "Missing fields should error" <|
                 \_ ->
