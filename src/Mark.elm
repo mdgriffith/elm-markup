@@ -9,7 +9,7 @@ module Mark exposing
     , tree, Tree(..)
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
     , Text(..), Styles, text, textWith, replacement, balanced, Replacement
-    , Inline, token, annotation, attrString
+    , Inline, token, annotation, verbatim, attrString
     , Range, Position
     , Error, errorToString, errorToHtml, Theme(..)
     )
@@ -68,7 +68,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs Text, Styles, text, textWith, replacement, balanced, Replacement
 
-@docs Inline, token, annotation, attrString
+@docs Inline, token, annotation, verbatim, attrString
 
 @docs Range, Position
 
@@ -450,9 +450,9 @@ document view child =
                         , currentSeed = currentSeed
                         }
                 )
+                |. Parser.chompWhile (\c -> c == '\n')
                 |= Parser.getSource
-                |= Parse.withRange
-                    (Parser.withIndent 0 blockParser)
+                |= Parse.withRange (Parser.withIndent 0 blockParser)
                 |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
                 |. Parser.end End
         }
@@ -619,14 +619,6 @@ mapFound fn found =
 
 
 
--- {-| -}
--- andThenFound : (a -> Result CustomError b) -> Found a -> Found b
--- andThenFound fn found =
---     case found of
---         Found range item ->
---             Found range (fn item)
---         Unexpected unexp ->
---             Unexpected unexp
 -- {-| -}
 -- stub : String -> (Range -> result) -> Block result
 -- stub name renderer =
@@ -907,110 +899,13 @@ oneOf blocks =
                     _ ->
                         Outcome.Failure NoMatch
         , parser =
-            \seed ->
-                let
-                    gatherParsers myBlock details =
-                        let
-                            ( currentSeed, parser ) =
-                                getParser details.seed myBlock
-                        in
-                        case blockName myBlock of
-                            Just name ->
-                                { blockNames = name :: details.blockNames
-                                , childBlocks = Parser.map Ok parser :: details.childBlocks
-                                , childValues = details.childValues
-                                , seed = currentSeed
-                                }
-
-                            Nothing ->
-                                { blockNames = details.blockNames
-                                , childBlocks = details.childBlocks
-                                , childValues = Parser.map Ok parser :: details.childValues
-                                , seed = currentSeed
-                                }
-
-                    children =
-                        List.foldl gatherParsers
-                            { blockNames = []
-                            , childBlocks = []
-                            , childValues = []
-                            , seed = newSeed
-                            }
-                            blocks
-
-                    blockParser =
-                        Parser.succeed identity
-                            |. Parser.token (Parser.Token "|" BlockStart)
-                            |. Parser.oneOf
-                                [ Parser.chompIf (\c -> c == ' ') Space
-                                , Parser.succeed ()
-                                ]
-                            |= Parser.oneOf
-                                (List.reverse children.childBlocks
-                                    ++ [ Parser.getIndent
-                                            |> Parser.andThen
-                                                (\indentation ->
-                                                    Parser.succeed
-                                                        (\( pos, foundWord ) ->
-                                                            Err ( pos, Error.UnknownBlock children.blockNames )
-                                                        )
-                                                        |= Parse.withRange Parse.word
-                                                        |. Parse.newline
-                                                        |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
-                                                )
-                                       ]
-                                )
-
-                    ( parentId, newSeed ) =
-                        Id.step seed
-                in
-                ( children.seed
-                , Parser.succeed
-                    (\( range, result ) ->
-                        case result of
-                            Ok found ->
-                                OneOf
-                                    { choices = List.map (Choice parentId) expectations
-                                    , child = Found range found
-                                    , id = parentId
-                                    }
-
-                            Err ( pos, unexpected ) ->
-                                OneOf
-                                    { choices = List.map (Choice parentId) expectations
-                                    , child =
-                                        Unexpected
-                                            { range = pos
-                                            , problem = unexpected
-                                            }
-                                    , id = parentId
-                                    }
-                    )
-                    |= Parse.withRange
-                        (Parser.oneOf
-                            (blockParser :: List.reverse (unexpectedInOneOf expectations :: children.childValues))
-                        )
-                )
+            Parse.oneOf blocks expectations
         }
-
-
-unexpectedInOneOf expectations =
-    Parser.getIndent
-        |> Parser.andThen
-            (\indentation ->
-                Parser.succeed
-                    (\( pos, foundWord ) ->
-                        Err ( pos, Error.FailMatchOneOf (List.map humanReadableExpectations expectations) )
-                    )
-                    |= Parse.withRange Parse.word
-            )
 
 
 {-| Many blocks that are all at the same indentation level.
 -}
-manyOf :
-    List (Block a)
-    -> Block (List a)
+manyOf : List (Block a) -> Block (List a)
 manyOf blocks =
     let
         expectations =
@@ -2227,6 +2122,48 @@ convertTextDescription options comp cursor =
                                 )
                         }
 
+        InlineVerbatim details ->
+            let
+                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+                    case maybeFound of
+                        Nothing ->
+                            if isVerbatim inline && noInlineAttributes inlineDetails.expect && name == Nothing then
+                                Just inlineDetails
+
+                            else if isVerbatim inline && name == Just inlineDetails.name then
+                                Just inlineDetails
+
+                            else
+                                Nothing
+
+                        _ ->
+                            maybeFound
+
+                maybeMatched =
+                    List.foldl
+                        (matchInlineName details.name)
+                        Nothing
+                        options.inlines
+            in
+            case maybeMatched of
+                Just matchedInline ->
+                    mergeWith (++)
+                        (matchedInline.converter [ textToText details.text ] details.attributes)
+                        cursor
+
+                Nothing ->
+                    uncertain
+                        { range = details.range
+                        , problem =
+                            Error.UnknownInline
+                                (List.map
+                                    (Desc.inlineExample
+                                        << getInlineExpectation
+                                    )
+                                    options.inlines
+                                )
+                        }
+
         UnexpectedInline details ->
             uncertain details
 
@@ -2266,6 +2203,26 @@ type Inline data
         }
 
 
+isToken : Inline data -> Bool
+isToken (Inline inline) =
+    case inline.expect of
+        ExpectToken _ _ ->
+            True
+
+        _ ->
+            False
+
+
+isVerbatim : Inline data -> Bool
+isVerbatim (Inline inline) =
+    case inline.expect of
+        ExpectVerbatim _ _ ->
+            True
+
+        _ ->
+            False
+
+
 {-| -}
 token : String -> result -> Inline result
 token name result =
@@ -2279,16 +2236,6 @@ token name result =
         }
 
 
-isToken : Inline data -> Bool
-isToken (Inline inline) =
-    case inline.expect of
-        ExpectToken _ _ ->
-            True
-
-        _ ->
-            False
-
-
 {-| -}
 annotation : String -> (List Text -> result) -> Inline result
 annotation name result =
@@ -2298,6 +2245,25 @@ annotation name result =
                 Outcome.Success [ result textPieces ]
         , expect =
             ExpectAnnotation name []
+        , name = name
+        }
+
+
+{-| -}
+verbatim : String -> (Text -> result) -> Inline result
+verbatim name result =
+    Inline
+        { converter =
+            \textPieces attrs ->
+                case textPieces of
+                    [] ->
+                        -- This should never happen
+                        Outcome.Failure NoMatch
+
+                    fst :: _ ->
+                        Outcome.Success [ result fst ]
+        , expect =
+            ExpectVerbatim name []
         , name = name
         }
 
@@ -2316,7 +2282,7 @@ attrString name newInline =
 
                             (AttrString attr) :: remaining ->
                                 details.converter textPieces remaining
-                                    |> mapSuccessAndRecovered (List.map (\x -> x attr.value))
+                                    |> mapSuccessAndRecovered (List.map (\x -> x (String.trim attr.value)))
                 , expect =
                     case details.expect of
                         ExpectToken tokenName attrs ->
@@ -2324,6 +2290,9 @@ attrString name newInline =
 
                         ExpectAnnotation noteName attrs ->
                             ExpectAnnotation noteName (ExpectAttrString name :: attrs)
+
+                        ExpectVerbatim verbatimName attrs ->
+                            ExpectVerbatim verbatimName (ExpectAttrString name :: attrs)
                 , name = details.name
                 }
 

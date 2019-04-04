@@ -35,6 +35,72 @@ inlines =
                 ]
             , inlines =
                 [ Mark.annotation "highlight" identity
+                , Mark.verbatim "verb" List.singleton
+                ]
+            }
+        )
+
+
+inlineMultipleVerbatim =
+    Mark.document
+        identity
+        (Mark.textWith
+            { view =
+                \(Mark.Text styling str) ->
+                    [ str ]
+            , replacements =
+                [ Mark.replacement "..." "…"
+                , Mark.replacement "<>" "\u{00A0}"
+                , Mark.replacement "---" "—"
+                , Mark.replacement "--" "–"
+                , Mark.replacement "//" "/"
+                , Mark.replacement "'" "’"
+                , Mark.balanced
+                    { start = ( "\"", "“" )
+                    , end = ( "\"", "”" )
+                    }
+                ]
+            , inlines =
+                [ Mark.annotation "highlight" (always [ "high" ])
+                , Mark.verbatim "verb"
+                    (\(Mark.Text styling str) ->
+                        [ str ]
+                    )
+                , Mark.verbatim "verb2"
+                    (\(Mark.Text styling str) one two ->
+                        [ str, one, two ]
+                    )
+                    |> Mark.attrString "one"
+                    |> Mark.attrString "two"
+                ]
+            }
+        )
+
+
+inlineOrder =
+    Mark.document
+        identity
+        (Mark.textWith
+            { view = always Nothing
+            , replacements =
+                [ Mark.replacement "..." "…"
+                , Mark.replacement "<>" "\u{00A0}"
+                , Mark.replacement "---" "—"
+                , Mark.replacement "--" "–"
+                , Mark.replacement "//" "/"
+                , Mark.replacement "'" "’"
+                , Mark.balanced
+                    { start = ( "\"", "“" )
+                    , end = ( "\"", "”" )
+                    }
+                ]
+            , inlines =
+                [ Mark.annotation "order"
+                    (\txt one two ->
+                        Just ( one, two )
+                    )
+                    |> Mark.attrString "one"
+                    |> Mark.attrString "two"
                 ]
             }
         )
@@ -56,7 +122,7 @@ withMetaData =
         )
 
 
-toplevelText =
+topLevelText =
     Mark.document
         identity
         text
@@ -110,6 +176,17 @@ codeDoc =
         (Mark.block "Monospace"
             identity
             Mark.multiline
+        )
+
+
+singleOneOf =
+    Mark.document
+        identity
+        (Mark.oneOf
+            [ Mark.block "Monospace"
+                identity
+                Mark.multiline
+            ]
         )
 
 
@@ -345,7 +422,26 @@ suite =
               --              , Error.UnclosedStyles [ Mark.Italic ]
               --              ]
               --             )
-              test "Inline elements should maintain their source order." <|
+              test "Single newlines are allowed in paragraphs" <|
+                \_ ->
+                    Expect.equal
+                        (toResult
+                            (Mark.document identity text)
+                            "Some text\nand some more text"
+                        )
+                        (Ok
+                            [ Mark.Text emptyStyles "Some text\nand some more text"
+                            ]
+                        )
+            , only <|
+                test "Double newlines signify a new paragraph" <|
+                    \_ ->
+                        Expect.err
+                            (toResult
+                                (Mark.document identity text)
+                                "Some text\n\nand some moretext"
+                            )
+            , test "Inline elements should maintain their source order." <|
                 \_ ->
                     Expect.equal
                         (toResult inlines "[my]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
@@ -355,6 +451,47 @@ suite =
                             , [ Mark.Text emptyStyles "sentence" ]
                             , [ Mark.Text emptyStyles " " ]
                             , [ Mark.Text emptyStyles "order" ]
+                            ]
+                        )
+            , test "Basic Verbatim Element." <|
+                \_ ->
+                    Expect.equal
+                        (toResult inlines "my `verbatim string`{verb}")
+                        (Ok
+                            [ [ Mark.Text emptyStyles "my " ]
+                            , [ Mark.Text emptyStyles "verbatim string" ]
+                            ]
+                        )
+            , test "Verbatim element without attributes" <|
+                \_ ->
+                    Expect.equal
+                        (toResult inlines "my `verbatim string`")
+                        (Ok
+                            [ [ Mark.Text emptyStyles "my " ]
+                            , [ Mark.Text emptyStyles "verbatim string" ]
+                            ]
+                        )
+            , test "Verbatim element with attributes" <|
+                \_ ->
+                    Expect.equal
+                        (toResult inlineMultipleVerbatim
+                            "my `verbatim string`  `verbatim 2`{verb2|one=one, two=two}"
+                        )
+                        (Ok [ [ "my " ], [ "verbatim string" ], [ "  " ], [ "verbatim 2", "two", "one" ] ])
+            , test "Inline attribute order(source order)" <|
+                \_ ->
+                    Expect.equal
+                        (toResult inlineOrder "[test]{order|one = one, two = two}")
+                        (Ok
+                            [ Just ( "one", "two" )
+                            ]
+                        )
+            , test "Inline attribute order(not source order)" <|
+                \_ ->
+                    Expect.equal
+                        (toResult inlineOrder "[test]{order|two = two, one = one}")
+                        (Ok
+                            [ Just ( "one", "two" )
                             ]
                         )
             , test "Basic replacement" <|
@@ -524,6 +661,26 @@ Then some text.
                     in
                     Expect.equal (toResult textDoc doc1)
                         result
+            , test "Single OneOf" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """| Monospace
+    Here's my extra line
+"""
+                    in
+                    Expect.equal (toResult singleOneOf doc1)
+                        (Ok "Here's my extra line\n")
+            , test "Mulitline Text" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """| Monospace
+    Here's my extra line
+"""
+                    in
+                    Expect.equal (toResult codeDoc doc1)
+                        (Ok "Here's my extra line\n")
             , test "Incorrect Indentation" <|
                 \_ ->
                     let
@@ -625,26 +782,25 @@ Finally, a sentence
                             "5"
                         )
                         (Ok 5)
-            , only <|
-                test "Fail a range on an int" <|
-                    \_ ->
-                        Expect.equal
-                            (toResult
-                                (Mark.document identity
-                                    (Mark.int
-                                        |> Mark.verify
-                                            (\x ->
-                                                Err
-                                                    { title = "Out of range"
-                                                    , message =
-                                                        []
-                                                    }
-                                            )
-                                    )
+            , test "Fail a range on an int" <|
+                \_ ->
+                    Expect.equal
+                        (toResult
+                            (Mark.document identity
+                                (Mark.int
+                                    |> Mark.verify
+                                        (\x ->
+                                            Err
+                                                { title = "Out of range"
+                                                , message =
+                                                    []
+                                                }
+                                        )
                                 )
-                                "5"
                             )
-                            (Err [ Custom { message = [], title = "Out of range" } ])
+                            "5"
+                        )
+                        (Err [ Error.Custom { message = [], title = "Out of range" } ])
             ]
         , describe "Records"
             [ test "Missing fields should error" <|

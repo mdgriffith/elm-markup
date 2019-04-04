@@ -1,5 +1,6 @@
 module Mark.Edit exposing
-    ( int, float, string, multiline
+    ( bool, int, float, string, multiline
+    , oneOf
     , update
     , Edit, updateInt, updateString, replaceWith, delete, insertAt, updateFloat, move
     , setInt, setString, setFloat, setBool, setField, withinBlock
@@ -10,7 +11,9 @@ module Mark.Edit exposing
 
 # Editable Blocks
 
-@docs int, float, string, multiline
+@docs bool, int, float, string, multiline
+
+@docs oneOf
 
 
 # Making Edits

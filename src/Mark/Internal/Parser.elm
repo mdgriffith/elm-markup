@@ -8,6 +8,7 @@ module Mark.Internal.Parser exposing
     , int
     , newline
     , newlineWith
+    , oneOf
     , peek
     , raggedIndentedStringAbove
     , styledText
@@ -245,6 +246,109 @@ indentationBetween lower higher =
         )
 
 
+oneOf blocks expectations seed =
+    let
+        gatherParsers myBlock details =
+            let
+                ( currentSeed, parser ) =
+                    case myBlock of
+                        Block name blk ->
+                            blk.parser details.seed
+
+                        Value val ->
+                            val.parser details.seed
+            in
+            case blockName myBlock of
+                Just name ->
+                    { blockNames = name :: details.blockNames
+                    , childBlocks = Parser.map Ok parser :: details.childBlocks
+                    , childValues = details.childValues
+                    , seed = currentSeed
+                    }
+
+                Nothing ->
+                    { blockNames = details.blockNames
+                    , childBlocks = details.childBlocks
+                    , childValues = Parser.map Ok parser :: details.childValues
+                    , seed = currentSeed
+                    }
+
+        children =
+            List.foldl gatherParsers
+                { blockNames = []
+                , childBlocks = []
+                , childValues = []
+                , seed = newSeed
+                }
+                blocks
+
+        blockParser =
+            Parser.succeed identity
+                |. Parser.token (Parser.Token "|" BlockStart)
+                |. Parser.oneOf
+                    [ Parser.chompIf (\c -> c == ' ') Space
+                    , Parser.succeed ()
+                    ]
+                |= Parser.oneOf
+                    (List.reverse children.childBlocks
+                        ++ [ Parser.getIndent
+                                |> Parser.andThen
+                                    (\indentation ->
+                                        Parser.succeed
+                                            (\( pos, foundWord ) ->
+                                                Err ( pos, Error.UnknownBlock children.blockNames )
+                                            )
+                                            |= withRange word
+                                            |. newline
+                                            |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                    )
+                           ]
+                    )
+
+        ( parentId, newSeed ) =
+            Id.step seed
+    in
+    ( children.seed
+    , Parser.succeed
+        (\( range, result ) ->
+            case result of
+                Ok found ->
+                    OneOf
+                        { choices = List.map (Choice parentId) expectations
+                        , child = Found range found
+                        , id = parentId
+                        }
+
+                Err ( pos, unexpected ) ->
+                    OneOf
+                        { choices = List.map (Choice parentId) expectations
+                        , child =
+                            Unexpected
+                                { range = pos
+                                , problem = unexpected
+                                }
+                        , id = parentId
+                        }
+        )
+        |= withRange
+            (Parser.oneOf
+                (blockParser :: List.reverse (unexpectedInOneOf expectations :: children.childValues))
+            )
+    )
+
+
+unexpectedInOneOf expectations =
+    Parser.getIndent
+        |> Parser.andThen
+            (\indentation ->
+                Parser.succeed
+                    (\( pos, foundWord ) ->
+                        Err ( pos, Error.FailMatchOneOf (List.map humanReadableExpectations expectations) )
+                    )
+                    |= withRange word
+            )
+
+
 
 {- TEXT PARSING -}
 
@@ -372,6 +476,83 @@ styledTextLoop options meaningful untilStrings found =
                 , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
                 ]
 
+        -- `verbatim`{label| attr = maybe this is here}
+        , Parser.succeed
+            (\start verbatimString maybeToken end ->
+                case Debug.log "verbatim" maybeToken of
+                    Nothing ->
+                        let
+                            note =
+                                InlineVerbatim
+                                    { name = Nothing
+                                    , text = Text emptyStyles verbatimString
+                                    , range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , attributes = []
+                                    }
+                        in
+                        found
+                            |> commitText
+                            |> addToTextCursor note
+                            |> advanceTo end
+                            |> Parser.Loop
+
+                    Just (Err errors) ->
+                        let
+                            note =
+                                InlineVerbatim
+                                    { name = Nothing
+                                    , text = Text emptyStyles verbatimString
+                                    , range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , attributes = []
+                                    }
+                        in
+                        found
+                            |> commitText
+                            |> addToTextCursor note
+                            |> advanceTo end
+                            |> Parser.Loop
+
+                    Just (Ok ( name, attrs )) ->
+                        let
+                            note =
+                                InlineVerbatim
+                                    { name = Just name
+                                    , text = Text emptyStyles verbatimString
+                                    , range =
+                                        { start = start
+                                        , end = end
+                                        }
+                                    , attributes = attrs
+                                    }
+                        in
+                        found
+                            |> commitText
+                            |> addToTextCursor note
+                            |> advanceTo end
+                            |> Parser.Loop
+            )
+            |= getPosition
+            |. Parser.token (Parser.Token "`" (Expecting "`"))
+            |= Parser.getChompedString
+                (Parser.chompWhile (\c -> c /= '`' && c /= '\n'))
+            |. Parser.chompWhile (\c -> c == '`')
+            |= Parser.oneOf
+                [ Parser.map Just
+                    (attrContainer
+                        { attributes = List.filterMap onlyVerbatim options.inlines
+                        , onError = Tolerant.skip
+                        }
+                    )
+                , Parser.succeed Nothing
+                ]
+            |= getPosition
+
         -- {token| withAttributes = True}
         , Parser.succeed
             (\start maybeToken end ->
@@ -479,31 +660,48 @@ styledTextLoop options meaningful untilStrings found =
             |= inlineAnnotation options found
             |= getPosition
         , -- chomp until a meaningful character
-          Parser.chompWhile
-            (\c ->
-                not (List.member c meaningful)
-            )
-            |> Parser.getChompedString
-            |> Parser.andThen
-                (\new ->
-                    if new == "" || new == "\n" then
-                        case commitText found of
-                            TextCursor txt ->
-                                let
-                                    styling =
-                                        case txt.current of
-                                            Text s _ ->
-                                                s
-                                in
-                                -- TODO: What to do on unclosed styling?
-                                -- if List.isEmpty styling then
-                                Parser.succeed (Parser.Done (List.reverse txt.found))
-                        -- else
-                        -- Parser.problem (UnclosedStyles styling)
+          Parser.succeed
+            (\( new, final ) ->
+                let
+                    _ =
+                        Debug.log "gathered" ( new, final )
+                in
+                if new == "" || final then
+                    case commitText (addText (String.trimRight new) found) of
+                        TextCursor txt ->
+                            let
+                                styling =
+                                    case txt.current of
+                                        Text s _ ->
+                                            s
+                            in
+                            -- TODO: What to do on unclosed styling?
+                            -- if List.isEmpty styling then
+                            Parser.Done (List.reverse txt.found)
+                    -- else
+                    -- Parser.problem (UnclosedStyles styling)
 
-                    else
-                        Parser.succeed (Parser.Loop (addText new found))
-                )
+                else
+                    Parser.Loop (addText new found)
+            )
+            |= (Parser.getChompedString (Parser.chompWhile (\c -> not (List.member c meaningful)))
+                    |> Parser.andThen
+                        (\str ->
+                            Parser.oneOf
+                                [ Parser.succeed ( str, True )
+                                    |. Parser.token (Parser.Token "\n\n" Newline)
+                                , Parser.succeed ( str ++ "\n", False )
+                                    |. newline
+                                , Parser.succeed ( str, True )
+                                    |. Parser.end End
+                                , Parser.succeed ( str, False )
+                                ]
+                        )
+               )
+
+        -- |> Parser.andThen
+        --     (\new ->
+        --     )
         ]
 
 
@@ -656,7 +854,7 @@ This parser is configureable so that it will either
 
 If the attributes aren't required (i.e. in a oneOf), then we want to skip to allow testing of other possibilities.
 
-If they are required, then
+If they are required, then we can fastforward to a specific condition and continue on.
 
 -}
 attrContainer :
@@ -1034,6 +1232,7 @@ stylingChars =
     , '*'
     , '\n'
     , '{'
+    , '`'
     ]
 
 
@@ -1149,6 +1348,9 @@ onlyTokens inline =
         ExpectToken name attrs ->
             Just ( name, attrs )
 
+        ExpectVerbatim name _ ->
+            Nothing
+
 
 onlyAnnotations inline =
     case inline of
@@ -1158,6 +1360,21 @@ onlyAnnotations inline =
         ExpectToken name attrs ->
             Nothing
 
+        ExpectVerbatim name _ ->
+            Nothing
+
+
+onlyVerbatim inline =
+    case inline of
+        ExpectAnnotation name attrs ->
+            Nothing
+
+        ExpectToken name attrs ->
+            Nothing
+
+        ExpectVerbatim name attrs ->
+            Just ( name, attrs )
+
 
 getInlineName inline =
     case inline of
@@ -1165,6 +1382,9 @@ getInlineName inline =
             name
 
         ExpectToken name attrs ->
+            name
+
+        ExpectVerbatim name _ ->
             name
 
 

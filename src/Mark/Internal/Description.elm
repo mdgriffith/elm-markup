@@ -7,7 +7,7 @@ module Mark.Internal.Description exposing
     , create
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
-    , Uncertain(..), ErrorWithRange, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser
+    , Uncertain(..), ErrorWithRange, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, noInlineAttributes
     , Block(..), Document(..)
     )
 
@@ -29,7 +29,7 @@ module Mark.Internal.Description exposing
 
 @docs inlineExample, blockName, uncertain, humanReadableExpectations
 
-@docs Uncertain, ErrorWithRange, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser
+@docs Uncertain, ErrorWithRange, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, noInlineAttributes
 
 @docs Block, Document
 
@@ -278,6 +278,12 @@ type TextDescription
         , range : Range
         , attributes : List InlineAttribute
         }
+    | InlineVerbatim
+        { name : Maybe String
+        , range : Range
+        , text : Text
+        , attributes : List InlineAttribute
+        }
     | UnexpectedInline UnexpectedDetails
 
 
@@ -427,6 +433,19 @@ type Expectation
 type InlineExpectation
     = ExpectAnnotation String (List AttrExpectation)
     | ExpectToken String (List AttrExpectation)
+    | ExpectVerbatim String (List AttrExpectation)
+
+
+noInlineAttributes expect =
+    case expect of
+        ExpectAnnotation _ attrs ->
+            List.isEmpty attrs
+
+        ExpectToken _ attrs ->
+            List.isEmpty attrs
+
+        ExpectVerbatim _ attrs ->
+            List.isEmpty attrs
 
 
 {-| -}
@@ -466,6 +485,13 @@ inlineExample inline =
 
             else
                 "{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
+
+        ExpectVerbatim name attrs ->
+            if List.isEmpty attrs then
+                "`some styled text`"
+
+            else
+                "`some styled text`{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
 
 
 choiceExpectation (Choice id exp) =
@@ -1304,6 +1330,19 @@ textDescriptionToString txt =
                 ++ "]{"
                 ++ String.join ", " (List.map inlineDescToString details.attributes)
                 ++ "}"
+
+        InlineVerbatim details ->
+            case details.text of
+                Text _ str ->
+                    if List.isEmpty details.attributes then
+                        "`" ++ str ++ "`"
+
+                    else
+                        "`"
+                            ++ str
+                            ++ "`{"
+                            ++ String.join ", " (List.map inlineDescToString details.attributes)
+                            ++ "}"
 
         UnexpectedInline unexpected ->
             ""
