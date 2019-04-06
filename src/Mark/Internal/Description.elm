@@ -1,13 +1,13 @@
 module Mark.Internal.Description exposing
     ( parse, render, compile
-    , Found(..), Nested(..), Icon(..), UnexpectedDetails
+    , Found(..), Nested(..), Icon(..)
     , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), AttrExpectation(..)
     , Parsed(..), startingPoint, descriptionToString, toString
     , create
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
-    , Uncertain(..), ErrorWithRange, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, noInlineAttributes
+    , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, noInlineAttributes
     , Block(..), Document(..)
     )
 
@@ -15,7 +15,7 @@ module Mark.Internal.Description exposing
 
 @docs parse, render, compile
 
-@docs Found, Nested, Icon, UnexpectedDetails
+@docs Found, Nested, Icon
 
 @docs Description, TextDescription, InlineAttribute, Text, Style
 
@@ -29,7 +29,7 @@ module Mark.Internal.Description exposing
 
 @docs inlineExample, blockName, uncertain, humanReadableExpectations
 
-@docs Uncertain, ErrorWithRange, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, noInlineAttributes
+@docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, noInlineAttributes
 
 @docs Block, Document
 
@@ -63,7 +63,7 @@ type alias Error =
 {-| -}
 type Parsed
     = Parsed
-        { errors : List ErrorWithRange
+        { errors : List Error.UnexpectedDetails
         , found : Found Description
         , expected : Expectation
         , initialSeed : Id.Seed
@@ -74,17 +74,7 @@ type Parsed
 {-| -}
 type Found item
     = Found Range item
-    | Unexpected
-        { range : Range
-        , problem : Error.Error
-        }
-
-
-{-| -}
-type alias UnexpectedDetails =
-    { range : Range
-    , problem : Error.Error
-    }
+    | Unexpected Error.UnexpectedDetails
 
 
 {-| -}
@@ -119,12 +109,13 @@ type Nested item
         }
 
 
-{-| As an error propogates up, it can gather futher context
--}
-type alias ErrorWithRange =
-    { range : Range
-    , problem : Error.Error
-    }
+
+-- {-| As an error propogates up, it can gather futher context
+-- -}
+-- type alias ErrorWithRange =
+--     { range : Range
+--     , problem : Error.Error
+--     }
 
 
 {-| With this type, we're not quite sure if we're going to be able to render or not.
@@ -137,8 +128,8 @@ Scenarios:
 
 -}
 type Uncertain data
-    = Uncertain ( ErrorWithRange, List ErrorWithRange )
-    | Recovered ( ErrorWithRange, List ErrorWithRange ) data
+    = Uncertain ( Error.UnexpectedDetails, List Error.UnexpectedDetails )
+    | Recovered ( Error.UnexpectedDetails, List Error.UnexpectedDetails ) data
 
 
 {-| -}
@@ -284,7 +275,7 @@ type TextDescription
         , text : Text
         , attributes : List InlineAttribute
         }
-    | UnexpectedInline UnexpectedDetails
+    | UnexpectedInline Error.UnexpectedDetails
 
 
 {-| -}
@@ -301,7 +292,7 @@ type InlineAttribute
 
 
 {-| -}
-uncertain : ErrorWithRange -> Outcome Error.AstError (Uncertain data) data
+uncertain : Error.UnexpectedDetails -> Outcome Error.AstError (Uncertain data) data
 uncertain err =
     Almost (Uncertain ( err, [] ))
 
@@ -1981,8 +1972,8 @@ compile :
     Document data
     -> String
     ->
-        Outcome (List ErrorWithRange)
-            { errors : List ErrorWithRange
+        Outcome (List Error.UnexpectedDetails)
+            { errors : List Error.UnexpectedDetails
             , result : data
             }
             data
@@ -2068,7 +2059,7 @@ compile (Document blocks) source =
 render :
     Document data
     -> Parsed
-    -> Outcome (List ErrorWithRange) { errors : List ErrorWithRange, result : data } data
+    -> Outcome (List Error.UnexpectedDetails) { errors : List Error.UnexpectedDetails, result : data } data
 render (Document blocks) ((Parsed parsedDetails) as parsed) =
     case parsedDetails.errors of
         [] ->

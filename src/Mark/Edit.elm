@@ -1929,7 +1929,7 @@ bool view =
                                     Err err ->
                                         Unexpected
                                             { range = range
-                                            , problem = Error.BadBool err
+                                            , problem = Error.BadBool
                                             }
 
                                     Ok b ->

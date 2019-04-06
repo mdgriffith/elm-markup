@@ -1,6 +1,6 @@
 module Mark.Internal.Error exposing
     ( Error(..), render
-    , Context(..), Problem(..)
+    , Context(..), Problem(..), UnexpectedDetails
     , AstError(..)
     )
 
@@ -8,7 +8,7 @@ module Mark.Internal.Error exposing
 
 @docs Error, render
 
-@docs Context, Problem
+@docs Context, Problem, UnexpectedDetails
 
 -}
 
@@ -45,9 +45,9 @@ type Error
         , strike : Bool
         }
     | BadDate String
-    | BadFloat String
-    | BadInt String
-    | BadBool String
+    | BadFloat
+    | BadInt
+    | BadBool
     | IntOutOfRange
         { found : Int
         , min : Int
@@ -305,7 +305,7 @@ render source current =
                     ]
             }
 
-        BadFloat found ->
+        BadFloat ->
             { title = "BAD FLOAT"
             , region =
                 current.range
@@ -316,7 +316,7 @@ render source current =
                     ]
             }
 
-        BadInt found ->
+        BadInt ->
             { title = "BAD INT"
             , region =
                 current.range
@@ -327,7 +327,7 @@ render source current =
                     ]
             }
 
-        BadBool found ->
+        BadBool ->
             { title = "BAD INT"
             , region =
                 current.range

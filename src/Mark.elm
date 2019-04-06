@@ -220,29 +220,27 @@ type Outcome failure almost success
     | Failure failure
 
 
-{-| This doesn't cause something to completely fail, but logs the error.
--}
-logErrors :
-    ( ErrorWithRange, List ErrorWithRange )
-    -> Outcome.Outcome f (Uncertain success) success
-    -> Outcome.Outcome f (Uncertain success) success
-logErrors (( fst, remainingErrs ) as err) outcome =
-    case outcome of
-        Outcome.Success s ->
-            Outcome.Almost (Recovered err s)
 
-        Outcome.Almost (Uncertain u) ->
-            Outcome.Almost (Uncertain (mergeErrors u err))
-
-        Outcome.Almost (Recovered e a) ->
-            Outcome.Almost (Recovered (mergeErrors e err) a)
-
-        Outcome.Failure failures ->
-            Outcome.Failure failures
+-- {-| This doesn't cause something to completely fail, but logs the error.
+-- -}
+-- logErrors :
+--     ( ErrorWithRange, List ErrorWithRange )
+--     -> Outcome.Outcome f (Uncertain success) success
+--     -> Outcome.Outcome f (Uncertain success) success
+-- logErrors (( fst, remainingErrs ) as err) outcome =
+--     case outcome of
+--         Outcome.Success s ->
+--             Outcome.Almost (Recovered err s)
+--         Outcome.Almost (Uncertain u) ->
+--             Outcome.Almost (Uncertain (mergeErrors u err))
+--         Outcome.Almost (Recovered e a) ->
+--             Outcome.Almost (Recovered (mergeErrors e err) a)
+--         Outcome.Failure failures ->
+--             Outcome.Failure failures
 
 
 {-| -}
-uncertain : ErrorWithRange -> Outcome.Outcome AstError (Uncertain data) data
+uncertain : Error.UnexpectedDetails -> Outcome.Outcome AstError (Uncertain data) data
 uncertain err =
     Outcome.Almost (Uncertain ( err, [] ))
 
@@ -280,7 +278,7 @@ withinOffsetRange offset range =
     range.start.offset <= offset.start && range.end.offset >= offset.end
 
 
-getUnexpecteds : Description -> List UnexpectedDetails
+getUnexpecteds : Description -> List Error.UnexpectedDetails
 getUnexpecteds description =
     case description of
         DescribeBlock details ->
@@ -504,6 +502,8 @@ verify fn myBlock =
                                     Err newErr ->
                                         uncertain
                                             { problem = Error.Custom newErr
+
+                                            -- TODO: Does this mean we need to thread source snippets everywhere to get them here?
                                             , range = startDocRange
                                             }
 
@@ -563,7 +563,7 @@ verify fn myBlock =
 
 
 {-| -}
-onError : (List UnexpectedDetails -> a) -> Block a -> Block a
+onError : (List Error -> a) -> Block a -> Block a
 onError recover myBlock =
     case myBlock of
         Block name details ->
@@ -580,7 +580,7 @@ onError recover myBlock =
                                 Outcome.Almost (Recovered err a)
 
                             Outcome.Almost (Uncertain x) ->
-                                Outcome.Almost (Recovered x (recover (errorsToList x)))
+                                Outcome.Almost (Recovered x (recover (List.map (Error.render "") (errorsToList x))))
 
                             Outcome.Failure f ->
                                 Outcome.Failure f
@@ -600,7 +600,7 @@ onError recover myBlock =
                                 Outcome.Almost (Recovered err a)
 
                             Outcome.Almost (Uncertain x) ->
-                                Outcome.Almost (Recovered x (recover (errorsToList x)))
+                                Outcome.Almost (Recovered x (recover (List.map (Error.render "") (errorsToList x))))
 
                             Outcome.Failure f ->
                                 Outcome.Failure f
@@ -697,28 +697,28 @@ block name view child =
                 in
                 ( newSeed
                 , Parser.map
-                    (\( range, valueResult ) ->
-                        case valueResult of
-                            Ok value ->
+                    (\result ->
+                        case result of
+                            Ok details ->
                                 DescribeBlock
-                                    { found = Found range value
+                                    { found = Found details.range details.value
                                     , name = name
                                     , expected = ExpectBlock name (getBlockExpectation child)
                                     }
 
-                            Err ( pos, errorMessage ) ->
+                            Err details ->
                                 DescribeBlock
                                     { name = name
                                     , found =
                                         Unexpected
-                                            { range = pos
-                                            , problem = errorMessage
+                                            { range = details.range
+                                            , problem = details.error
                                             }
                                     , expected = ExpectBlock name (getBlockExpectation child)
                                     }
                     )
                   <|
-                    Parse.withRange
+                    Parse.withRangeResult
                         (Parser.getIndent
                             |> Parser.andThen
                                 (\indentation ->
@@ -745,9 +745,7 @@ block name view child =
                                                             [ Parser.succeed
                                                                 (\end ->
                                                                     Err
-                                                                        ( { start = start, end = end }
-                                                                        , Error.ExpectingIndent (indentation + 4)
-                                                                        )
+                                                                        (Error.ExpectingIndent (indentation + 4))
                                                                 )
                                                                 |. Parser.chompIf (\c -> c == ' ') Space
                                                                 |. Parser.chompWhile (\c -> c == ' ')
@@ -764,10 +762,8 @@ block name view child =
                                             -- If the child parser failed in some way, it would
                                             -- take care of that itself by returning Unexpected
                                             , Parser.succeed
-                                                (\( pos, foundIndent ) ->
-                                                    Err ( pos, Error.ExpectingIndent (indentation + 4) )
-                                                )
-                                                |= Parse.withRange (Parser.chompWhile (\c -> c == ' '))
+                                                (Err (Error.ExpectingIndent (indentation + 4)))
+                                                |. Parser.chompWhile (\c -> c == ' ')
                                                 |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
                                             ]
                                 )
@@ -2410,23 +2406,24 @@ bool =
                 in
                 ( newSeed
                 , Parser.map
-                    (\( range, boolResult ) ->
+                    (\boolResult ->
                         DescribeBoolean
                             { id = id
                             , found =
                                 case boolResult of
                                     Err err ->
                                         Unexpected
-                                            { range = range
-                                            , problem = Error.BadBool err
+                                            { range = err.range
+                                            , problem = Error.BadBool
                                             }
 
-                                    Ok b ->
-                                        Found range
-                                            b
+                                    Ok details ->
+                                        Found
+                                            details.range
+                                            details.value
                             }
                     )
-                    (Parse.withRange
+                    (Parse.withRangeResult
                         (Parser.oneOf
                             [ Parser.token (Parser.Token "True" (Expecting "True"))
                                 |> Parser.map (always (Ok True))
@@ -2597,28 +2594,29 @@ parseRecord :
     -> Parser Context Problem Description
 parseRecord recordName expectations fields =
     Parser.succeed
-        (\( pos, foundFields ) ->
-            case foundFields of
-                Ok ok ->
+        (\result ->
+            case result of
+                Ok details ->
                     Record
                         { expected = expectations
                         , name = recordName
                         , found =
-                            Found (backtrackCharacters 2 pos) ok
+                            Found (backtrackCharacters 2 details.range) details.value
                         }
 
-                Err ( maybePosition, prob ) ->
+                -- Err ( maybePosition, prob ) ->
+                Err err ->
                     Record
                         { expected = expectations
                         , name = recordName
                         , found =
                             Unexpected
-                                { range = Maybe.withDefault (backtrackCharacters 2 pos) maybePosition
-                                , problem = prob
+                                { range = Maybe.withDefault (backtrackCharacters 2 err.range) (Tuple.first err.error)
+                                , problem = Tuple.second err.error
                                 }
                         }
         )
-        |= Parse.withRange
+        |= Parse.withRangeResult
             (Parser.getIndent
                 |> Parser.andThen
                     (\indentation ->
@@ -2669,28 +2667,30 @@ unexpectedField recordName options =
         |> Parser.andThen
             (\indentation ->
                 Parser.map
-                    (\( ( range, name ), content ) ->
-                        ( name
+                    (\{ range, value } ->
+                        ( value
                         , Unexpected
                             { range = range
                             , problem =
                                 Error.UnexpectedField
-                                    { found = name
+                                    { found = value
                                     , options = options
                                     , recordName = recordName
                                     }
                             }
                         )
                     )
-                    (Parser.succeed Tuple.pair
-                        |= Parse.withRange (Parser.getChompedString (Parser.chompWhile Char.isAlphaNum))
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        -- TODO: parse multiline string
-                        |= Parser.withIndent (indentation + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
-                     -- |. Parse.newline
-                     -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
+                    (Parse.getRangeAndSource
+                        (Parser.succeed identity
+                            |= Parser.getChompedString (Parser.chompWhile Char.isAlphaNum)
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            -- TODO: parse multiline string
+                            |. Parser.withIndent (indentation + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
+                         -- |. Parse.newline
+                         -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
+                        )
                     )
             )
 
@@ -2939,7 +2939,7 @@ createMakerField foundField possiblyMakerFn =
 
 
 {-| -}
-applyField : Found a -> Result UnexpectedDetails (a -> b) -> Result UnexpectedDetails b
+applyField : Found a -> Result Error.UnexpectedDetails (a -> b) -> Result Error.UnexpectedDetails b
 applyField foundField possiblyFn =
     case possiblyFn of
         Err err ->

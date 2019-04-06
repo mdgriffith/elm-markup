@@ -4,6 +4,7 @@ module Mark.Internal.Parser exposing
     , attributeList
     , float
     , getPosition
+    , getRangeAndSource
     , indentedString
     , int
     , newline
@@ -13,6 +14,7 @@ module Mark.Internal.Parser exposing
     , raggedIndentedStringAbove
     , styledText
     , withRange
+    , withRangeResult
     , word
     )
 
@@ -51,18 +53,18 @@ type alias Range =
 int : Parser Context Problem (Found Int)
 int =
     Parser.map
-        (\( pos, intResult ) ->
-            case intResult of
-                Ok i ->
-                    Found pos i
+        (\result ->
+            case result of
+                Ok details ->
+                    Found details.range details.value
 
-                Err str ->
+                Err details ->
                     Unexpected
-                        { range = pos
-                        , problem = Error.BadInt str
+                        { range = details.range
+                        , problem = Error.BadInt
                         }
         )
-        (withRange
+        (withRangeResult
             (Parser.oneOf
                 [ Parser.succeed
                     (\i str ->
@@ -70,7 +72,7 @@ int =
                             Ok (negate i)
 
                         else
-                            Err (String.fromInt i ++ str)
+                            Err ()
                     )
                     |. Parser.token (Parser.Token "-" (Expecting "-"))
                     |= Parser.int Integer InvalidNumber
@@ -81,12 +83,12 @@ int =
                             Ok i
 
                         else
-                            Err (String.fromInt i ++ str)
+                            Err ()
                     )
                     |= Parser.int Integer InvalidNumber
                     |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed Err
-                    |= word
+                , Parser.succeed (Err ())
+                    |. word
                 ]
             )
         )
@@ -97,18 +99,18 @@ int =
 float : Parser Context Problem (Found ( String, Float ))
 float =
     Parser.map
-        (\( pos, floatResult ) ->
-            case floatResult of
-                Ok f ->
-                    Found pos f
+        (\result ->
+            case result of
+                Ok details ->
+                    Found details.range details.value
 
-                Err str ->
+                Err details ->
                     Unexpected
-                        { range = pos
-                        , problem = Error.BadFloat str
+                        { range = details.range
+                        , problem = Error.BadFloat
                         }
         )
-        (withRange
+        (withRangeResult
             (Parser.oneOf
                 [ Parser.succeed
                     (\start fl end src extra ->
@@ -116,7 +118,7 @@ float =
                             Ok ( String.slice start end src, negate fl )
 
                         else
-                            Err (String.fromFloat fl ++ extra)
+                            Err ()
                     )
                     |= Parser.getOffset
                     |. Parser.token (Parser.Token "-" (Expecting "-"))
@@ -130,15 +132,15 @@ float =
                             Ok ( String.slice start end src, fl )
 
                         else
-                            Err (String.fromFloat fl ++ extra)
+                            Err ()
                     )
                     |= Parser.getOffset
                     |= Parser.float FloatingPoint InvalidNumber
                     |= Parser.getOffset
                     |= Parser.getSource
                     |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed Err
-                    |= word
+                , Parser.succeed (Err ())
+                    |. word
                 ]
             )
         )
@@ -310,27 +312,28 @@ oneOf blocks expectations seed =
     in
     ( children.seed
     , Parser.succeed
-        (\( range, result ) ->
+        (\result ->
             case result of
-                Ok found ->
+                Ok details ->
                     OneOf
                         { choices = List.map (Choice parentId) expectations
-                        , child = Found range found
+                        , child = Found details.range details.value
                         , id = parentId
                         }
 
-                Err ( pos, unexpected ) ->
+                -- Err ( pos, unexpected ) ->
+                Err details ->
                     OneOf
                         { choices = List.map (Choice parentId) expectations
                         , child =
                             Unexpected
-                                { range = pos
-                                , problem = unexpected
+                                { range = details.range
+                                , problem = Tuple.second details.error
                                 }
                         , id = parentId
                         }
         )
-        |= withRange
+        |= withRangeResult
             (Parser.oneOf
                 (blockParser :: List.reverse (unexpectedInOneOf expectations :: children.childValues))
             )
@@ -555,16 +558,13 @@ styledTextLoop options meaningful untilStrings found =
 
         -- {token| withAttributes = True}
         , Parser.succeed
-            (\start maybeToken end ->
-                case maybeToken of
-                    Err errors ->
+            (\tokenResult ->
+                case tokenResult of
+                    Err details ->
                         let
                             er =
                                 UnexpectedInline
-                                    { range =
-                                        { start = start
-                                        , end = end
-                                        }
+                                    { range = details.range
                                     , problem =
                                         Error.UnknownInline
                                             (options.inlines
@@ -582,48 +582,45 @@ styledTextLoop options meaningful untilStrings found =
                         found
                             |> commitText
                             |> addToTextCursor er
-                            |> advanceTo end
+                            |> advanceTo details.range.end
                             |> Parser.Loop
 
-                    Ok ( name, attrs ) ->
+                    Ok details ->
                         let
                             note =
                                 InlineToken
-                                    { name = name
-                                    , range =
-                                        { start = start
-                                        , end = end
-                                        }
-                                    , attributes = attrs
+                                    { name = Tuple.first details.value
+                                    , range = details.range
+                                    , attributes = Tuple.second details.value
                                     }
                         in
                         found
                             |> commitText
                             |> addToTextCursor note
-                            |> advanceTo end
+                            |> advanceTo details.range.end
                             |> Parser.Loop
             )
-            |= getPosition
-            |= attrContainer
-                { attributes = List.filterMap onlyTokens options.inlines
-                , onError = Tolerant.skip
-                }
-            |= getPosition
+            |= withRangeResult
+                (attrContainer
+                    { attributes = List.filterMap onlyTokens options.inlines
+                    , onError = Tolerant.skip
+                    }
+                )
 
         -- [Some styled /text/]{token| withAttribtues = True}
         , Parser.succeed
-            (\start almostNote end ->
-                case almostNote of
-                    Ok ( noteText, TextCursor childCursor, ( name, attrs ) ) ->
+            (\result ->
+                case result of
+                    Ok details ->
                         let
+                            ( noteText, TextCursor childCursor, ( name, attrs ) ) =
+                                details.value
+
                             note =
                                 InlineAnnotation
                                     { name = name
                                     , text = noteText
-                                    , range =
-                                        { start = start
-                                        , end = end
-                                        }
+                                    , range = details.range
                                     , attributes = attrs
                                     }
                         in
@@ -632,17 +629,14 @@ styledTextLoop options meaningful untilStrings found =
                             |> addToTextCursor note
                             |> resetBalancedReplacements childCursor.balancedReplacements
                             |> resetTextWith childCursor.current
-                            |> advanceTo end
+                            |> advanceTo details.range.end
                             |> Parser.Loop
 
                     Err errs ->
                         let
                             er =
                                 UnexpectedInline
-                                    { range =
-                                        { start = start
-                                        , end = end
-                                        }
+                                    { range = errs.range
                                     , problem =
                                         Error.UnknownInline
                                             (options.inlines
@@ -653,12 +647,11 @@ styledTextLoop options meaningful untilStrings found =
                         found
                             |> commitText
                             |> addToTextCursor er
-                            |> advanceTo end
+                            |> advanceTo errs.range.end
                             |> Parser.Loop
             )
-            |= getPosition
-            |= inlineAnnotation options found
-            |= getPosition
+            |= withRangeResult
+                (inlineAnnotation options found)
         , -- chomp until a meaningful character
           Parser.succeed
             (\( new, final ) ->
@@ -1262,7 +1255,107 @@ replacementStartingChars replacements =
 {- GENERAL HELPERS -}
 
 
-withRange : Parser Context Problem thing -> Parser Context Problem ( Range, thing )
+withRangeResult :
+    Parser Context Problem (Result err thing)
+    ->
+        Parser Context
+            Problem
+            (Result
+                { range : Range
+                , error : err
+                }
+                { range : Range
+                , value : thing
+                }
+            )
+withRangeResult parser =
+    Parser.succeed
+        (\start result end ->
+            case result of
+                Ok val ->
+                    Ok
+                        { range =
+                            { start = start
+                            , end = end
+                            }
+                        , value = val
+                        }
+
+                Err err ->
+                    let
+                        range =
+                            { start = start
+                            , end = end
+                            }
+                    in
+                    Err
+                        { range = range
+                        , error = err
+                        }
+        )
+        |= getPosition
+        |= parser
+        |= getPosition
+
+
+getRangeAndSource :
+    Parser Context Problem thing
+    ->
+        Parser Context
+            Problem
+            { source : String
+            , range : Range
+            , value : thing
+            }
+getRangeAndSource parser =
+    Parser.succeed
+        (\src start result end ->
+            let
+                range =
+                    { start = start
+                    , end = end
+                    }
+            in
+            { range = range
+            , value = result
+            , source = sliceRange range src
+            }
+        )
+        |= Parser.getSource
+        |= getPosition
+        |= parser
+        |= getPosition
+
+
+sliceRange range source =
+    if range.start.line == range.end.line then
+        -- single line
+        let
+            lineStart =
+                range.start.offset - (range.start.column - 1)
+        in
+        String.slice lineStart (range.end.offset + 20) source
+            |> String.lines
+            |> List.head
+            |> Maybe.withDefault ""
+
+    else
+        -- multiline
+        let
+            snippet =
+                String.slice range.start.offset range.end.offset source
+
+            indented =
+                String.slice (range.start.offset + 1 - range.start.column)
+                    range.start.offset
+                    source
+        in
+        indented ++ snippet
+
+
+withRange :
+    Parser Context Problem thing
+    -> Parser Context Problem ( Range, thing )
 withRange parser =
     Parser.succeed
         (\start val end ->
