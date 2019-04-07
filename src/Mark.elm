@@ -418,7 +418,7 @@ document view child =
             Id.initialSeed
 
         ( currentSeed, blockParser ) =
-            getParser seed child
+            Parse.getFailableBlock seed child
     in
     Document
         { expect = expectation
@@ -445,19 +445,39 @@ document view child =
                         Outcome.Almost (Uncertain ( unexpected, [] ))
         , parser =
             Parser.succeed
-                (\source ( range, val ) ->
-                    Parsed
-                        { errors =
-                            List.map (Error.render source) (getUnexpecteds val)
-                        , found = Found range val
-                        , expected = getBlockExpectation child
-                        , initialSeed = seed
-                        , currentSeed = currentSeed
-                        }
+                (\source result ->
+                    case result of
+                        Ok details ->
+                            Parsed
+                                { errors =
+                                    List.map (Error.render source) (getUnexpecteds details.value)
+                                , found = Found details.range details.value
+                                , expected = getBlockExpectation child
+                                , initialSeed = seed
+                                , currentSeed = currentSeed
+                                }
+
+                        Err details ->
+                            Parsed
+                                { errors =
+                                    [ Error.render source
+                                        { range = details.range
+                                        , problem = details.error
+                                        }
+                                    ]
+                                , found =
+                                    Unexpected
+                                        { range = details.range
+                                        , problem = details.error
+                                        }
+                                , expected = getBlockExpectation child
+                                , initialSeed = seed
+                                , currentSeed = currentSeed
+                                }
                 )
                 |. Parser.chompWhile (\c -> c == '\n')
                 |= Parser.getSource
-                |= Parse.withRange (Parser.withIndent 0 blockParser)
+                |= Parse.withRangeResult (Parser.withIndent 0 blockParser)
                 |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
                 |. Parser.end End
         }

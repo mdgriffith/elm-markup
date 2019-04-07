@@ -659,8 +659,7 @@ Then some text.
                     let
                         doc1 =
                             """| Turst
-    one = hello
-    two = world
+    Here's some text content
                         """
                     in
                     Expect.equal (toResult textDoc doc1)

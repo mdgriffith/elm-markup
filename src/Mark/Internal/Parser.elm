@@ -3,6 +3,7 @@ module Mark.Internal.Parser exposing
     , attribute
     , attributeList
     , float
+    , getFailableBlock
     , getPosition
     , getRangeAndSource
     , indentedString
@@ -264,7 +265,7 @@ oneOf blocks expectations seed =
             case blockName myBlock of
                 Just name ->
                     { blockNames = name :: details.blockNames
-                    , childBlocks = Parser.map Ok parser :: details.childBlocks
+                    , childBlocks = parser :: details.childBlocks
                     , childValues = details.childValues
                     , seed = currentSeed
                     }
@@ -286,27 +287,10 @@ oneOf blocks expectations seed =
                 blocks
 
         blockParser =
-            Parser.succeed identity
-                |. Parser.token (Parser.Token "|" BlockStart)
-                |. Parser.oneOf
-                    [ Parser.chompIf (\c -> c == ' ') Space
-                    , Parser.succeed ()
-                    ]
-                |= Parser.oneOf
-                    (List.reverse children.childBlocks
-                        ++ [ Parser.getIndent
-                                |> Parser.andThen
-                                    (\indentation ->
-                                        Parser.succeed
-                                            (\( pos, foundWord ) ->
-                                                Err ( pos, Error.UnknownBlock children.blockNames )
-                                            )
-                                            |= withRange word
-                                            |. newline
-                                            |. Parser.loop "" (raggedIndentedStringAbove indentation)
-                                    )
-                           ]
-                    )
+            failableBlocks
+                { names = children.blockNames
+                , parsers = children.childBlocks
+                }
 
         ( parentId, newSeed ) =
             Id.step seed
@@ -322,14 +306,13 @@ oneOf blocks expectations seed =
                         , id = parentId
                         }
 
-                -- Err ( pos, unexpected ) ->
                 Err details ->
                     OneOf
                         { choices = List.map (Choice parentId) expectations
                         , child =
                             Unexpected
                                 { range = details.range
-                                , problem = Tuple.second details.error
+                                , problem = details.error
                                 }
                         , id = parentId
                         }
@@ -342,14 +325,62 @@ oneOf blocks expectations seed =
 
 
 unexpectedInOneOf expectations =
-    Parser.getIndent
-        |> Parser.andThen
-            (\indentation ->
-                Parser.succeed
-                    (\( pos, foundWord ) ->
-                        Err ( pos, Error.FailMatchOneOf (List.map humanReadableExpectations expectations) )
-                    )
-                    |= withRange word
+    withIndent
+        (\indentation ->
+            Parser.succeed
+                (\( pos, foundWord ) ->
+                    Err (Error.FailMatchOneOf (List.map humanReadableExpectations expectations))
+                )
+                |= withRange word
+        )
+
+
+getFailableBlock seed fromBlock =
+    case fromBlock of
+        Block name { parser } ->
+            let
+                ( newSeed, blockParser ) =
+                    parser seed
+            in
+            ( newSeed
+            , failableBlocks
+                { names = [ name ]
+                , parsers =
+                    [ blockParser
+                    ]
+                }
+            )
+
+        Value { parser } ->
+            Tuple.mapSecond (Parser.map Ok) (parser seed)
+
+
+{-| This parser will either:
+
+    - Parse one of the blocks
+    - Fail to parse a `|` and continue on
+    - Parse a `|`, fail to parse the rest and return an Error
+
+-}
+failableBlocks blocks =
+    Parser.succeed identity
+        |. Parser.token (Parser.Token "|" BlockStart)
+        |. Parser.oneOf
+            [ Parser.chompIf (\c -> c == ' ') Space
+            , Parser.succeed ()
+            ]
+        |= Parser.oneOf
+            (List.map (Parser.map Ok) blocks.parsers
+                ++ [ withIndent
+                        (\indentation ->
+                            Parser.succeed
+                                (Err (Error.UnknownBlock blocks.names))
+                                |. word
+                                |. Parser.chompWhile (\c -> c == ' ')
+                                |. newline
+                                |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                        )
+                   ]
             )
 
 
