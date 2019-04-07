@@ -740,54 +740,53 @@ block name view child =
                     )
                   <|
                     Parse.withRangeResult
-                        (Parser.getIndent
-                            |> Parser.andThen
-                                (\indentation ->
-                                    Parser.succeed identity
-                                        |. Parser.keyword
-                                            (Parser.Token name
-                                                (ExpectingBlockName name)
-                                            )
-                                        |. Parser.chompWhile (\c -> c == ' ')
-                                        |. skipBlankLineWith ()
-                                        |= Parser.oneOf
-                                            [ (Parser.succeed identity
-                                                |= Parse.getPosition
-                                                |. Parser.token
-                                                    (Parser.Token
-                                                        (String.repeat (indentation + 4) " ")
-                                                        (ExpectingIndentation (indentation + 4))
-                                                    )
-                                              )
-                                                |> Parser.andThen
-                                                    (\start ->
-                                                        Parser.oneOf
-                                                            -- If there's st
-                                                            [ Parser.succeed
-                                                                (\end ->
-                                                                    Err
-                                                                        (Error.ExpectingIndent (indentation + 4))
-                                                                )
-                                                                |. Parser.chompIf (\c -> c == ' ') Space
-                                                                |. Parser.chompWhile (\c -> c == ' ')
-                                                                |= Parse.getPosition
-                                                                |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
-                                                            , Parser.map Ok <|
-                                                                Parser.withIndent
-                                                                    (indentation + 4)
-                                                                    (Parser.inContext (InBlock name) childParser)
-                                                            ]
-                                                    )
+                        (Parse.withIndent
+                            (\indentation ->
+                                Parser.succeed identity
+                                    |. Parser.keyword
+                                        (Parser.Token name
+                                            (ExpectingBlockName name)
+                                        )
+                                    |. Parser.chompWhile (\c -> c == ' ')
+                                    |. skipBlankLineWith ()
+                                    |= Parser.oneOf
+                                        [ (Parser.succeed identity
+                                            |= Parse.getPosition
+                                            |. Parser.token
+                                                (Parser.Token
+                                                    (String.repeat (indentation + 4) " ")
+                                                    (ExpectingIndentation (indentation + 4))
+                                                )
+                                          )
+                                            |> Parser.andThen
+                                                (\start ->
+                                                    Parser.oneOf
+                                                        -- If there's st
+                                                        [ Parser.succeed
+                                                            (\end ->
+                                                                Err
+                                                                    (Error.ExpectingIndent (indentation + 4))
+                                                            )
+                                                            |. Parser.chompIf (\c -> c == ' ') Space
+                                                            |. Parser.chompWhile (\c -> c == ' ')
+                                                            |= Parse.getPosition
+                                                            |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
+                                                        , Parser.map Ok <|
+                                                            Parser.withIndent
+                                                                (indentation + 4)
+                                                                (Parser.inContext (InBlock name) childParser)
+                                                        ]
+                                                )
 
-                                            -- If we're here, it's because the indentation failed.
-                                            -- If the child parser failed in some way, it would
-                                            -- take care of that itself by returning Unexpected
-                                            , Parser.succeed
-                                                (Err (Error.ExpectingIndent (indentation + 4)))
-                                                |. Parser.chompWhile (\c -> c == ' ')
-                                                |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
-                                            ]
-                                )
+                                        -- If we're here, it's because the indentation failed.
+                                        -- If the child parser failed in some way, it would
+                                        -- take care of that itself by returning Unexpected
+                                        , Parser.succeed
+                                            (Err (Error.ExpectingIndent (indentation + 4)))
+                                            |. Parser.chompWhile (\c -> c == ' ')
+                                            |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
+                                        ]
+                            )
                         )
                 )
         }
@@ -991,19 +990,18 @@ manyOf blocks =
                             }
                     )
                     |= Parse.withRange
-                        (Parser.getIndent
-                            |> Parser.andThen
-                                (\indentation ->
-                                    Parser.loop
-                                        { parsedSomething = False
-                                        , found = []
-                                        , seed = childStart
-                                        }
-                                        (blocksOrNewlines
-                                            indentation
-                                            blocks
-                                        )
-                                )
+                        (Parse.withIndent
+                            (\indentation ->
+                                Parser.loop
+                                    { parsedSomething = False
+                                    , found = []
+                                    , seed = childStart
+                                    }
+                                    (blocksOrNewlines
+                                        indentation
+                                        blocks
+                                    )
+                            )
                         )
                 )
         }
@@ -1128,17 +1126,16 @@ makeBlocksParser blocks seed =
                             ]
                         |= Parser.oneOf
                             (List.reverse children.childBlocks
-                                ++ [ Parser.getIndent
-                                        |> Parser.andThen
-                                            (\indentation ->
-                                                Parser.succeed
-                                                    (\( pos, foundWord ) ->
-                                                        Err ( pos, Error.UnknownBlock children.blockNames )
-                                                    )
-                                                    |= Parse.withRange Parse.word
-                                                    |. Parse.newline
-                                                    |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
-                                            )
+                                ++ [ Parse.withIndent
+                                        (\indentation ->
+                                            Parser.succeed
+                                                (\( pos, foundWord ) ->
+                                                    Err ( pos, Error.UnknownBlock children.blockNames )
+                                                )
+                                                |= Parse.withRange Parse.word
+                                                |. Parse.newline
+                                                |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
+                                        )
                                    ]
                             )
                     )
@@ -1211,37 +1208,36 @@ tree name view contentBlock =
             \seed ->
                 -- TODO: AHHHH, A NEW SEED NEEDS TO GET CREATED
                 ( seed
-                , Parser.getIndent
-                    |> Parser.andThen
-                        (\baseIndent ->
-                            Parser.succeed identity
-                                |. Parser.keyword
-                                    (Parser.Token name
-                                        (ExpectingBlockName name)
-                                    )
-                                |. Parser.chompWhile (\c -> c == ' ')
-                                |. skipBlankLineWith ()
-                                |= Parser.map
-                                    (\( pos, result ) ->
-                                        DescribeTree
-                                            { found = ( pos, buildTree (baseIndent + 4) result )
-                                            , expected = expectation
-                                            }
-                                    )
-                                    (Parse.withRange
-                                        (Parser.loop
-                                            ( { base = baseIndent + 4
-                                              , prev = baseIndent + 4
-                                              }
-                                            , []
-                                            )
-                                            (indentedBlocksOrNewlines
-                                                seed
-                                                contentBlock
-                                            )
+                , Parse.withIndent
+                    (\baseIndent ->
+                        Parser.succeed identity
+                            |. Parser.keyword
+                                (Parser.Token name
+                                    (ExpectingBlockName name)
+                                )
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |. skipBlankLineWith ()
+                            |= Parser.map
+                                (\( pos, result ) ->
+                                    DescribeTree
+                                        { found = ( pos, buildTree (baseIndent + 4) result )
+                                        , expected = expectation
+                                        }
+                                )
+                                (Parse.withRange
+                                    (Parser.loop
+                                        ( { base = baseIndent + 4
+                                          , prev = baseIndent + 4
+                                          }
+                                        , []
+                                        )
+                                        (indentedBlocksOrNewlines
+                                            seed
+                                            contentBlock
                                         )
                                     )
-                        )
+                                )
+                    )
                 )
         }
 
@@ -2347,11 +2343,10 @@ multiline =
                         DescribeMultiline id pos str
                     )
                     (Parse.withRange
-                        (Parser.getIndent
-                            |> Parser.andThen
-                                (\indentation ->
-                                    Parser.loop "" (Parse.indentedString indentation)
-                                )
+                        (Parse.withIndent
+                            (\indentation ->
+                                Parser.loop "" (Parse.indentedString indentation)
+                            )
                         )
                     )
                 )
@@ -2638,82 +2633,79 @@ parseRecord recordName expectations fields =
                         }
         )
         |= Parse.withRangeResult
-            (Parser.getIndent
-                |> Parser.andThen
-                    (\indentation ->
-                        Parser.succeed identity
-                            |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
-                            |. Parser.chompWhile (\c -> c == ' ')
-                            |. Parser.chompIf (\c -> c == '\n') Newline
-                            |= Parser.withIndent (indentation + 4)
-                                (Parser.loop
-                                    { remaining = fields
-                                    , found = Ok []
-                                    }
-                                    (parseFields recordName (List.map Tuple.first fields))
-                                )
-                    )
+            (Parse.withIndent
+                (\indentation ->
+                    Parser.succeed identity
+                        |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |. Parser.chompIf (\c -> c == '\n') Newline
+                        |= Parser.withIndent (indentation + 4)
+                            (Parser.loop
+                                { remaining = fields
+                                , found = Ok []
+                                }
+                                (parseFields recordName (List.map Tuple.first fields))
+                            )
+                )
             )
 
 
 withFieldName : String -> Parser Context Problem Description -> Parser Context Problem ( String, Found Description )
 withFieldName name parser =
-    Parser.getIndent
-        |> Parser.andThen
-            (\indentation ->
-                Parser.map
-                    (\( pos, description ) ->
-                        ( name, Found pos description )
+    Parse.withIndent
+        (\indentation ->
+            Parser.map
+                (\( pos, description ) ->
+                    ( name, Found pos description )
+                )
+            <|
+                Parse.withRange
+                    (Parser.succeed identity
+                        |. Parser.keyword (Parser.Token name (ExpectingFieldName name))
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |= Parser.oneOf
+                            [ Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
+                            , Parser.succeed identity
+                                |. Parser.chompWhile (\c -> c == '\n')
+                                |. Parser.token (Parser.Token (String.repeat (indentation + 4) " ") (ExpectingIndentation indentation))
+                                |= Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
+                            ]
                     )
-                <|
-                    Parse.withRange
-                        (Parser.succeed identity
-                            |. Parser.keyword (Parser.Token name (ExpectingFieldName name))
-                            |. Parser.chompWhile (\c -> c == ' ')
-                            |. Parser.chompIf (\c -> c == '=') (Expecting "=")
-                            |. Parser.chompWhile (\c -> c == ' ')
-                            |= Parser.oneOf
-                                [ Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
-                                , Parser.succeed identity
-                                    |. Parser.chompWhile (\c -> c == '\n')
-                                    |. Parser.token (Parser.Token (String.repeat (indentation + 4) " ") (ExpectingIndentation indentation))
-                                    |= Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
-                                ]
-                        )
-            )
+        )
 
 
 unexpectedField recordName options =
-    Parser.getIndent
-        |> Parser.andThen
-            (\indentation ->
-                Parser.map
-                    (\{ range, value } ->
-                        ( value
-                        , Unexpected
-                            { range = range
-                            , problem =
-                                Error.UnexpectedField
-                                    { found = value
-                                    , options = options
-                                    , recordName = recordName
-                                    }
-                            }
-                        )
+    Parse.withIndent
+        (\indentation ->
+            Parser.map
+                (\{ range, value } ->
+                    ( value
+                    , Unexpected
+                        { range = range
+                        , problem =
+                            Error.UnexpectedField
+                                { found = value
+                                , options = options
+                                , recordName = recordName
+                                }
+                        }
                     )
-                    (Parse.getRangeAndSource
-                        (Parser.succeed identity
-                            |= Parser.getChompedString (Parser.chompWhile Char.isAlphaNum)
-                            |. Parser.chompWhile (\c -> c == ' ')
-                            |. Parser.chompIf (\c -> c == '=') (Expecting "=")
-                            |. Parser.chompWhile (\c -> c == ' ')
-                            -- TODO: parse multiline string
-                            |. Parser.withIndent (indentation + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
-                         -- |. Parse.newline
-                         -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
-                        )
+                )
+                (Parse.getRangeAndSource
+                    (Parser.succeed identity
+                        |= Parser.getChompedString (Parser.chompWhile Char.isAlphaNum)
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        -- TODO: parse multiline string
+                        |. Parser.withIndent (indentation + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
+                     -- |. Parse.newline
+                     -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
                     )
-            )
+                )
+        )
 
 
 resultToFound result =
@@ -2832,53 +2824,51 @@ parseFields recordName fieldNames fields =
         _ ->
             case fields.found of
                 Ok found ->
-                    Parser.getIndent
-                        |> Parser.andThen
-                            (\indentation ->
-                                Parser.oneOf
-                                    [ indentOrSkip indentation (captureField found recordName fields fieldNames)
-                                        |> Parser.map
-                                            (\indentedField ->
-                                                case indentedField of
-                                                    Indented thing ->
-                                                        thing
+                    Parse.withIndent
+                        (\indentation ->
+                            Parser.oneOf
+                                [ indentOrSkip indentation (captureField found recordName fields fieldNames)
+                                    |> Parser.map
+                                        (\indentedField ->
+                                            case indentedField of
+                                                Indented thing ->
+                                                    thing
 
-                                                    EmptyLine ->
-                                                        Parser.Loop fields
+                                                EmptyLine ->
+                                                    Parser.Loop fields
 
-                                                    WeirdIndent i ->
-                                                        Parser.Loop
-                                                            { found =
-                                                                Err ( Nothing, Error.ExpectingIndent indentation )
-                                                            , remaining =
-                                                                fields.remaining
-                                                            }
-                                            )
-
-                                    -- We've reached here because:
-                                    -- 1. We still have expected fields, but we didn't parse them.
-                                    -- 2. No other errors occurred.
-                                    -- 3. We did not find the correct indentation
-                                    -- 4. And This is not a blank line
-                                    -- So, the only thing left is that we have some fields that we didn't parse
-                                    , Parser.succeed
-                                        (Parser.Done
-                                            (Err
-                                                ( Nothing, Error.MissingFields (List.map Tuple.first fields.remaining) )
-                                            )
+                                                WeirdIndent i ->
+                                                    Parser.Loop
+                                                        { found =
+                                                            Err ( Nothing, Error.ExpectingIndent indentation )
+                                                        , remaining =
+                                                            fields.remaining
+                                                        }
                                         )
-                                    ]
-                            )
+
+                                -- We've reached here because:
+                                -- 1. We still have expected fields, but we didn't parse them.
+                                -- 2. No other errors occurred.
+                                -- 3. We did not find the correct indentation
+                                -- 4. And This is not a blank line
+                                -- So, the only thing left is that we have some fields that we didn't parse
+                                , Parser.succeed
+                                    (Parser.Done
+                                        (Err
+                                            ( Nothing, Error.MissingFields (List.map Tuple.first fields.remaining) )
+                                        )
+                                    )
+                                ]
+                        )
 
                 Err unexpected ->
                     -- We've encountered an error, but we still need to parse
                     -- the entire indented block.  so that the parser can continue.
-                    Parser.getIndent
-                        |> Parser.andThen
-                            (\indentation ->
-                                Parser.succeed (Parser.Done fields.found)
-                                    |. Parser.loop "" (Parse.raggedIndentedStringAbove (indentation - 4))
-                            )
+                    Parse.withIndent
+                        (\indentation ->
+                            Parser.succeed (Parser.Done fields.found)
+                                |. Parser.loop "" (Parse.raggedIndentedStringAbove (indentation - 4))
+                        )
 
 
 captureField :

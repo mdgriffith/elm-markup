@@ -13,6 +13,7 @@ module Mark.Internal.Parser exposing
     , peek
     , raggedIndentedStringAbove
     , styledText
+    , withIndent
     , withRange
     , withRangeResult
     , word
@@ -482,7 +483,7 @@ styledTextLoop options meaningful untilStrings found =
         -- `verbatim`{label| attr = maybe this is here}
         , Parser.succeed
             (\start verbatimString maybeToken end ->
-                case Debug.log "verbatim" maybeToken of
+                case maybeToken of
                     Nothing ->
                         let
                             note =
@@ -655,10 +656,6 @@ styledTextLoop options meaningful untilStrings found =
         , -- chomp until a meaningful character
           Parser.succeed
             (\( new, final ) ->
-                let
-                    _ =
-                        Debug.log "gathered" ( new, final )
-                in
                 if new == "" || final then
                     case commitText (addText (String.trimRight new) found) of
                         TextCursor txt ->
@@ -684,7 +681,15 @@ styledTextLoop options meaningful untilStrings found =
                                 [ Parser.succeed ( str, True )
                                     |. Parser.token (Parser.Token "\n\n" Newline)
                                 , Parser.succeed ( str ++ "\n", False )
-                                    |. newline
+                                    |. (Parser.getIndent
+                                            |> Parser.andThen
+                                                (\indentation ->
+                                                    Parser.token (Parser.Token ("\n" ++ String.repeat indentation " ") Newline)
+                                                 -- TODO do we need to check that this isn't just a completely blank line?
+                                                )
+                                       )
+                                , Parser.succeed ( str, True )
+                                    |. Parser.token (Parser.Token "\n" Newline)
                                 , Parser.succeed ( str, True )
                                     |. Parser.end End
                                 , Parser.succeed ( str, False )
@@ -1253,6 +1258,11 @@ replacementStartingChars replacements =
 
 
 {- GENERAL HELPERS -}
+
+
+withIndent fn =
+    Parser.getIndent
+        |> Parser.andThen fn
 
 
 withRangeResult :
