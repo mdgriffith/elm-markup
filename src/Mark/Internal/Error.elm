@@ -1,14 +1,14 @@
 module Mark.Internal.Error exposing
     ( Error(..), render
-    , Context(..), Problem(..), UnexpectedDetails
-    , AstError(..)
+    , Context(..), Problem(..), UnexpectedDetails, documentMismatch, renderParsingErrors
+    , AstError(..), Rendered(..), compilerError
     )
 
 {-|
 
 @docs Error, render
 
-@docs Context, Problem, UnexpectedDetails
+@docs Context, Problem, UnexpectedDetails, documentMismatch, renderParsingErrors
 
 -}
 
@@ -23,6 +23,7 @@ type AstError
 {-| -}
 type Error
     = DocumentMismatch
+    | CompilerError
     | ParsingIssue (List (Parser.DeadEnd Context Problem))
     | UnknownBlock (List String)
     | UnknownInline (List String)
@@ -125,258 +126,360 @@ type alias UnexpectedDetails =
     }
 
 
-render : String -> UnexpectedDetails -> ErrorMessage
+{-| -}
+type Rendered
+    = Rendered
+        { title : String
+        , problem : Error
+        , region :
+            { start : Position
+            , end : Position
+            }
+        , message : List Format.Text
+        }
+    | Global
+        { problem : Error
+        , title : String
+        , message : List Format.Text
+        }
+
+
+documentMismatch =
+    Global
+        { title = "DOCUMENT MISMATCH"
+        , problem = DocumentMismatch
+        , message =
+            [ Format.text "Your "
+            , Format.yellow (Format.text "document")
+            , Format.text " and your "
+            , Format.yellow (Format.text "Parsed")
+            , Format.text " structure don't match for some reason.\n\n"
+            , Format.text "This usually occurs because you've stored the "
+            , Format.yellow (Format.text "Parsed")
+            , Format.text " data somewhere and then made a breaking change to your document."
+            ]
+        }
+
+
+compilerError =
+    Global
+        { title = "COMPILER ERROR"
+        , problem = CompilerError
+        , message =
+            [ Format.text "Oh boy, this looks like a  "
+            , Format.yellow (Format.text "compiler error")
+            , Format.text "\n\n"
+            , Format.text "If you have time, could you file an "
+            , Format.yellow (Format.text "issue")
+            , Format.text " on the elm-markup respository(https://github.com/mdgriffith/elm-markup) describing how you got here?"
+            ]
+        }
+
+
+{-| -}
+renderParsingErrors : String -> List (Parser.DeadEnd Context Problem) -> Rendered
+renderParsingErrors source issues =
+    Rendered
+        { title = "PARSING ISSUE"
+        , problem = ParsingIssue issues
+        , region =
+            -- TODO:  How to get offset + guarantee of non-null region
+            -- Really, we should fold over all the issues and combine them if their ranges match
+            -- and return a list.
+            case issues of
+                [] ->
+                    { start =
+                        { offset = 0
+                        , line = 0
+                        , column = 0
+                        }
+                    , end =
+                        { offset = 0
+                        , line = 0
+                        , column = 0
+                        }
+                    }
+
+                first :: _ ->
+                    { start =
+                        { offset = 0
+                        , line = first.row
+                        , column = first.col
+                        }
+                    , end =
+                        { offset = 0
+                        , line = first.row
+                        , column = first.col
+                        }
+                    }
+        , message =
+            List.concat
+                [ [ Format.text "I ran into an issue parsing your document.\n\n" ]
+                , renderParserIssue issues
+                , [ Format.text "\n\n" ]
+                ]
+        }
+
+
+render : String -> UnexpectedDetails -> Rendered
 render source current =
     case current.problem of
+        CompilerError ->
+            compilerError
+
         DocumentMismatch ->
-            { title = "DOCUMENT MISMATCH"
-            , region =
-                current.range
-            , message =
-                [ Format.text "Your "
-                , Format.yellow (Format.text "document")
-                , Format.text " and your "
-                , Format.yellow (Format.text "Parsed")
-                , Format.text " structure don't match for some reason.\n\n"
-                , Format.text "This usually occurs because you've stored the "
-                , Format.yellow (Format.text "Parsed")
-                , Format.text " data somewhere and then made a breaking change to your document."
-                ]
-            }
+            documentMismatch
 
         ParsingIssue issues ->
-            { title = "PARSING ISSUE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I ran into an issue parsing your document.\n\n" ]
-                    , renderParserIssue issues
-                    , [ Format.text "\n\n" ]
-                    ]
-            }
+            renderParsingErrors source issues
 
         UnknownBlock expecting ->
             let
                 target =
                     String.slice current.range.start.offset current.range.end.offset source
             in
-            { title = "UNKNOWN BLOCK"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I don't recognize this block name.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "Do you mean one of these instead?\n\n"
-                      , expecting
-                            |> List.sortBy (\exp -> 0 - similarity target exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                      ]
-                    ]
-            }
+            Rendered
+                { title = "UNKNOWN BLOCK"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I don't recognize this block name.\n\n" ]
+                        , highlight current.range source
+                        , [ Format.text "Do you mean one of these instead?\n\n"
+                          , expecting
+                                |> List.sortBy (\exp -> 0 - similarity target exp)
+                                |> List.map (addIndent 4)
+                                |> String.join "\n"
+                                |> Format.text
+                                |> Format.yellow
+                          ]
+                        ]
+                }
 
         UnknownInline expecting ->
             let
                 target =
                     String.slice current.range.start.offset current.range.end.offset source
             in
-            { title = "UNKNOWN INLINE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I ran into an unexpected inline name.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "But I was expecting one of these instead:\n\n"
-                      , expecting
-                            |> List.sortBy (\exp -> 0 - similarity target exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                      ]
-                    ]
-            }
+            Rendered
+                { title = "UNKNOWN INLINE"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I ran into an unexpected inline name.\n\n" ]
+                        , highlight current.range source
+                        , [ Format.text "But I was expecting one of these instead:\n\n"
+                          , expecting
+                                |> List.sortBy (\exp -> 0 - similarity target exp)
+                                |> List.map (addIndent 4)
+                                |> String.join "\n"
+                                |> Format.text
+                                |> Format.yellow
+                          ]
+                        ]
+                }
 
         FailMatchOneOf expecting ->
             let
                 target =
                     String.slice current.range.start.offset current.range.end.offset source
             in
-            { title = "NO MATCH"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I wasn't able to match this.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "to one of the following:\n\n"
-                      , expecting
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                      ]
-                    ]
-            }
+            Rendered
+                { title = "NO MATCH"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I wasn't able to match this.\n\n" ]
+                        , highlight current.range source
+                        , [ Format.text "to one of the following:\n\n"
+                          , expecting
+                                |> List.map (addIndent 4)
+                                |> String.join "\n"
+                                |> Format.text
+                                |> Format.yellow
+                          ]
+                        ]
+                }
 
         ExpectingIndent indentation ->
-            { title = "MISMATCHED INDENTATION"
-            , region = current.range
-            , message =
-                [ Format.text ("I was expecting " ++ String.fromInt indentation ++ " spaces of indentation.\n\n")
-                ]
-                    ++ highlight current.range source
-                    ++ hint "All indentation in `elm-markup` is a multiple of 4."
-            }
+            Rendered
+                { title = "MISMATCHED INDENTATION"
+                , problem = current.problem
+                , region = current.range
+                , message =
+                    [ Format.text ("I was expecting " ++ String.fromInt indentation ++ " spaces of indentation.\n\n")
+                    ]
+                        ++ highlight current.range source
+                        ++ hint "All indentation in `elm-markup` is a multiple of 4."
+                }
 
         CantStartTextWithSpace ->
             let
                 line =
                     String.slice current.range.start.offset current.range.end.offset source
             in
-            { title = "TOO MUCH SPACE"
-            , region = current.range
-            , message =
-                List.concat
-                    [ [ Format.text "This line of text starts with extra space.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "Beyond the required indentation, text should start with non-whitespace characters." ]
-                    ]
-            }
+            Rendered
+                { title = "TOO MUCH SPACE"
+                , problem = current.problem
+                , region = current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "This line of text starts with extra space.\n\n" ]
+                        , highlight current.range source
+                        , [ Format.text "Beyond the required indentation, text should start with non-whitespace characters." ]
+                        ]
+                }
 
         UnclosedStyle styles ->
             let
                 line =
                     String.slice current.range.start.offset current.range.end.offset source
             in
-            { title = "UNCLOSED STYLE"
-            , region = current.range
-            , message =
-                List.concat
-                    [ [ Format.text (styleNames styles ++ " still open.  Add " ++ styleChars styles ++ " to close it.\n\n") ] ]
-                    ++ highlight current.range source
-                    ++ hint "`*` is used for bold and `/` is used for italic."
-            }
+            Rendered
+                { title = "UNCLOSED STYLE"
+                , problem = current.problem
+                , region = current.range
+                , message =
+                    List.concat
+                        [ [ Format.text (styleNames styles ++ " still open.  Add " ++ styleChars styles ++ " to close it.\n\n") ] ]
+                        ++ highlight current.range source
+                        ++ hint "`*` is used for bold and `/` is used for italic."
+                }
 
         UnexpectedField msgUnexpectedField ->
             let
                 target =
                     String.slice current.range.start.offset current.range.end.offset source
             in
-            { title = "UNKNOWN FIELD"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I ran into an unexpected field name for a "
-                      , Format.text msgUnexpectedField.recordName
-                            |> Format.yellow
-                      , Format.text " record\n\n"
-                      ]
-                    , highlight current.range source
-                    , [ Format.text "\nDo you mean one of these instead?\n\n"
-                      , msgUnexpectedField.options
-                            |> List.sortBy (\exp -> 0 - similarity target exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                      ]
-                    ]
-            }
+            Rendered
+                { title = "UNKNOWN FIELD"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I ran into an unexpected field name for a "
+                          , Format.text msgUnexpectedField.recordName
+                                |> Format.yellow
+                          , Format.text " record\n\n"
+                          ]
+                        , highlight current.range source
+                        , [ Format.text "\nDo you mean one of these instead?\n\n"
+                          , msgUnexpectedField.options
+                                |> List.sortBy (\exp -> 0 - similarity target exp)
+                                |> List.map (addIndent 4)
+                                |> String.join "\n"
+                                |> Format.text
+                                |> Format.yellow
+                          ]
+                        ]
+                }
 
         BadDate found ->
-            { title = "BAD DATE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was trying to parse a date, but this format looks off.\n\n" ]
-                    , highlight current.range source
-                    , [ Format.text "Dates should be in ISO 8601 format:\n\n"
-                      , Format.text (addIndent 4 "YYYY-MM-DDTHH:mm:ss.SSSZ")
-                            |> Format.yellow
-                      ]
-                    ]
-            }
+            Rendered
+                { title = "BAD DATE"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I was trying to parse a date, but this format looks off.\n\n" ]
+                        , highlight current.range source
+                        , [ Format.text "Dates should be in ISO 8601 format:\n\n"
+                          , Format.text (addIndent 4 "YYYY-MM-DDTHH:mm:ss.SSSZ")
+                                |> Format.yellow
+                          ]
+                        ]
+                }
 
         BadFloat ->
-            { title = "BAD FLOAT"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was trying to parse a float, but this format looks off.\n\n" ]
-                    , highlight current.range source
-                    ]
-            }
+            Rendered
+                { title = "BAD FLOAT"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I was trying to parse a float, but this format looks off.\n\n" ]
+                        , highlight current.range source
+                        ]
+                }
 
         BadInt ->
-            { title = "BAD INT"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was trying to parse an integer, but this format looks off.\n\n" ]
-                    , highlight current.range source
-                    ]
-            }
+            Rendered
+                { title = "BAD INT"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I was trying to parse an integer, but this format looks off.\n\n" ]
+                        , highlight current.range source
+                        ]
+                }
 
         BadBool ->
-            { title = "BAD INT"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was trying to parse a boolean, but this format looks off.\n\n" ]
-                    , highlight current.range source
-                    ]
-            }
+            Rendered
+                { title = "BAD INT"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I was trying to parse a boolean, but this format looks off.\n\n" ]
+                        , highlight current.range source
+                        ]
+                }
 
         IntOutOfRange found ->
-            { title = "INTEGER OUT OF RANGE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was expecting an "
-                      , Format.yellow (Format.text "Int")
-                      , Format.text " between "
-                      , Format.text (String.fromInt found.min)
-                            |> Format.yellow
-                      , Format.text " and "
-                      , Format.text (String.fromInt found.max)
-                            |> Format.yellow
-                      , Format.text ", but found:\n\n"
-                      ]
-                    , highlight current.range source
-                    ]
-            }
+            Rendered
+                { title = "INTEGER OUT OF RANGE"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I was expecting an "
+                          , Format.yellow (Format.text "Int")
+                          , Format.text " between "
+                          , Format.text (String.fromInt found.min)
+                                |> Format.yellow
+                          , Format.text " and "
+                          , Format.text (String.fromInt found.max)
+                                |> Format.yellow
+                          , Format.text ", but found:\n\n"
+                          ]
+                        , highlight current.range source
+                        ]
+                }
 
         FloatOutOfRange found ->
-            { title = "FLOAT OUT OF RANGE"
-            , region =
-                current.range
-            , message =
-                List.concat
-                    [ [ Format.text "I was expecting a "
-                      , Format.yellow (Format.text "Float")
-                      , Format.text " between "
-                      , Format.text (String.fromFloat found.min)
-                            |> Format.yellow
-                      , Format.text " and "
-                      , Format.text (String.fromFloat found.max)
-                            |> Format.yellow
-                      , Format.text ", but found:\n\n"
-                      ]
-                    , highlight current.range source
-                    ]
-            }
+            Rendered
+                { title = "FLOAT OUT OF RANGE"
+                , problem = current.problem
+                , region =
+                    current.range
+                , message =
+                    List.concat
+                        [ [ Format.text "I was expecting a "
+                          , Format.yellow (Format.text "Float")
+                          , Format.text " between "
+                          , Format.text (String.fromFloat found.min)
+                                |> Format.yellow
+                          , Format.text " and "
+                          , Format.text (String.fromFloat found.max)
+                                |> Format.yellow
+                          , Format.text ", but found:\n\n"
+                          ]
+                        , highlight current.range source
+                        ]
+                }
 
         NonMatchingFields fields ->
             let
@@ -388,77 +491,83 @@ render source current =
                         (\f -> not <| List.member f fields.found)
                         fields.expecting
             in
-            { title = "MISSING FIELD"
-            , region = current.range
-            , message =
-                -- TODO: Highlight entire record section
-                -- TODO: mention record name
-                case remaining of
-                    [] ->
-                        -- TODO: This should never happen actually.
-                        --  Maybe error should be a nonempty list?
-                        [ Format.text "It looks like a field is missing." ]
+            Rendered
+                { title = "MISSING FIELD"
+                , problem = current.problem
+                , region = current.range
+                , message =
+                    -- TODO: Highlight entire record section
+                    -- TODO: mention record name
+                    case remaining of
+                        [] ->
+                            -- TODO: This should never happen actually.
+                            --  Maybe error should be a nonempty list?
+                            [ Format.text "It looks like a field is missing." ]
 
-                    [ single ] ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You need to add the "
-                        , Format.yellow (Format.text single)
-                        , Format.text " field."
-                        ]
+                        [ single ] ->
+                            [ Format.text "It looks like a field is missing.\n\n"
+                            , Format.text "You need to add the "
+                            , Format.yellow (Format.text single)
+                            , Format.text " field."
+                            ]
 
-                    multiple ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You still need to add:\n"
-                        , remaining
-                            |> List.sortBy (\exp -> 0 - similarity line exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                        ]
-            }
+                        multiple ->
+                            [ Format.text "It looks like a field is missing.\n\n"
+                            , Format.text "You still need to add:\n"
+                            , remaining
+                                |> List.sortBy (\exp -> 0 - similarity line exp)
+                                |> List.map (addIndent 4)
+                                |> String.join "\n"
+                                |> Format.text
+                                |> Format.yellow
+                            ]
+                }
 
         MissingFields remaining ->
             let
                 line =
                     String.slice current.range.start.offset current.range.end.offset source
             in
-            { title = "MISSING FIELD"
-            , region = current.range
-            , message =
-                -- TODO: Highlight entire record section
-                -- TODO: mention record name
-                case remaining of
-                    [] ->
-                        -- TODO: This should never happen actually.
-                        --  Maybe error should be a nonempty list?
-                        [ Format.text "It looks like a field is missing." ]
+            Rendered
+                { title = "MISSING FIELD"
+                , problem = current.problem
+                , region = current.range
+                , message =
+                    -- TODO: Highlight entire record section
+                    -- TODO: mention record name
+                    case remaining of
+                        [] ->
+                            -- TODO: This should never happen actually.
+                            --  Maybe error should be a nonempty list?
+                            [ Format.text "It looks like a field is missing." ]
 
-                    [ single ] ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You need to add the "
-                        , Format.yellow (Format.text single)
-                        , Format.text " field."
-                        ]
+                        [ single ] ->
+                            [ Format.text "It looks like a field is missing.\n\n"
+                            , Format.text "You need to add the "
+                            , Format.yellow (Format.text single)
+                            , Format.text " field."
+                            ]
 
-                    multiple ->
-                        [ Format.text "It looks like a field is missing.\n\n"
-                        , Format.text "You still need to add:\n"
-                        , remaining
-                            |> List.sortBy (\exp -> 0 - similarity line exp)
-                            |> List.map (addIndent 4)
-                            |> String.join "\n"
-                            |> Format.text
-                            |> Format.yellow
-                        ]
-            }
+                        multiple ->
+                            [ Format.text "It looks like a field is missing.\n\n"
+                            , Format.text "You still need to add:\n"
+                            , remaining
+                                |> List.sortBy (\exp -> 0 - similarity line exp)
+                                |> List.map (addIndent 4)
+                                |> String.join "\n"
+                                |> Format.text
+                                |> Format.yellow
+                            ]
+                }
 
         Custom custom ->
-            { title = String.toUpper custom.title
-            , region = current.range
-            , message =
-                List.map Format.text custom.message
-            }
+            Rendered
+                { title = String.toUpper custom.title
+                , problem = current.problem
+                , region = current.range
+                , message =
+                    List.map Format.text custom.message
+                }
 
 
 styleChars styles =
@@ -557,6 +666,22 @@ similarity source target =
         |> (+) lenSimilarity
 
 
+{-|
+
+    Parser.DeadEnd
+
+    { row = Int
+    , col = Int
+    , problem = problem
+    , contextStack =
+        List
+            { row = Int
+            , col = Int
+            , context = context
+            }
+    }
+
+-}
 renderParserIssue deadends =
     List.map
         (Format.yellow

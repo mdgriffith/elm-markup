@@ -107,52 +107,87 @@ toString =
 
 
 {-| -}
-parse : Document data -> String -> Outcome Error (Partial Parsed) Parsed
+parse : Document data -> String -> Outcome (List Error) (Partial Parsed) Parsed
 parse doc source =
-    case Desc.parse doc source of
-        Ok ((Parsed parsedDetails) as parsed) ->
-            case parsedDetails.errors of
-                [] ->
-                    Success parsed
+    Desc.compile doc source
+        |> moveParsedToResult
 
-                _ ->
-                    Almost
-                        { errors = List.map (Error.render source) parsedDetails.errors
-                        , result = parsed
-                        }
 
-        Err deadEnds ->
-            Failure <|
-                Error.render source
-                    { problem = Error.ParsingIssue deadEnds
-                    , range =
-                        case List.head deadEnds of
-                            Nothing ->
-                                { start =
-                                    { offset = 0
-                                    , line = 0
-                                    , column = 0
-                                    }
-                                , end =
-                                    { offset = 0
-                                    , line = 0
-                                    , column = 0
-                                    }
-                                }
+moveParsedToResult :
+    Result
+        (Outcome.Outcome (List Error.Rendered)
+            { errors : List Error.Rendered
+            , result : data
+            }
+            data
+        )
+        ( Parsed
+        , Outcome.Outcome (List Error.Rendered)
+            { errors : List Error.Rendered
+            , result : data
+            }
+            data
+        )
+    -> Outcome (List Error) (Partial Parsed) Parsed
+moveParsedToResult result =
+    case result of
+        Ok ( parsed, Outcome.Success success ) ->
+            Success parsed
 
-                            Just deadEnd ->
-                                { start =
-                                    { offset = 0
-                                    , line = deadEnd.row
-                                    , column = deadEnd.col
-                                    }
-                                , end =
-                                    { offset = 0
-                                    , line = deadEnd.row
-                                    , column = deadEnd.col
-                                    }
-                                }
-                    }
+        Ok ( parsed, Outcome.Almost almost ) ->
+            Almost
+                { errors = almost.errors
+                , result = parsed
+                }
+
+        Ok ( parsed, Outcome.Failure errors ) ->
+            Failure errors
+
+        Err (Outcome.Success success) ->
+            Failure []
+
+        Err (Outcome.Almost almost) ->
+            Failure almost.errors
+
+        Err (Outcome.Failure fail) ->
+            Failure fail
+
+
+{-| -}
+render : Document data -> Parsed -> Outcome (List Error) (Partial data) data
+render doc ((Parsed parsedDetails) as parsed) =
+    Desc.render doc parsed
+        |> rewrapOutcome
+
+
+{-| -}
+compile : Document data -> String -> Outcome (List Error) (Partial data) data
+compile doc source =
+    Desc.compile doc source
+        |> flattenErrors
+        |> rewrapOutcome
+
+
+flattenErrors result =
+    case result of
+        Ok ( parsed, outcome ) ->
+            outcome
+
+        Err outcome ->
+            outcome
+
+
+rewrapOutcome : Outcome.Outcome x y z -> Outcome x y z
+rewrapOutcome outcome =
+    case outcome of
+        Outcome.Success s ->
+            Success s
+
+        Outcome.Almost x ->
+            Almost x
+
+        Outcome.Failure f ->
+            Failure f
 
 
 {-| -}
@@ -180,32 +215,6 @@ startDocRange =
 
 errorsToList ( fst, remain ) =
     fst :: remain
-
-
-{-| -}
-render : Document data -> Parsed -> Outcome (List Error) (Partial data) data
-render doc ((Parsed parsedDetails) as parsed) =
-    Desc.render doc parsed
-        |> errorsToMessages
-
-
-{-| -}
-compile : Document data -> String -> Outcome (List Error) (Partial data) data
-compile doc source =
-    Desc.compile doc source
-        |> errorsToMessages
-
-
-errorsToMessages outcome =
-    case outcome of
-        Outcome.Success s ->
-            Success s
-
-        Outcome.Almost { errors, result } ->
-            Almost { errors = List.map (Error.render "") errors, result = result }
-
-        Outcome.Failure errors ->
-            Failure (List.map (Error.render "") errors)
 
 
 {-| -}
@@ -373,10 +382,7 @@ unexpectedFromFound found =
 
 {-| -}
 type alias Error =
-    { message : List Format.Text
-    , region : Range
-    , title : String
-    }
+    Error.Rendered
 
 
 {-| -}
@@ -441,7 +447,8 @@ document view child =
             Parser.succeed
                 (\source ( range, val ) ->
                     Parsed
-                        { errors = getUnexpecteds val
+                        { errors =
+                            List.map (Error.render source) (getUnexpecteds val)
                         , found = Found range val
                         , expected = getBlockExpectation child
                         , initialSeed = seed
@@ -563,7 +570,7 @@ verify fn myBlock =
 
 
 {-| -}
-onError : (List Error -> a) -> Block a -> Block a
+onError : (List { range : Range } -> a) -> Block a -> Block a
 onError recover myBlock =
     case myBlock of
         Block name details ->
@@ -580,7 +587,14 @@ onError recover myBlock =
                                 Outcome.Almost (Recovered err a)
 
                             Outcome.Almost (Uncertain x) ->
-                                Outcome.Almost (Recovered x (recover (List.map (Error.render "") (errorsToList x))))
+                                Outcome.Almost
+                                    (Recovered x
+                                        (recover
+                                            (List.map (\err -> { range = err.range })
+                                                (errorsToList x)
+                                            )
+                                        )
+                                    )
 
                             Outcome.Failure f ->
                                 Outcome.Failure f
@@ -600,7 +614,14 @@ onError recover myBlock =
                                 Outcome.Almost (Recovered err a)
 
                             Outcome.Almost (Uncertain x) ->
-                                Outcome.Almost (Recovered x (recover (List.map (Error.render "") (errorsToList x))))
+                                Outcome.Almost
+                                    (Recovered x
+                                        (recover
+                                            (List.map (\err -> { range = err.range })
+                                                (errorsToList x)
+                                            )
+                                        )
+                                    )
 
                             Outcome.Failure f ->
                                 Outcome.Failure f
@@ -3656,8 +3677,19 @@ balanced =
 
 {-| -}
 errorToString : Error -> String
-errorToString msg =
-    formatErrorString msg
+errorToString error =
+    case error of
+        Error.Rendered details ->
+            formatErrorString
+                { title = details.title
+                , message = details.message
+                }
+
+        Error.Global global ->
+            formatErrorString
+                { title = global.title
+                , message = global.message
+                }
 
 
 formatErrorString error =
@@ -3675,7 +3707,18 @@ type Theme
 {-| -}
 errorToHtml : Theme -> Error -> List (Html.Html msg)
 errorToHtml theme error =
-    formatErrorHtml theme error
+    case error of
+        Error.Rendered details ->
+            formatErrorHtml theme
+                { title = details.title
+                , message = details.message
+                }
+
+        Error.Global global ->
+            formatErrorHtml theme
+                { title = global.title
+                , message = global.message
+                }
 
 
 formatErrorHtml theme error =
