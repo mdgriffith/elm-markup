@@ -388,16 +388,34 @@ sectionWithRecordDoc =
         )
 
 
+getProblem renderedError =
+    case renderedError of
+        Error.Rendered details ->
+            details.problem
+
+        Error.Global details ->
+            details.problem
+
+
+flattenErrors result =
+    case result of
+        Ok ( parsed, outcome ) ->
+            outcome
+
+        Err outcome ->
+            outcome
+
+
 toResult doc src =
-    case Mark.Internal.Description.compile doc src of
+    case flattenErrors (Mark.Internal.Description.compile doc src) of
         Mark.Internal.Outcome.Success success ->
             Ok success
 
         Mark.Internal.Outcome.Failure errs ->
-            Err (List.map .problem errs)
+            Err (List.map getProblem errs)
 
         Mark.Internal.Outcome.Almost { errors } ->
-            Err (List.map .problem errors)
+            Err (List.map getProblem errors)
 
 
 suite : Test
