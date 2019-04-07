@@ -7,7 +7,7 @@ module Mark.Internal.Description exposing
     , create
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
-    , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, noInlineAttributes
+    , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
     , Block(..), Document(..)
     )
 
@@ -29,7 +29,7 @@ module Mark.Internal.Description exposing
 
 @docs inlineExample, blockName, uncertain, humanReadableExpectations
 
-@docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, noInlineAttributes
+@docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
 
 @docs Block, Document
 
@@ -342,6 +342,21 @@ getParser seed fromBlock =
                 |. Parser.token (Parser.Token "|" (Error.ExpectingBlockName name))
                 |. Parser.chompIf (\c -> c == ' ') Error.Space
                 |= blockParser
+            )
+
+        Value { parser } ->
+            parser seed
+
+
+getParserNoBar seed fromBlock =
+    case fromBlock of
+        Block name { parser } ->
+            let
+                ( newSeed, blockParser ) =
+                    parser seed
+            in
+            ( newSeed
+            , blockParser
             )
 
         Value { parser } ->

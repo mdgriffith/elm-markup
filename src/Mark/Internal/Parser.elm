@@ -680,14 +680,24 @@ styledTextLoop options meaningful untilStrings found =
                             Parser.oneOf
                                 [ Parser.succeed ( str, True )
                                     |. Parser.token (Parser.Token "\n\n" Newline)
-                                , Parser.succeed ( str ++ "\n", False )
-                                    |. (Parser.getIndent
-                                            |> Parser.andThen
-                                                (\indentation ->
-                                                    Parser.token (Parser.Token ("\n" ++ String.repeat indentation " ") Newline)
-                                                 -- TODO do we need to check that this isn't just a completely blank line?
-                                                )
-                                       )
+                                , withIndent
+                                    (\indentation ->
+                                        Parser.succeed
+                                            (\finished ->
+                                                if finished then
+                                                    ( str, True )
+
+                                                else
+                                                    ( str ++ "\n", False )
+                                            )
+                                            |. Parser.token (Parser.Token ("\n" ++ String.repeat indentation " ") Newline)
+                                            |= Parser.oneOf
+                                                [ Parser.map (always True) (Parser.end End)
+                                                , Parser.map (always True) newline
+                                                , Parser.succeed False
+                                                ]
+                                     -- TODO do we need to check that this isn't just a completely blank line?
+                                    )
                                 , Parser.succeed ( str, True )
                                     |. Parser.token (Parser.Token "\n" Newline)
                                 , Parser.succeed ( str, True )

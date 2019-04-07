@@ -224,8 +224,7 @@ sectionDoc =
     Mark.document
         identity
         (Mark.manyOf
-            [ text
-                |> Mark.map (always "text")
+            [ Mark.map (always "text") text
             , Mark.record3 "Test"
                 (\one two three -> "record:one,two,three")
                 (Mark.field "one" Mark.string)
@@ -445,20 +444,20 @@ suite =
                     Expect.equal
                         (toResult
                             (Mark.document identity text)
-                            "Some text\nand some more text"
+                            "Some text\nand some more text\n\n"
                         )
                         (Ok
                             [ Mark.Text emptyStyles "Some text\nand some more text"
                             ]
                         )
-            , only <|
-                test "Double newlines signify a new paragraph" <|
-                    \_ ->
-                        Expect.err
-                            (toResult
-                                (Mark.document identity text)
-                                "Some text\n\nand some moretext"
-                            )
+            , test "Double newlines signify a new paragraph" <|
+                \_ ->
+                    -- This is an error because we're expecting one paragraph, not two.
+                    Expect.err
+                        (toResult
+                            (Mark.document identity text)
+                            "Some text\n\nand some moretext"
+                        )
             , test "Inline elements should maintain their source order." <|
                 \_ ->
                     Expect.equal
@@ -563,7 +562,7 @@ suite =
                     Expect.equal
                         (toResult inlines "[my]{highlurt} highlighted sentence")
                         (Err
-                            [ Error.UnknownInline [ "[some styled text]{highlight}" ]
+                            [ Error.UnknownInline [ "[some styled text]{highlight}", "`some styled text`" ]
                             ]
                         )
             ]
@@ -679,6 +678,20 @@ Then some text.
                     in
                     Expect.equal (toResult textDoc doc1)
                         result
+            , test "Paragraph with single newline" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """| Test
+    Here's my extra line
+    And some additional stuff.
+"""
+
+                        result =
+                            Ok [ Mark.Text emptyStyles "Here's my extra line\nAnd some additional stuff." ]
+                    in
+                    Expect.equal (toResult textDoc doc1)
+                        result
             , test "Single OneOf" <|
                 \_ ->
                     let
@@ -716,8 +729,11 @@ Then some text.
                             """| Meta
     one = Test data
     two = other data
+
 Then a bunch of
+
 paragraphs.
+
 Each with their own /styling/.
 """
 
@@ -745,13 +761,15 @@ Each with their own /styling/.
 | Meta
     one = Test data
     two = other data
+
 Then a bunch of
+
 paragraphs.
+
 Each with their own /styling/.
 """
                     in
-                    Expect.equal (toResult withMetaData doc1)
-                        (Err [ Error.UnknownBlock [ "Meta" ] ])
+                    Expect.ok (toResult withMetaData doc1)
             , test "Nested section blocks" <|
                 \_ ->
                     let
@@ -761,23 +779,36 @@ Each with their own /styling/.
     one = Test data
     two = other data
     three = other test data
+
 Then a bunch of
+
 paragraphs.
+
 Each with their own /styling/.
+
 | Section
+
     Then we have embedded stuff
+
     and we can add other blocks like
+
     | Embedded
         This is embedded
+
     and others
 Finally, a sentence
 """
-
-                        result =
-                            Ok [ "record:one,two,three", "text", "text", "text", "section:text,text,embedded,text", "text" ]
                     in
                     Expect.equal (toResult sectionDoc doc1)
-                        result
+                        (Ok
+                            [ "record:one,two,three"
+                            , "text"
+                            , "text"
+                            , "text"
+                            , "section:text,text,embedded,text"
+                            , "text"
+                            ]
+                        )
             ]
         , describe "Error Correction"
             [ test "Verify an int" <|
@@ -886,7 +917,8 @@ Finally, a sentence
     three = Here is a bunch of text
 """
                     in
-                    Expect.equal (toResult recordManyTextDoc doc1)
+                    Expect.equal
+                        (toResult recordManyTextDoc doc1)
                         (Ok
                             { one = "hello"
                             , three =
@@ -903,7 +935,9 @@ Finally, a sentence
     two = world
     three =
         Here is a bunch of text
+
         And some more on another line
+
 """
                     in
                     Expect.equal (toResult recordManyTextDoc doc1)

@@ -1089,7 +1089,7 @@ makeBlocksParser blocks seed =
             let
                 -- We don't care about the new seed because that's handled by the loop.
                 ( _, parser ) =
-                    getParser seed myBlock
+                    getParserNoBar seed myBlock
             in
             case blockName myBlock of
                 Just name ->
@@ -1246,10 +1246,10 @@ iconParser =
     Parser.oneOf
         [ Parser.succeed Bullet
             |. Parser.chompIf (\c -> c == '-') (Expecting "-")
-            |. Parser.chompWhile (\c -> c == '-')
+            |. Parser.chompWhile (\c -> c == '-' || c == ' ')
         , Parser.succeed AutoNumber
             |. Parser.chompIf (\c -> c == '#') (Expecting "#")
-            |. Parser.chompWhile (\c -> c == '.')
+            |. Parser.chompWhile (\c -> c == '.' || c == ' ')
         ]
 
 
