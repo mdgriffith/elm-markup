@@ -214,10 +214,13 @@ raggedIndentedStringAbove indentation found =
                 ]
         , Parser.succeed
             (\indentCount str ->
-                Parser.Loop (found ++ String.repeat indentCount " " ++ str)
+                if indentCount <= 0 then
+                    Parser.Done found
+
+                else
+                    Parser.Loop (found ++ String.repeat indentCount " " ++ str)
             )
-            |= Parser.oneOf
-                (indentationBetween (indentation + 1) (indentation + 4))
+            |= Parser.oneOf (indentationBetween (indentation + 1) (indentation + 4))
             |= Parser.getChompedString
                 (Parser.chompWhile
                     (\c -> c /= '\n')

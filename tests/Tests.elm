@@ -717,7 +717,8 @@ Then some text.
                         doc1 =
                             """| Test
   Only two spaces(should be four)
-                        """
+
+"""
                     in
                     Expect.equal (toResult textDoc doc1)
                         (Err [ Error.ExpectingIndent 4 ])
@@ -858,13 +859,10 @@ Finally, a sentence
                             """| Test
     one = hello
     two = world
-                        """
+"""
 
                         expectedProblem =
-                            Error.NonMatchingFields
-                                { expecting = [ "one", "two", "three" ]
-                                , found = [ "two", "one" ]
-                                }
+                            Error.MissingFields [ "three" ]
                     in
                     Expect.equal (toResult recordDoc doc1)
                         (Err [ expectedProblem ])
@@ -980,13 +978,14 @@ Finally, a sentence
     two = world
     three = Yo
     four = huh?
-                        """
+
+"""
                     in
                     Expect.equal (toResult recordDoc doc1)
                         (Err
                             [ Error.UnexpectedField
                                 { options = [ "one", "two", "three" ]
-                                , found = "four"
+                                , found = "four = huh?"
                                 , recordName = "Test"
                                 }
                             ]

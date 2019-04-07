@@ -698,16 +698,8 @@ skipSeed parser seed =
     ( seed, parser )
 
 
-
--- TODO: use (backtrackCharacters 2 pos)
-
-
 {-| -}
-block :
-    String
-    -> (child -> result)
-    -> Block child
-    -> Block result
+block : String -> (child -> result) -> Block child -> Block result
 block name view child =
     Block name
         { expect = ExpectBlock name (getBlockExpectation child)
@@ -781,11 +773,11 @@ block name view child =
                                             |> Parser.andThen
                                                 (\start ->
                                                     Parser.oneOf
-                                                        -- If there's st
+                                                        -- ALERT:  This first parser will fail because `Parse.raggedIndentedStringAbove`
+                                                        -- expects indentation for the first line.
                                                         [ Parser.succeed
                                                             (\end ->
-                                                                Err
-                                                                    (Error.ExpectingIndent (indentation + 4))
+                                                                Err (Error.ExpectingIndent (indentation + 4))
                                                             )
                                                             |. Parser.chompIf (\c -> c == ' ') Space
                                                             |. Parser.chompWhile (\c -> c == ' ')
@@ -803,7 +795,6 @@ block name view child =
                                         -- take care of that itself by returning Unexpected
                                         , Parser.succeed
                                             (Err (Error.ExpectingIndent (indentation + 4)))
-                                            |. Parser.chompWhile (\c -> c == ' ')
                                             |. Parser.loop "" (Parse.raggedIndentedStringAbove indentation)
                                         ]
                             )
@@ -2839,7 +2830,35 @@ parseFields :
 parseFields recordName fieldNames fields =
     case fields.remaining of
         [] ->
-            Parser.succeed (Parser.Done fields.found)
+            Parse.withIndent
+                (\indentation ->
+                    Parser.succeed
+                        (\remaining ->
+                            if String.trim remaining == "" then
+                                Parser.Done fields.found
+
+                            else
+                                Parser.Done
+                                    (Err
+                                        ( Nothing
+                                        , Error.UnexpectedField
+                                            { options = fieldNames
+                                            , found = String.trim remaining
+                                            , recordName = recordName
+                                            }
+                                        )
+                                    )
+                        )
+                        |= Parser.oneOf
+                            [ Parser.succeed identity
+                                |. Parser.token
+                                    (Parser.Token ("\n" ++ String.repeat indentation " ")
+                                        (ExpectingIndentation indentation)
+                                    )
+                                |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
+                            , Parser.succeed ""
+                            ]
+                )
 
         _ ->
             case fields.found of
