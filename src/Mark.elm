@@ -88,7 +88,6 @@ import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
-import Time
 
 
 {-| -}
