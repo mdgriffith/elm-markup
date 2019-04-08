@@ -6,19 +6,13 @@
     "version": "2.0.5",
     "exposed-modules": [
         "Mark",
-        "Mark.Default",
-        "Mark.Advanced",
-        "Mark.Description"
+        "Mark.Edit"
     ],
     "elm-version": "0.19.0 <= v < 0.20.0",
     "dependencies": {
         "elm/core": "1.0.0 <= v < 2.0.0",
         "elm/html": "1.0.0 <= v < 2.0.0",
-        "elm/parser": "1.1.0 <= v < 2.0.0",
-        "elm/time": "1.0.0 <= v < 2.0.0",
-        "mdgriffith/elm-ui": "1.1.0 <= v < 2.0.0",
-        "rtfeldman/elm-iso8601-date-strings": "1.1.2 <= v < 2.0.0",
-        "zwilias/elm-rosetree": "1.2.2 <= v < 2.0.0"
+        "elm/parser": "1.1.0 <= v < 2.0.0"
     },
     "test-dependencies": {
         "elm-explorations/test": "1.2.0 <= v < 2.0.0"
