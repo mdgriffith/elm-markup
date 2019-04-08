@@ -494,7 +494,7 @@ suite =
                         (toResult inlineMultipleVerbatim
                             "my `verbatim string`  `verbatim 2`{verb2|one=one, two=two}"
                         )
-                        (Ok [ [ "my " ], [ "verbatim string" ], [ "  " ], [ "verbatim 2", "two", "one" ] ])
+                        (Ok [ [ "my " ], [ "verbatim string" ], [ "  " ], [ "verbatim 2", "one", "two" ] ])
             , test "Inline attribute order(source order)" <|
                 \_ ->
                     Expect.equal

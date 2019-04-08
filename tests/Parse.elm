@@ -48,10 +48,14 @@ suite =
                 Expect.equal
                     (Parser.run
                         (Parser.loop
-                            ( [ Description.ExpectAttrString "attr1"
-                              ]
-                            , []
-                            )
+                            { remaining =
+                                [ Description.ExpectAttrString "attr1"
+                                ]
+                            , original =
+                                [ Description.ExpectAttrString "attr1"
+                                ]
+                            , found = []
+                            }
                             Mark.Internal.Parser.attributeList
                         )
                         "attr1 = My String variable"
@@ -73,11 +77,16 @@ suite =
                 Expect.equal
                     (Parser.run
                         (Parser.loop
-                            ( [ Description.ExpectAttrString "attr1"
-                              , Description.ExpectAttrString "attr2"
-                              ]
-                            , []
-                            )
+                            { original =
+                                [ Description.ExpectAttrString "attr1"
+                                , Description.ExpectAttrString "attr2"
+                                ]
+                            , remaining =
+                                [ Description.ExpectAttrString "attr1"
+                                , Description.ExpectAttrString "attr2"
+                                ]
+                            , found = []
+                            }
                             Mark.Internal.Parser.attributeList
                         )
                         "attr1 = My String variable, attr2 = My Second variable"

@@ -959,7 +959,54 @@ tokenBody ( name, attrs ) =
                 |> Tolerant.ignore
                     (Tolerant.chompWhile (\c -> c == ' '))
                 |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
-                |> Tolerant.keep (Parser.loop ( attrs, [] ) attributeList)
+                |> Tolerant.keep
+                    (Parser.loop
+                        { remaining = attrs
+                        , original = attrs
+                        , found = []
+                        }
+                        attributeList
+                    )
+
+
+{-| reorder a list to be in the original order
+-}
+reorder original current =
+    let
+        findIndex name exp =
+            List.foldl
+                (\expectation result ->
+                    case result of
+                        Err i ->
+                            case expectation of
+                                ExpectAttrString expName ->
+                                    if expName == name then
+                                        Ok i
+
+                                    else
+                                        Err (i + 1)
+
+                        Ok i ->
+                            Ok i
+                )
+                (Err 0)
+                exp
+                |> (\result ->
+                        case result of
+                            Err i ->
+                                i
+
+                            Ok i ->
+                                i
+                   )
+    in
+    List.sortBy
+        (\attr ->
+            case attr of
+                AttrString details ->
+                    findIndex details.name original
+        )
+        current
 
 
 {-| Parse a set of attributes.
@@ -968,12 +1015,24 @@ They can be parsed in any order.
 
 -}
 attributeList :
-    ( List AttrExpectation, List InlineAttribute )
-    -> Parser Context Problem (Parser.Step ( List AttrExpectation, List InlineAttribute ) (Result (List Problem) (List InlineAttribute)))
-attributeList ( attrExpectations, found ) =
-    case attrExpectations of
+    { remaining : List AttrExpectation
+    , original : List AttrExpectation
+    , found : List InlineAttribute
+    }
+    ->
+        Parser Context
+            Problem
+            (Parser.Step
+                { remaining : List AttrExpectation
+                , original : List AttrExpectation
+                , found : List InlineAttribute
+                }
+                (Result (List Problem) (List InlineAttribute))
+            )
+attributeList cursor =
+    case cursor.remaining of
         [] ->
-            Parser.succeed (Parser.Done (Ok (List.reverse found)))
+            Parser.succeed (Parser.Done (Ok (reorder cursor.original cursor.found)))
 
         _ ->
             let
@@ -981,12 +1040,13 @@ attributeList ( attrExpectations, found ) =
                     Parser.succeed
                         (\attr ->
                             Parser.Loop
-                                ( removeByIndex i attrExpectations
-                                , attr :: found
-                                )
+                                { remaining = removeByIndex i cursor.remaining
+                                , original = cursor.original
+                                , found = attr :: cursor.found
+                                }
                         )
                         |= attribute expectation
-                        |. (if List.length attrExpectations > 1 then
+                        |. (if List.length cursor.remaining > 1 then
                                 Parser.succeed ()
                                     |. Parser.chompIf (\c -> c == ',') (Expecting ",")
                                     |. Parser.chompWhile (\c -> c == ' ')
@@ -996,7 +1056,7 @@ attributeList ( attrExpectations, found ) =
                            )
             in
             Parser.oneOf
-                (List.indexedMap parseAttr attrExpectations
+                (List.indexedMap parseAttr cursor.remaining
                     -- TODO: ADD MISSING ATTRIBUTES HERE!!
                     ++ [ Parser.map (always (Parser.Done (Err []))) parseTillEnd ]
                 )

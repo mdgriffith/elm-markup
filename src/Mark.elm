@@ -2130,7 +2130,10 @@ convertTextDescription options comp cursor =
             case maybeMatched of
                 Just matchedInline ->
                     mergeWith (++)
-                        (matchedInline.converter (List.map textToText details.text) details.attributes)
+                        (matchedInline.converter
+                            (List.map textToText details.text)
+                            details.attributes
+                        )
                         cursor
 
                 Nothing ->
@@ -2151,7 +2154,11 @@ convertTextDescription options comp cursor =
                 matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
                     case maybeFound of
                         Nothing ->
-                            if isVerbatim inline && noInlineAttributes inlineDetails.expect && name == Nothing then
+                            if
+                                isVerbatim inline
+                                    && noInlineAttributes inlineDetails.expect
+                                    && (name == Nothing)
+                            then
                                 Just inlineDetails
 
                             else if isVerbatim inline && name == Just inlineDetails.name then
@@ -2172,7 +2179,10 @@ convertTextDescription options comp cursor =
             case maybeMatched of
                 Just matchedInline ->
                     mergeWith (++)
-                        (matchedInline.converter [ textToText details.text ] details.attributes)
+                        (matchedInline.converter
+                            [ textToText details.text ]
+                            details.attributes
+                        )
                         cursor
 
                 Nothing ->
