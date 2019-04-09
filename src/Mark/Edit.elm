@@ -2038,11 +2038,8 @@ oneOf view blocks =
 
                     blockParser =
                         Parser.succeed identity
-                            |. Parser.token (Parser.Token "|" Error.BlockStart)
-                            |. Parser.oneOf
-                                [ Parser.chompIf (\c -> c == ' ') Error.Space
-                                , Parser.succeed ()
-                                ]
+                            |. Parser.token (Parser.Token "|>" Error.BlockStart)
+                            |. Parser.chompWhile (\c -> c == ' ')
                             |= Parser.oneOf
                                 (List.reverse children.childBlocks
                                     ++ [ Parser.getIndent

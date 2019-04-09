@@ -292,7 +292,7 @@ renderIndex stack i (Mark.Tree node) =
 
 
 simpleNestedOrderedDoc =
-    """| Nested
+    """|> Nested
     - 1
         2
     - 3
@@ -303,7 +303,7 @@ simpleNestedOrderedDoc =
 
 
 complexNestedOrderedDoc =
-    """| Nested
+    """|> Nested
     - 1
         2
     - 3
@@ -317,7 +317,7 @@ complexNestedOrderedDoc =
 
 
 simpleNestedDoc =
-    """| Nested
+    """|> Nested
     - *
     - *
     - *
@@ -325,7 +325,7 @@ simpleNestedDoc =
 
 
 complexNestedDoc =
-    """| Nested
+    """|> Nested
     - *
         - *
         - *
@@ -339,7 +339,7 @@ complexNestedDoc =
 
 
 dedentingNestedDoc =
-    """| Nested
+    """|> Nested
     - *
         - *
         - *
@@ -570,7 +570,7 @@ suite =
             [ test "Correctly parse code block" <|
                 \_ ->
                     Expect.equal
-                        (toResult codeDoc """| Monospace
+                        (toResult codeDoc """|> Monospace
     Here is my first line.
     Here is my second.
     Here is my third.
@@ -581,7 +581,7 @@ suite =
             , test "Parse code block and then normal text" <|
                 \_ ->
                     Expect.equal
-                        (toResult codeAndTextDoc """| Monospace
+                        (toResult codeAndTextDoc """|> Monospace
     Here is my first line.
     Here is my second.
     Here is my third.
@@ -658,7 +658,7 @@ Then some text.
                 \_ ->
                     let
                         doc1 =
-                            """| Turst
+                            """|> Turst
     Here's some text content
                         """
                     in
@@ -668,7 +668,7 @@ Then some text.
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     Here's my extra line
 """
 
@@ -681,7 +681,7 @@ Then some text.
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     Here's my extra line
     And some additional stuff.
 """
@@ -695,7 +695,7 @@ Then some text.
                 \_ ->
                     let
                         doc1 =
-                            """| Monospace
+                            """|> Monospace
     Here's my extra line
 """
                     in
@@ -705,7 +705,7 @@ Then some text.
                 \_ ->
                     let
                         doc1 =
-                            """| Monospace
+                            """|> Monospace
     Here's my extra line
 """
                     in
@@ -715,7 +715,7 @@ Then some text.
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
   Only two spaces(should be four)
 
 """
@@ -726,7 +726,7 @@ Then some text.
                 \_ ->
                     let
                         doc1 =
-                            """| Meta
+                            """|> Meta
     one = Test data
     two = other data
 
@@ -758,7 +758,7 @@ Each with their own /styling/.
                     let
                         doc1 =
                             """
-| Meta
+|> Meta
     one = Test data
     two = other data
 
@@ -775,7 +775,7 @@ Each with their own /styling/.
                     let
                         doc1 =
                             """
-| Test
+|> Test
     one = Test data
     two = other data
     three = other test data
@@ -786,13 +786,13 @@ paragraphs.
 
 Each with their own /styling/.
 
-| Section
+|> Section
 
     Then we have embedded stuff
 
     and we can add other blocks like
 
-    | Embedded
+    |> Embedded
         This is embedded
 
     and others
@@ -856,7 +856,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
     two = world
 """
@@ -870,7 +870,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
     two = world
     three = !
@@ -883,7 +883,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
     two = world
     three = !
@@ -895,7 +895,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
     two = world
     three =
@@ -908,7 +908,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
     two = world
     three = Here is a bunch of text
@@ -927,7 +927,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
     two = world
     three =
@@ -951,7 +951,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
   one = hello
   two = world
                         """
@@ -962,7 +962,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
   two = world
                         """
@@ -973,7 +973,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
     two = world
     three = Yo
@@ -994,14 +994,14 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = hello
     two = world
     three = !
                         """
 
                         doc2 =
-                            """| Test
+                            """|> Test
     two = world
     one = hello
     three = !
@@ -1030,7 +1030,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = 15.25
     two = -1.0
     three = 2
@@ -1042,7 +1042,7 @@ Finally, a sentence
                 \_ ->
                     let
                         doc1 =
-                            """| Test
+                            """|> Test
     one = 15
     two = -1
     three = 2

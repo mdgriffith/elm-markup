@@ -339,8 +339,8 @@ getParser seed fromBlock =
             in
             ( newSeed
             , Parser.succeed identity
-                |. Parser.token (Parser.Token "|" (Error.ExpectingBlockName name))
-                |. Parser.chompIf (\c -> c == ' ') Error.Space
+                |. Parser.token (Parser.Token "|>" (Error.ExpectingBlockName name))
+                |. Parser.chompWhile (\c -> c == ' ')
                 |= blockParser
             )
 
@@ -1176,14 +1176,14 @@ writeDescription description cursor =
 
         DescribeBlock details ->
             cursor
-                |> write ("| " ++ details.name)
+                |> write ("|> " ++ details.name)
                 |> indent
                 |> writeFound writeDescription details.found
                 |> dedent
 
         DescribeStub name found ->
             cursor
-                |> write "|"
+                |> write "|> "
                 |> writeFound (writeWith identity) found
 
         Record details ->
@@ -1194,7 +1194,7 @@ writeDescription description cursor =
                             -- TODO: This seems to be necessary for the recordOfRecord test, but
                             -- makes things parsed normally fail...sooo
                             -- |> writeIndent
-                            |> write ("| " ++ details.name)
+                            |> write ("|> " ++ details.name)
                             |> indent
                             |> (\c ->
                                     List.foldr writeField c fields

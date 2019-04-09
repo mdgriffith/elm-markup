@@ -76,14 +76,14 @@ recordOfRecord =
 
 
 recordOfRecordString =
-    """| Record
+    """|> Record
     record =
-        | Record
+        |> Record
             value = 5"""
 
 
 recordString =
-    """| Circle
+    """|> Circle
     x = 5
     y = 5
     radius = 5
@@ -91,7 +91,7 @@ recordString =
 
 
 indentedRecordString =
-    """| Circle
+    """|> Circle
         x = 5
         y = 5
         radius = 5
@@ -171,7 +171,7 @@ suite =
                         (Description.descriptionToString
                             (manyIndentedHellos ())
                         )
-                        """| Indented
+                        """|> Indented
     hello
     hello
     hello"""
@@ -248,7 +248,7 @@ edits =
                             )
                 in
                 Expect.equal (Description.toString new)
-                    """| Indented
+                    """|> Indented
     hello
     hello
     world

@@ -1129,11 +1129,8 @@ makeBlocksParser blocks seed =
                 )
                 (Parse.withRange
                     (Parser.succeed identity
-                        |. Parser.token (Parser.Token "|" BlockStart)
-                        |. Parser.oneOf
-                            [ Parser.chompIf (\c -> c == ' ') Space
-                            , Parser.succeed ()
-                            ]
+                        |. Parser.token (Parser.Token "|>" BlockStart)
+                        |. Parser.chompWhile (\c -> c == ' ')
                         |= Parser.oneOf
                             (List.reverse children.childBlocks
                                 ++ [ Parse.withIndent
