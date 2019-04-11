@@ -116,39 +116,38 @@ type Uncertain data
     | Recovered ( Error.UnexpectedDetails, List Error.UnexpectedDetails ) data
 
 
-{-| -}
-type
-    Block data
-    {-
-        A `Block data` is just a parser that results in `data`.
+{-|
 
-       You'll be building up your `Document` in terms of the `Blocks`.
+    A `Block data` is just a parser that results in `data`.
 
-       A block starts with `|` and has a name(already built into the parser)
+You'll be building up your `Document` in terms of the `Blocks`.
 
-       A value is just a raw parser.
+A block starts with `|` and has a name(already built into the parser)
 
-       --- Error Propagation
+A value is just a raw parser.
 
-        Failure
-            -> The document has had a mismatch
-            -> This can only be recovered by `oneOf` or `manyOf`
-        Almost
-            -> An `Error` has been "raised".  It's propogated until it's resolved by `onError`
-            ->
+--- Error Propagation
 
-        Success
-            -> Well, this is the easy one.
+    Failure
+        -> The document has had a mismatch
+        -> This can only be recovered by `oneOf` or `manyOf`
+    Almost
+        -> An `Error` has been "raised".  It's propogated until it's resolved by `onError`
+        ->
 
-        Ids are only available on the element they apply to.
+    Success
+        -> Well, this is the easy one.
 
-        Recovery is done at the level above the errored block.
+    Ids are only available on the element they apply to.
 
-        So, if there is a record with a string that is constrained
+    Recovery is done at the level above the errored block.
 
-        If the constraint fails, the record can say "Here's the reset"
+    So, if there is a record with a string that is constrained
 
-    -}
+    If the constraint fails, the record can say "Here's the reset"
+
+-}
+type Block data
     = Block
         String
         { converter : Description -> Outcome Error.AstError (Uncertain data) data

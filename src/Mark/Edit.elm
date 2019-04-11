@@ -1,9 +1,8 @@
 module Mark.Edit exposing
-    ( bool, int, float, string, multiline
-    , oneOf
+    ( bool, int, float, string, multiline, oneOf
     , update
-    , Edit, updateInt, updateString, replaceWith, delete, insertAt, updateFloat, move
-    , setInt, setString, setFloat, setBool, setField, withinBlock
+    , Edit, updateInt, updateFloat, updateString
+    , replace, delete, insertAt, move
     )
 
 {-|
@@ -11,21 +10,16 @@ module Mark.Edit exposing
 
 # Editable Blocks
 
-@docs bool, int, float, string, multiline
-
-@docs oneOf
+@docs bool, int, float, string, multiline, oneOf
 
 
 # Making Edits
 
 @docs update
 
-@docs Edit, updateInt, updateString, replaceWith, delete, insertAt, updateFloat, move
+@docs Edit, updateInt, updateFloat, updateString
 
-
-# Creating Values
-
-@docs setInt, setString, setFloat, setBool, setField, withinBlock
+@docs replace, delete, insertAt, move
 
 -}
 
@@ -91,8 +85,8 @@ updateString =
 
 
 {-| -}
-replaceWith : Choice (Id Options) Expectation -> Edit
-replaceWith =
+replace : Choice (Id Options) Expectation -> Edit
+replace =
     ReplaceOneOf
 
 
@@ -1495,212 +1489,6 @@ getWithinNested offset (Nested nest) =
             getContainingDescriptions item offset
         )
         nest.content
-
-
-
---- Setting Expectations
--- type Expectation
---     = ExpectBlock String Expectation
---     | ExpectStub String
---     | ExpectRecord String (List ( String, Expectation ))
---     | ExpectOneOf (List Expectation)
---     | ExpectManyOf (List Expectation)
---     | ExpectStartsWith Expectation Expectation
---     | ExpectBoolean Bool
---     | ExpectInteger Int
---     | ExpectFloat Float
---     | ExpectFloatBetween
---         { min : Float
---         , max : Float
---         , default : Float
---         }
---     | ExpectIntBetween
---         { min : Int
---         , max : Int
---         , default : Int
---         }
---     | ExpectText (List InlineExpectation)
---     | ExpectString String
---     | ExpectMultiline String
---     | ExpectStringExactly String
---     | ExpectDate Time.Posix
---     | ExpectTree Expectation Expectation
-{-
-   General Use of Setters.
-
-
-   makeCircle default =
-       startingWith default
-           |> setField "label" (setString "Heres my circle!")
-           |> setField "x" (setInt 10)
-
-
-
--}
-
-
-type ExpError
-    = ExpError
-
-
-{-| -}
-startingWith : Expectation -> Result ExpError Expectation
-startingWith exp =
-    Ok exp
-
-
-{-| -}
-withinBlock :
-    (Result ExpError Expectation -> Result ExpError Expectation)
-    -> Result ExpError Expectation
-    -> Result ExpError Expectation
-withinBlock setter resExp =
-    resExp
-
-
-{-| -}
-setInt : Int -> Result ExpError Expectation -> Result ExpError Expectation
-setInt i resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectInteger _ ->
-                    Ok (ExpectInteger i)
-
-                ExpectIntBetween details ->
-                    if i >= details.min && i <= details.max then
-                        Ok (ExpectIntBetween { details | default = i })
-
-                    else
-                        Err ExpError
-
-                _ ->
-                    Err ExpError
-
-
-{-| -}
-setString : String -> Result ExpError Expectation -> Result ExpError Expectation
-setString str resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectString _ ->
-                    Ok (ExpectString str)
-
-                ExpectMultiline _ ->
-                    Ok (ExpectMultiline str)
-
-                _ ->
-                    Err ExpError
-
-
-{-| -}
-setFloat : Float -> Result ExpError Expectation -> Result ExpError Expectation
-setFloat f resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectFloat _ ->
-                    Ok (ExpectFloat f)
-
-                ExpectFloatBetween details ->
-                    if f >= details.min && f <= details.max then
-                        Ok (ExpectFloatBetween { details | default = f })
-
-                    else
-                        Err ExpError
-
-                _ ->
-                    Err ExpError
-
-
-{-| -}
-setBool : Bool -> Result ExpError Expectation -> Result ExpError Expectation
-setBool b resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectBoolean _ ->
-                    Ok (ExpectBoolean b)
-
-                _ ->
-                    Err ExpError
-
-
-setField :
-    String
-    -> (Result ExpError Expectation -> Result ExpError Expectation)
-    -> Result ExpError Expectation
-    -> Result ExpError Expectation
-setField fieldName fieldSetter resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectRecord recordName fields ->
-                    case List.foldl (setRecordField fieldName fieldSetter) (NotYet []) fields of
-                        Failed err ->
-                            Err err
-
-                        NotYet _ ->
-                            Err ExpError
-
-                        UpdateMade updatedFields ->
-                            Ok
-                                (ExpectRecord recordName (List.reverse updatedFields))
-
-                _ ->
-                    Err ExpError
-
-
-type Updated x
-    = UpdateMade x
-    | NotYet x
-    | Failed ExpError
-
-
-setRecordField :
-    String
-    ->
-        (Result ExpError Expectation
-         -> Result ExpError Expectation
-        )
-    -> ( String, Expectation )
-    -> Updated (List ( String, Expectation ))
-    -> Updated (List ( String, Expectation ))
-setRecordField targetFieldName fieldSetter ( fieldName, fieldExp ) gathered =
-    case gathered of
-        Failed x ->
-            gathered
-
-        UpdateMade fields ->
-            UpdateMade (( fieldName, fieldExp ) :: fields)
-
-        NotYet fields ->
-            if fieldName == targetFieldName then
-                case fieldSetter (Ok fieldExp) of
-                    Err err ->
-                        Failed err
-
-                    Ok updated ->
-                        UpdateMade (( fieldName, updated ) :: fields)
-
-            else
-                NotYet (( fieldName, fieldExp ) :: fields)
 
 
 

@@ -6,7 +6,8 @@
     "version": "2.0.5",
     "exposed-modules": [
         "Mark",
-        "Mark.Edit"
+        "Mark.Edit",
+        "Mark.New"
     ],
     "elm-version": "0.19.0 <= v < 0.20.0",
     "dependencies": {
