@@ -115,7 +115,7 @@ to `Mark.annotation`, which looks like this:
 [some styled text]{link| url = elm-lang.org }
 ```
 
-Again due to readability and this probably feels familiar.
+Again due to readability and this probably feels familiar.  Actually part of me is wondering what I was thinking with that first syntax :sweat_smile:
 
 **Newlines in pargraphs**
 
@@ -164,16 +164,34 @@ type alias CustomError =
 verify : (a -> Result CustomError b) -> Block a -> Block b
 ```
 
+This is pretty cool because you can now make:
+- urls constrained to be valid and pointing at what you want.
+- dates to be at the level of resolution you want.  Do you just want a year?  Year/month?  year/month/time?
+- constrain `int`s and `float`s to a certain range.  Only positive ints?  Floats between 0 and 1?  Only prime numbers?
+- Lists that have length restrictions.
+
+All kinds of stuff!
+
+
 ## Recovering from errors
 
-**More on this once it's finished**
+If a block does have an error in it, previously the parsing of the whole document would fail.  Not so great if you want to make an editor, or a realtime document previewer.
+
+Now you can let the document know how to recover from an error using `onError`:
+
+```elm
+onError : a -> Block a -> Block a
+```
+
+This will render a block with a certain value if it has failed in some way.
+
 
 ## Editing
 
-**More on this once it's finished**
+More on this once it's finished.  Suffice to say you'll be able to send updates to the `Mark.Parsed` data structure.
 
 ## Mark.andThen is removed
 
 It's actually not possible to write because parsing and rendering are now separate.  So, we can't change parsing based on a rendered piece of data because we dont have it yet.
 
-I'm not sure there was a strong usecase for it in the beginning.
+I'm not sure there was a strong usecase for it anyway, I think we just wanted `Mark.verify` instead.
