@@ -81,13 +81,13 @@ errorToRecord : Error -> Details
 
 Blocks moved from 
 
-```
+```elm
 | MyBlock
     with some content
 
 ```
  to
-```
+```elm
 |> MyBlock
     with some content
 
