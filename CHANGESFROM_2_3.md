@@ -95,6 +95,8 @@ Blocks moved from
 
 This makes the block names easier to read in documents, especially with syntax highlighing and ligatures such as in `Fira Code`.
 
+I was finding that in common circumstances the single `|`, especially top-level, was hard to see.
+
 It also kinda works because the arrow gives a visual clue that the content will be indented.
 
 

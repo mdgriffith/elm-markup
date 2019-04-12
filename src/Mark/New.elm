@@ -1,5 +1,5 @@
 module Mark.New exposing
-    ( Block(..), from, field
+    ( Block, from, field
     , bool, float, int, string
     )
 
@@ -26,9 +26,11 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
    makeCircle default =
-       New.from default
-           |> New.field "label" (New.string "Heres my circle!")
-           |> New.field "x" (New.int 10)
+       New.record "Circle"
+           [ ("label", (New.string "Heres my circle!"))
+           , ( "x", (New.int 10))
+           , ( "y", (New.int 10))
+           ]
 
 
 
@@ -36,171 +38,100 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| -}
-type Block
-    = Block
+type alias Block =
+    Expectation
 
 
 {-| -}
-type ExpError
-    = ExpError
+block : String -> Block -> Block
+block =
+    ExpectBlock
 
 
 {-| -}
-from : Expectation -> Result ExpError Expectation
-from exp =
-    Ok exp
+record : String -> List ( String, Block )
+record =
+    ExpectRecord
 
 
 {-| -}
-block :
-    (Result ExpError Expectation -> Result ExpError Expectation)
-    -> Result ExpError Expectation
-    -> Result ExpError Expectation
-block ter resExp =
-    resExp
+int : Int -> Block
+int =
+    ExpectInteger
 
 
 {-| -}
-int : Int -> Result ExpError Expectation -> Result ExpError Expectation
-int i resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectInteger _ ->
-                    Ok (ExpectInteger i)
-
-                ExpectIntBetween details ->
-                    if i >= details.min && i <= details.max then
-                        Ok (ExpectIntBetween { details | default = i })
-
-                    else
-                        Err ExpError
-
-                _ ->
-                    Err ExpError
+string : String -> Block
+string =
+    ExpectString
 
 
 {-| -}
-string : String -> Result ExpError Expectation -> Result ExpError Expectation
-string str resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectString _ ->
-                    Ok (ExpectString str)
-
-                ExpectMultiline _ ->
-                    Ok (ExpectMultiline str)
-
-                _ ->
-                    Err ExpError
+float : Float -> Block
+float =
+    ExpectFloat
 
 
 {-| -}
-float : Float -> Result ExpError Expectation -> Result ExpError Expectation
-float f resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectFloat _ ->
-                    Ok (ExpectFloat f)
-
-                ExpectFloatBetween details ->
-                    if f >= details.min && f <= details.max then
-                        Ok (ExpectFloatBetween { details | default = f })
-
-                    else
-                        Err ExpError
-
-                _ ->
-                    Err ExpError
+bool : Bool -> Block
+bool =
+    ExpectBoolean
 
 
 {-| -}
-bool : Bool -> Result ExpError Expectation -> Result ExpError Expectation
-bool b resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectBoolean _ ->
-                    Ok (ExpectBoolean b)
-
-                _ ->
-                    Err ExpError
+many : List Block -> Block
+many =
+    ExpectManyOf
 
 
 {-| -}
-field :
-    String
-    -> (Result ExpError Expectation -> Result ExpError Expectation)
-    -> Result ExpError Expectation
-    -> Result ExpError Expectation
-field fieldName fieldSetter resExp =
-    case resExp of
-        Err _ ->
-            resExp
-
-        Ok exp ->
-            case exp of
-                ExpectRecord recordName fields ->
-                    case List.foldl (recordField fieldName fieldSetter) (NotYet []) fields of
-                        Failed err ->
-                            Err err
-
-                        NotYet _ ->
-                            Err ExpError
-
-                        UpdateMade updatedFields ->
-                            Ok
-                                (ExpectRecord recordName (List.reverse updatedFields))
-
-                _ ->
-                    Err ExpError
+type alias Text =
+    InlineExpectation
 
 
-type Updated x
-    = UpdateMade x
-    | NotYet x
-    | Failed ExpError
+{-| -}
+text : List Text -> Block
+text =
+    ExpectText
 
 
-recordField :
-    String
-    ->
-        (Result ExpError Expectation
-         -> Result ExpError Expectation
-        )
-    -> ( String, Expectation )
-    -> Updated (List ( String, Expectation ))
-    -> Updated (List ( String, Expectation ))
-recordField targetFieldName fieldSetter ( fieldName, fieldExp ) gathered =
-    case gathered of
-        Failed x ->
-            gathered
+{-| -}
+annotation : Text -> List Attributes -> Text
+annotation =
+    ExpectAnnotation
 
-        UpdateMade fields ->
-            UpdateMade (( fieldName, fieldExp ) :: fields)
 
-        NotYet fields ->
-            if fieldName == targetFieldName then
-                case fieldSetter (Ok fieldExp) of
-                    Err err ->
-                        Failed err
+{-| -}
+token : String -> List Attributes -> Text
+token =
+    ExpectToken
 
-                    Ok updated ->
-                        UpdateMade (( fieldName, updated ) :: fields)
 
-            else
-                NotYet (( fieldName, fieldExp ) :: fields)
+{-| -}
+verbatim : String -> List Attributes -> Text
+verbatim =
+    ExpectVerbatim
+
+
+{-| -}
+styled : Styling -> String -> Text
+styled =
+    Debug.todo "Expectation doesn't support this"
+
+
+{-| -}
+italicized : String -> Text
+italicized =
+    Debug.todo "not yet"
+
+
+{-| -}
+bold : String -> Text
+bold =
+    Debug.todo "nope"
+
+
+{-| -}
+strike : String -> Text
+strike =
+    Debug.todo "nada"
