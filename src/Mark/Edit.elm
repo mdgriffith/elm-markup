@@ -1648,174 +1648,18 @@ unexpectedInOneOf expectations =
             )
 
 
-
--- {-| Many blocks that are all at the same indentation level.
--- -}
--- manyOf :
---     { view :
---         { parent : Id ManyOptions
---         , index : Int
---         , options : List (Choice (Id ManyOptions) Expectation)
---         }
---         -> a
---         -> b
---     , merge :
---         { parent : Id ManyOptions
---         }
---         -> List b
---         -> final
---     }
---     -> List (Block a)
---     -> Block (List final)
--- manyOf manyOfDetails blocks =
---     let
---         expectations =
---             List.map getBlockExpectation blocks
---     in
---     Value
---         { expect = ExpectManyOf expectations
---         , converter =
---             \desc ->
---                 Failure NoMatch
---         -- let
---         --     applyDesc description blck found =
---         --         case found of
---         --             Nothing ->
---         --                 case renderBlock blck description of
---         --                     Failure _ ->
---         --                         found
---         --                     Success rendered ->
---         --                         Just rendered
---         --                     _ ->
---         --                         found
---         --             _ ->
---         --                 found
---         --     -- getRendered : Found Description -> Result AstError (List a) -> Result AstError (List a)
---         --     getRendered id choices found ( existingResult, index ) =
---         --         case existingResult of
---         --             Err err ->
---         --                 ( Err err, index + 1 )
---         --             Ok existing ->
---         --                 case found of
---         --                     Unexpected unexpected ->
---         --                         ( uncertain unexpected
---         --                             (manyOfDetails.error
---         --                                 { parent = id
---         --                                 , options = choices
---         --                                 , index = index
---         --                                 , range = unexpected.range
---         --                                 , problem = unexpected.problem
---         --                                 }
---         --                                 :: existing
---         --                             )
---         --                         , index + 1
---         --                         )
---         --                     Found range child ->
---         --                         case List.foldl (applyDesc child) Nothing blocks of
---         --                             Nothing ->
---         --                                 ( Failure NoMatch, index + 1 )
---         --                             Just (Success result) ->
---         --                                 ( Success
---         --                                     (manyOfDetails.view
---         --                                         { parent = id
---         --                                         , options = choices
---         --                                         , index = index
---         --                                         }
---         --                                         result
---         --                                         :: existing
---         --                                     )
---         --                                 , index + 1
---         --                                 )
---         --                             Just (Almost (Recovered err result)) ->
---         --                                 ( Almost
---         --                                     (Recovered err
---         --                                         (manyOfDetails.view
---         --                                             { parent = id
---         --                                             , options = choices
---         --                                             , index = index
---         --                                             }
---         --                                             result
---         --                                             :: existing
---         --                                         )
---         --                                     )
---         --                                 , index + 1
---         --                                 )
---         --                             Just (Almost (Uncertain err)) ->
---         --                                 ( Almost (Uncertain err)
---         --                                 , index + 1
---         --                                 )
---         --                             Just (Failure err) ->
---         --                                 ( Failure err
---         --                                 , index + 1
---         --                                 )
---         -- in
---         -- case desc of
---         --     ManyOf many ->
---         --         List.foldl (getRendered many.id many.choices) ( Ok [], 0 ) many.children
---         --             |> Tuple.first
---         --             |> Result.map
---         --                 (\items ->
---         --                     Success
---         --                         (manyOfDetails.merge
---         --                             { parent = many.id
---         --                             , options = many.choices
---         --                             }
---         --                             (List.reverse items)
---         --                         )
---         --                 )
---         --     _ ->
---         --         Failure NoMatch
---         , parser =
---             \seed ->
---                 let
---                     ( parentId, newSeed ) =
---                         Id.step seed
---                     ( _, childStart ) =
---                         Id.step newSeed
---                     reseeded =
---                         Id.reseed childStart
---                 in
---                 ( reseeded
---                 , Parser.succeed
---                     (\( range, results ) ->
---                         ManyOf
---                             { choices = List.map (Choice parentId) expectations
---                             , id = parentId
---                             , range = range
---                             , children = List.map resultToFound results
---                             }
---                     )
---                     |= Parse.withRange
---                         (Parser.getIndent
---                             |> Parser.andThen
---                                 (\indentation ->
---                                     Parser.loop
---                                         { parsedSomething = False
---                                         , found = []
---                                         , seed = childStart
---                                         }
---                                         (blocksOrNewlines
---                                             indentation
---                                             blocks
---                                         )
---                                 )
---                         )
---                 )
---         }
-
-
 {-| Many blocks that are all at the same indentation level.
 -}
 manyOf :
-    ({ id : Id Options
+    ({ id : Id ManyOptions
      , range : Range
      }
      -> List a
      -> b
     )
     -> List (Block a)
-    -> Block (List b)
-manyOf blocks =
+    -> Block b
+manyOf view blocks =
     let
         expectations =
             List.map getBlockExpectation blocks
@@ -1847,7 +1691,7 @@ manyOf blocks =
 
                             Found range child ->
                                 ( mergeWith (::)
-                                    (List.foldl (matchBlock child) (Outcome.Failure NoMatch) blocks)
+                                    (List.foldl (matchBlock child) (Outcome.Failure Error.NoMatch) blocks)
                                     existingResult
                                 , index + 1
                                 )
@@ -1856,10 +1700,16 @@ manyOf blocks =
                     ManyOf many ->
                         List.foldl (getRendered many.id many.choices) ( Outcome.Success [], 0 ) many.children
                             |> Tuple.first
-                            |> mapSuccessAndRecovered List.reverse
+                            |> mapSuccessAndRecovered
+                                (view
+                                    { id = many.id
+                                    , range = many.range
+                                    }
+                                    << List.reverse
+                                )
 
                     _ ->
-                        Outcome.Failure NoMatch
+                        Outcome.Failure Error.NoMatch
         , parser =
             \seed ->
                 let

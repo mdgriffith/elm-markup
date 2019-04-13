@@ -730,28 +730,6 @@ blockNameParser name =
         |. Parser.chompIf (\c -> c == '\n') Newline
 
 
-mergeWith fn one two =
-    case ( one, two ) of
-        ( Outcome.Success renderedOne, Outcome.Success renderedTwo ) ->
-            Outcome.Success (fn renderedOne renderedTwo)
-
-        ( Outcome.Almost (Recovered firstErrs fst), Outcome.Almost (Recovered secondErrs snd) ) ->
-            Outcome.Almost
-                (Recovered
-                    (mergeErrors firstErrs secondErrs)
-                    (fn fst snd)
-                )
-
-        ( Outcome.Almost (Uncertain unexpected), _ ) ->
-            Outcome.Almost (Uncertain unexpected)
-
-        ( _, Outcome.Almost (Uncertain unexpected) ) ->
-            Outcome.Almost (Uncertain unexpected)
-
-        _ ->
-            Outcome.Failure NoMatch
-
-
 {-| -}
 startWith :
     (start -> rest -> result)
@@ -2603,18 +2581,6 @@ unexpectedField recordName options =
         )
 
 
-resultToFound result =
-    case result of
-        Ok ( range, desc ) ->
-            Found range desc
-
-        Err ( range, prob ) ->
-            Unexpected
-                { range = range
-                , problem = prob
-                }
-
-
 renderRecordResult pos result =
     case result of
         Ok parsedCorrectly ->
@@ -3033,10 +2999,6 @@ reduceRender fn list =
             )
             (Outcome.Success [])
         |> Outcome.mapSuccess List.reverse
-
-
-mergeErrors ( h1, r1 ) ( h2, r2 ) =
-    ( h1, r1 ++ h2 :: r2 )
 
 
 {-| -}

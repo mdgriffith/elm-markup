@@ -3,13 +3,14 @@ module Mark.Internal.Description exposing
     , Found(..), Nested(..), Icon(..)
     , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), AttrExpectation(..), TreeExpectation(..)
-    , Parsed(..), startingPoint, descriptionToString, toString
+    , Parsed(..), startingPoint, descriptionToString, toString, mergeWith
     , create
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
     , Block(..), Document(..)
     , boldStyle, italicStyle, strikeStyle
+    , resultToFound
     )
 
 {-|
@@ -22,7 +23,7 @@ module Mark.Internal.Description exposing
 
 @docs Expectation, InlineExpectation, AttrExpectation, TreeExpectation
 
-@docs Parsed, startingPoint, descriptionToString, toString
+@docs Parsed, startingPoint, descriptionToString, toString, mergeWith
 
 @docs create
 
@@ -35,6 +36,8 @@ module Mark.Internal.Description exposing
 @docs Block, Document
 
 @docs boldStyle, italicStyle, strikeStyle
+
+@docs resultToFound
 
 -}
 
@@ -2010,3 +2013,41 @@ humanReadableExpectations expect =
             "A tree starting of "
                 ++ humanReadableExpectations content
                 ++ " content"
+
+
+mergeWith fn one two =
+    case ( one, two ) of
+        ( Success renderedOne, Success renderedTwo ) ->
+            Success (fn renderedOne renderedTwo)
+
+        ( Almost (Recovered firstErrs fst), Almost (Recovered secondErrs snd) ) ->
+            Almost
+                (Recovered
+                    (mergeErrors firstErrs secondErrs)
+                    (fn fst snd)
+                )
+
+        ( Almost (Uncertain unexpected), _ ) ->
+            Almost (Uncertain unexpected)
+
+        ( _, Almost (Uncertain unexpected) ) ->
+            Almost (Uncertain unexpected)
+
+        _ ->
+            Failure Error.NoMatch
+
+
+mergeErrors ( h1, r1 ) ( h2, r2 ) =
+    ( h1, r1 ++ h2 :: r2 )
+
+
+resultToFound result =
+    case result of
+        Ok ( range, desc ) ->
+            Found range desc
+
+        Err ( range, prob ) ->
+            Unexpected
+                { range = range
+                , problem = prob
+                }
