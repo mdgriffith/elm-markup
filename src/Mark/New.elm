@@ -101,7 +101,7 @@ type alias Text =
 {-| -}
 text : List Text -> Block
 text =
-    ExpectText
+    ExpectTextBlock
 
 
 {-| -}
@@ -110,9 +110,18 @@ type alias Attribute =
 
 
 {-| -}
-annotation : Text -> List Attribute -> Text
-annotation =
-    Debug.todo "ugh"
+annotation : List Text -> String -> List Attribute -> Text
+annotation content name attrs =
+    ExpectAnnotation name attrs (List.filterMap onlyText content)
+
+
+onlyText txt =
+    case txt of
+        ExpectText t ->
+            Just t
+
+        _ ->
+            Nothing
 
 
 {-| -}
@@ -122,36 +131,42 @@ token =
 
 
 {-| -}
-verbatim : String -> List Attribute -> Text
+verbatim : String -> Text
 verbatim =
-    ExpectVerbatim
+    ExpectVerbatim "" []
+
+
+{-| -}
+verbatimWith : String -> String -> List Attribute -> Text
+verbatimWith content name attributes =
+    ExpectVerbatim name attributes content
 
 
 {-| -}
 styled : Styling -> String -> Text
-styled =
-    Debug.todo "Expectation doesn't support this"
+styled styling str =
+    ExpectText (Text styling str)
 
 
 {-| -}
 italicized : String -> Text
-italicized =
-    Debug.todo "not yet"
+italicized str =
+    ExpectText (Text italicStyle str)
 
 
 {-| -}
 bold : String -> Text
-bold =
-    Debug.todo "nope"
+bold str =
+    ExpectText (Text boldStyle str)
 
 
 {-| -}
 strike : String -> Text
-strike =
-    Debug.todo "nada"
+strike str =
+    ExpectText (Text strikeStyle str)
 
 
 {-| -}
 unstyled : String -> Text
-unstyled =
-    Debug.todo "nope"
+unstyled str =
+    ExpectText (Text emptyStyles str)

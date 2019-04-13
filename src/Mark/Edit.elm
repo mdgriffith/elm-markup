@@ -256,7 +256,7 @@ match description exp =
 
         DescribeText _ ->
             case exp of
-                ExpectText _ ->
+                ExpectTextBlock _ ->
                     True
 
                 _ ->
@@ -312,7 +312,7 @@ matchExpected subExp expected =
         ( ExpectFloat _, ExpectFloat _ ) ->
             True
 
-        ( ExpectText oneInline, ExpectText twoInline ) ->
+        ( ExpectTextBlock oneInline, ExpectTextBlock twoInline ) ->
             True
 
         ( ExpectString _, ExpectString _ ) ->

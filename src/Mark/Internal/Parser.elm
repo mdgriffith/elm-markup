@@ -1546,50 +1546,62 @@ parseTillEnd =
 
 onlyTokens inline =
     case inline of
-        ExpectAnnotation name attrs ->
+        ExpectAnnotation name attrs _ ->
             Nothing
 
         ExpectToken name attrs ->
             Just ( name, attrs )
 
-        ExpectVerbatim name _ ->
+        ExpectVerbatim name _ _ ->
+            Nothing
+
+        ExpectText _ ->
             Nothing
 
 
 onlyAnnotations inline =
     case inline of
-        ExpectAnnotation name attrs ->
+        ExpectAnnotation name attrs _ ->
             Just ( name, attrs )
 
         ExpectToken name attrs ->
             Nothing
 
-        ExpectVerbatim name _ ->
+        ExpectVerbatim name _ _ ->
+            Nothing
+
+        ExpectText _ ->
             Nothing
 
 
 onlyVerbatim inline =
     case inline of
-        ExpectAnnotation name attrs ->
+        ExpectAnnotation name attrs _ ->
             Nothing
 
         ExpectToken name attrs ->
             Nothing
 
-        ExpectVerbatim name attrs ->
+        ExpectVerbatim name attrs _ ->
             Just ( name, attrs )
+
+        ExpectText _ ->
+            Nothing
 
 
 getInlineName inline =
     case inline of
-        ExpectAnnotation name attrs ->
+        ExpectAnnotation name attrs _ ->
             name
 
         ExpectToken name attrs ->
             name
 
-        ExpectVerbatim name _ ->
+        ExpectVerbatim name _ _ ->
             name
+
+        ExpectText _ ->
+            ""
 
 
 removeByIndex index list =

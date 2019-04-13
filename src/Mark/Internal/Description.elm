@@ -9,6 +9,7 @@ module Mark.Internal.Description exposing
     , inlineExample, blockName, uncertain, humanReadableExpectations
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
     , Block(..), Document(..)
+    , boldStyle, italicStyle, strikeStyle
     )
 
 {-|
@@ -32,6 +33,8 @@ module Mark.Internal.Description exposing
 @docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
 
 @docs Block, Document
+
+@docs boldStyle, italicStyle, strikeStyle
 
 -}
 
@@ -247,6 +250,19 @@ type TextDescription
     | UnexpectedInline Error.UnexpectedDetails
 
 
+{-| A text fragment with some styling.
+-}
+type Text
+    = Text Styling String
+
+
+type alias Styling =
+    { bold : Bool
+    , italic : Bool
+    , strike : Bool
+    }
+
+
 {-| -}
 type InlineAttribute
     = AttrString
@@ -257,6 +273,66 @@ type InlineAttribute
 
 
 
+{- EXPECTATIONS -}
+
+
+{-| -}
+type Style
+    = Bold
+    | Italic
+    | Strike
+
+
+{-| -}
+type Expectation
+    = ExpectBlock String Expectation
+    | ExpectRecord String (List ( String, Expectation ))
+    | ExpectOneOf (List Expectation)
+    | ExpectManyOf (List Expectation)
+    | ExpectStartsWith Expectation Expectation
+    | ExpectBoolean Bool
+    | ExpectInteger Int
+    | ExpectFloat Float
+    | ExpectTextBlock (List InlineExpectation)
+    | ExpectString String
+    | ExpectMultiline String
+    | ExpectTree Expectation
+    | ExpectNothing
+
+
+{-| -}
+type InlineExpectation
+    = ExpectText Text
+    | ExpectAnnotation String (List AttrExpectation) (List Text)
+      -- tokens have no placeholder
+    | ExpectToken String (List AttrExpectation)
+      -- name, attrs, placeholder content
+    | ExpectVerbatim String (List AttrExpectation) String
+
+
+noInlineAttributes expect =
+    case expect of
+        ExpectAnnotation _ attrs _ ->
+            List.isEmpty attrs
+
+        ExpectToken _ attrs ->
+            List.isEmpty attrs
+
+        ExpectVerbatim _ attrs _ ->
+            List.isEmpty attrs
+
+        ExpectText _ ->
+            True
+
+
+{-| -}
+type AttrExpectation
+    = ExpectAttrString String
+
+
+
+-- | ExpectAttr
+-- | ExpectInlineText
 -- | DescribeInlineText Range (List Text)
 
 
@@ -348,26 +424,6 @@ getParserNoBar seed fromBlock =
             parser seed
 
 
-{-| -}
-type Style
-    = Bold
-    | Italic
-    | Strike
-
-
-{-| A text fragment with some styling.
--}
-type Text
-    = Text Styling String
-
-
-type alias Styling =
-    { bold : Bool
-    , italic : Bool
-    , strike : Bool
-    }
-
-
 emptyStyles =
     { bold = False
     , italic = False
@@ -375,50 +431,25 @@ emptyStyles =
     }
 
 
-{-| -}
-type Expectation
-    = ExpectBlock String Expectation
-    | ExpectRecord String (List ( String, Expectation ))
-    | ExpectOneOf (List Expectation)
-    | ExpectManyOf (List Expectation)
-    | ExpectStartsWith Expectation Expectation
-    | ExpectBoolean Bool
-    | ExpectInteger Int
-    | ExpectFloat Float
-    | ExpectText (List InlineExpectation)
-    | ExpectString String
-    | ExpectMultiline String
-    | ExpectTree Expectation
-    | ExpectNothing
+boldStyle =
+    { bold = True
+    , italic = False
+    , strike = False
+    }
 
 
-{-| -}
-type InlineExpectation
-    = ExpectAnnotation String (List AttrExpectation)
-    | ExpectToken String (List AttrExpectation)
-    | ExpectVerbatim String (List AttrExpectation)
+italicStyle =
+    { bold = False
+    , italic = True
+    , strike = False
+    }
 
 
-noInlineAttributes expect =
-    case expect of
-        ExpectAnnotation _ attrs ->
-            List.isEmpty attrs
-
-        ExpectToken _ attrs ->
-            List.isEmpty attrs
-
-        ExpectVerbatim _ attrs ->
-            List.isEmpty attrs
-
-
-{-| -}
-type AttrExpectation
-    = ExpectAttrString String
-
-
-
--- | ExpectAttr
--- | ExpectInlineText
+strikeStyle =
+    { bold = False
+    , italic = False
+    , strike = True
+    }
 
 
 inlineExample : InlineExpectation -> String
@@ -435,7 +466,10 @@ inlineExample inline =
                     name ++ " = A String"
     in
     case inline of
-        ExpectAnnotation name attrs ->
+        ExpectText text ->
+            ""
+
+        ExpectAnnotation name attrs placeholder ->
             if List.isEmpty attrs then
                 "[some styled text]{" ++ name ++ "}"
 
@@ -449,7 +483,7 @@ inlineExample inline =
             else
                 "{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
 
-        ExpectVerbatim name attrs ->
+        ExpectVerbatim name attrs placeholder ->
             if List.isEmpty attrs then
                 "`some styled text`"
 
@@ -529,7 +563,7 @@ match description exp =
 
         DescribeText _ ->
             case exp of
-                ExpectText _ ->
+                ExpectTextBlock _ ->
                     True
 
                 _ ->
@@ -582,7 +616,7 @@ matchExpected subExp expected =
         ( ExpectFloat _, ExpectFloat _ ) ->
             True
 
-        ( ExpectText oneInline, ExpectText twoInline ) ->
+        ( ExpectTextBlock oneInline, ExpectTextBlock twoInline ) ->
             True
 
         ( ExpectString _, ExpectString _ ) ->
@@ -1928,7 +1962,7 @@ humanReadableExpectations expect =
         ExpectFloat _ ->
             "A Float"
 
-        ExpectText inlines ->
+        ExpectTextBlock inlines ->
             "Styled Text"
 
         ExpectString _ ->

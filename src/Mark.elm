@@ -634,41 +634,6 @@ mapFound fn found =
             Unexpected unexp
 
 
-
--- {-| -}
--- stub : String -> (Range -> result) -> Block result
--- stub name renderer =
---     Block name
---         { expect = ExpectStub name
---         , converter =
---             \desc ->
---                 case desc of
---                     DescribeStub actualBlockName found ->
---                         if actualBlockName == name then
---                             case found of
---                                 Found range _ ->
---                                     Ok (Found range (renderer range))
---                                 Unexpected unexpected ->
---                                     Outcome.Almost unexpected
---                         else
---                             Outcome.Failure NoMatch
---                     _ ->
---                         Outcome.Failure NoMatch
---         , parser =
---             skipSeed <|
---                 Parser.map
---                     (\( range, _ ) ->
---                         DescribeStub name (Found range name)
---                     )
---                     (Parse.withRange
---                         (Parser.succeed ()
---                             |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
---                             |. Parser.chompWhile (\c -> c == ' ')
---                         )
---                     )
---         }
-
-
 skipSeed parser seed =
     ( seed, parser )
 
@@ -1934,7 +1899,7 @@ text :
     -> Block (List rendered)
 text view =
     Value
-        { expect = ExpectText []
+        { expect = ExpectTextBlock []
         , converter =
             renderText
                 { view = view
@@ -1962,14 +1927,16 @@ text view =
 
 
 {-| Handling formatted text is a little more involved than may be initially apparent.
+
 Text styling can be overlapped such as
-/My italicized sentence can have _bold_/
+
+    /My italicized sentence can have *bold* words./
+
 In order to render this, the above sentence is chopped up into `Text` fragments that can have multiple styles active.
 
   - `view` is the function to render an individual fragment.
-  - `inlines` are custom inline blocks. These are how links are implemented in `Mark.Default`!
+  - `inlines` are custom inline blocks.
   - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
-    **Note** check out `Mark.Default.text` to see an example.
 
 -}
 textWith :
@@ -1979,8 +1946,12 @@ textWith :
     }
     -> Block (List rendered)
 textWith options =
+    let
+        inlineExpectations =
+            List.map getInlineExpectation options.inlines
+    in
     Value
-        { expect = ExpectText (List.map getInlineExpectation options.inlines)
+        { expect = ExpectTextBlock inlineExpectations
         , converter = renderText options
         , parser =
             \seed ->
@@ -1990,7 +1961,7 @@ textWith options =
                     |> Parser.andThen
                         (\pos ->
                             Parse.styledText
-                                { inlines = List.map getInlineExpectation options.inlines
+                                { inlines = inlineExpectations
                                 , replacements = options.replacements
                                 }
                                 seed
@@ -2222,7 +2193,7 @@ isToken (Inline inline) =
 isVerbatim : Inline data -> Bool
 isVerbatim (Inline inline) =
     case inline.expect of
-        ExpectVerbatim _ _ ->
+        ExpectVerbatim _ _ _ ->
             True
 
         _ ->
@@ -2250,7 +2221,7 @@ annotation name result =
             \textPieces attrs ->
                 Outcome.Success [ result textPieces ]
         , expect =
-            ExpectAnnotation name []
+            ExpectAnnotation name [] []
         , name = name
         }
 
@@ -2269,7 +2240,7 @@ verbatim name result =
                     fst :: _ ->
                         Outcome.Success [ result fst ]
         , expect =
-            ExpectVerbatim name []
+            ExpectVerbatim name [] "placeholder"
         , name = name
         }
 
@@ -2294,11 +2265,15 @@ attrString name newInline =
                         ExpectToken tokenName attrs ->
                             ExpectToken tokenName (ExpectAttrString name :: attrs)
 
-                        ExpectAnnotation noteName attrs ->
-                            ExpectAnnotation noteName (ExpectAttrString name :: attrs)
+                        ExpectAnnotation noteName attrs placeholder ->
+                            ExpectAnnotation noteName (ExpectAttrString name :: attrs) placeholder
 
-                        ExpectVerbatim verbatimName attrs ->
-                            ExpectVerbatim verbatimName (ExpectAttrString name :: attrs)
+                        ExpectVerbatim verbatimName attrs placeholder ->
+                            ExpectVerbatim verbatimName (ExpectAttrString name :: attrs) placeholder
+
+                        -- This shouldn't happen
+                        ExpectText x ->
+                            ExpectText x
                 , name = details.name
                 }
 
@@ -3545,16 +3520,6 @@ addToLevel index brandNewItem (Nested parent) =
                             addToLevel (index - 1) withNewIndex top
                                 :: remain
                     }
-
-
-
---
--- case levels of
---     [] ->
---         [ brandNewItem ]
---     lvl :: remaining ->
---         addToChildren newItem lvl
---             :: remaining
 
 
 addToChildren : Nested Description -> Nested Description -> Nested Description
