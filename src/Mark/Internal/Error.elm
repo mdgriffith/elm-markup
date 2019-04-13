@@ -12,7 +12,7 @@ module Mark.Internal.Error exposing
 
 -}
 
-import Mark.Format as Format
+import Mark.Internal.Format as Format
 import Parser.Advanced as Parser
 
 

@@ -20,7 +20,6 @@ module Mark.New exposing
 
 -}
 
-import Mark.Format as Format
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)

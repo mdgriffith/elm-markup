@@ -38,8 +38,8 @@ module Mark.Internal.Description exposing
 
 -}
 
-import Mark.Format as Format
 import Mark.Internal.Error as Error
+import Mark.Internal.Format as Format
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome exposing (..)
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)

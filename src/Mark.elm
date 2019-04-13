@@ -81,7 +81,6 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 import Html
 import Html.Attributes
-import Mark.Format as Format
 import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error exposing (AstError(..), Context(..), Problem(..))
 import Mark.Internal.Id as Id exposing (..)

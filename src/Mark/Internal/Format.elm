@@ -1,4 +1,4 @@
-module Mark.Format exposing (Text, bold, cyan, red, text, underline, yellow)
+module Mark.Internal.Format exposing (Text, bold, cyan, red, text, underline, yellow)
 
 {-| -}
 

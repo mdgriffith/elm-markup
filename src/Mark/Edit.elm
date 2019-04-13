@@ -23,9 +23,9 @@ module Mark.Edit exposing
 
 -}
 
-import Mark.Format as Format
 import Mark.Internal.Description exposing (..)
 import Mark.Internal.Error as Error
+import Mark.Internal.Format as Format
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
