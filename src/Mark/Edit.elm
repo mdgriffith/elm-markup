@@ -210,14 +210,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeStub name found ->
-            case exp of
-                ExpectStub expectedName ->
-                    name == expectedName
-
-                _ ->
-                    False
-
         Record details ->
             matchExpected details.expected exp
 
@@ -262,22 +254,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeFloatBetween _ ->
-            case exp of
-                ExpectFloatBetween _ ->
-                    True
-
-                _ ->
-                    False
-
-        DescribeIntBetween _ ->
-            case exp of
-                ExpectIntBetween _ ->
-                    True
-
-                _ ->
-                    False
-
         DescribeText _ ->
             case exp of
                 ExpectText _ ->
@@ -302,14 +278,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeStringExactly _ _ ->
-            case exp of
-                ExpectStringExactly _ ->
-                    True
-
-                _ ->
-                    False
-
         DescribeNothing ->
             False
 
@@ -321,9 +289,6 @@ matchExpected subExp expected =
     case ( subExp, expected ) of
         ( ExpectBlock oneName oneExp, ExpectBlock twoName twoExp ) ->
             oneName == twoName && matchExpected oneExp twoExp
-
-        ( ExpectStub one, ExpectStub two ) ->
-            one == two
 
         ( ExpectRecord one oneFields, ExpectRecord two twoFields ) ->
             one == two && List.all (matchFields twoFields) oneFields
@@ -347,12 +312,6 @@ matchExpected subExp expected =
         ( ExpectFloat _, ExpectFloat _ ) ->
             True
 
-        ( ExpectFloatBetween oneDetails, ExpectFloatBetween twoDetails ) ->
-            oneDetails.max == twoDetails.max && oneDetails.min == twoDetails.min
-
-        ( ExpectIntBetween oneDetails, ExpectIntBetween twoDetails ) ->
-            oneDetails.max == twoDetails.max && oneDetails.min == twoDetails.min
-
         ( ExpectText oneInline, ExpectText twoInline ) ->
             True
 
@@ -361,9 +320,6 @@ matchExpected subExp expected =
 
         ( ExpectMultiline _, ExpectMultiline _ ) ->
             True
-
-        ( ExpectStringExactly oneName, ExpectStringExactly twoName ) ->
-            oneName == twoName
 
         ( ExpectTree oneContent, ExpectTree twoContent ) ->
             True
@@ -615,9 +571,6 @@ makeEdit cursor desc =
             desc
 
         -- Primitives
-        DescribeStub name found ->
-            replacePrimitive cursor (foundStart found) desc
-
         DescribeBoolean details ->
             replacePrimitive cursor (foundStart details.found) desc
 
@@ -627,12 +580,6 @@ makeEdit cursor desc =
         DescribeFloat found ->
             replacePrimitive cursor (foundStart found.found) desc
 
-        DescribeFloatBetween details ->
-            replacePrimitive cursor (foundStart details.found) desc
-
-        DescribeIntBetween details ->
-            replacePrimitive cursor (foundStart details.found) desc
-
         DescribeText txt ->
             replacePrimitive cursor (.start txt.range) desc
 
@@ -641,9 +588,6 @@ makeEdit cursor desc =
 
         DescribeMultiline id range str ->
             replacePrimitive cursor range.start desc
-
-        DescribeStringExactly rng str ->
-            replacePrimitive cursor rng.start desc
 
         DescribeNothing ->
             desc
@@ -1057,68 +1001,6 @@ updateFoundBool id newBool desc =
 
 updateFoundFloat id newFloat desc =
     case desc of
-        DescribeFloatBetween details ->
-            if details.id == id then
-                case details.found of
-                    Found intRng fl ->
-                        if newFloat >= details.min && newFloat <= details.max then
-                            Just
-                                (DescribeFloatBetween
-                                    { details
-                                        | found =
-                                            Found intRng
-                                                ( String.fromFloat newFloat, newFloat )
-                                    }
-                                )
-
-                        else
-                            Just
-                                (DescribeFloatBetween
-                                    { details
-                                        | found =
-                                            Unexpected
-                                                { range = intRng
-                                                , problem =
-                                                    Error.FloatOutOfRange
-                                                        { found = newFloat
-                                                        , min = details.min
-                                                        , max = details.max
-                                                        }
-                                                }
-                                    }
-                                )
-
-                    Unexpected unexpected ->
-                        if newFloat >= details.min && newFloat <= details.max then
-                            Just
-                                (DescribeFloatBetween
-                                    { details
-                                        | found =
-                                            Found unexpected.range
-                                                ( String.fromFloat newFloat, newFloat )
-                                    }
-                                )
-
-                        else
-                            Just
-                                (DescribeFloatBetween
-                                    { details
-                                        | found =
-                                            Unexpected
-                                                { range = unexpected.range
-                                                , problem =
-                                                    Error.FloatOutOfRange
-                                                        { found = newFloat
-                                                        , min = details.min
-                                                        , max = details.max
-                                                        }
-                                                }
-                                    }
-                                )
-
-            else
-                Nothing
-
         DescribeFloat details ->
             if details.id == id then
                 case details.found of
@@ -1171,68 +1053,6 @@ updateFoundString id newString desc =
 
 updateFoundInt id newInt desc =
     case desc of
-        DescribeIntBetween details ->
-            if details.id == id then
-                case details.found of
-                    Found intRng fl ->
-                        if newInt >= details.min && newInt <= details.max then
-                            Just
-                                (DescribeIntBetween
-                                    { details
-                                        | found =
-                                            Found intRng
-                                                newInt
-                                    }
-                                )
-
-                        else
-                            Just
-                                (DescribeIntBetween
-                                    { details
-                                        | found =
-                                            Unexpected
-                                                { range = intRng
-                                                , problem =
-                                                    Error.IntOutOfRange
-                                                        { found = newInt
-                                                        , min = details.min
-                                                        , max = details.max
-                                                        }
-                                                }
-                                    }
-                                )
-
-                    Unexpected unexpected ->
-                        if newInt >= details.min && newInt <= details.max then
-                            Just
-                                (DescribeIntBetween
-                                    { details
-                                        | found =
-                                            Found unexpected.range
-                                                newInt
-                                    }
-                                )
-
-                        else
-                            Just
-                                (DescribeIntBetween
-                                    { details
-                                        | found =
-                                            Unexpected
-                                                { range = unexpected.range
-                                                , problem =
-                                                    Error.IntOutOfRange
-                                                        { found = newInt
-                                                        , min = details.min
-                                                        , max = details.max
-                                                        }
-                                                }
-                                    }
-                                )
-
-            else
-                Nothing
-
         DescribeInteger details ->
             if details.id == id then
                 case details.found of
@@ -1326,9 +1146,6 @@ isPrimitive description =
             False
 
         -- Primitives
-        DescribeStub name found ->
-            True
-
         DescribeBoolean found ->
             True
 
@@ -1338,12 +1155,6 @@ isPrimitive description =
         DescribeFloat found ->
             True
 
-        DescribeFloatBetween _ ->
-            True
-
-        DescribeIntBetween _ ->
-            True
-
         DescribeText _ ->
             True
 
@@ -1351,9 +1162,6 @@ isPrimitive description =
             True
 
         DescribeMultiline _ _ _ ->
-            True
-
-        DescribeStringExactly _ _ ->
             True
 
         DescribeNothing ->
@@ -1409,13 +1217,6 @@ getContainingDescriptions description offset =
                         []
 
         -- Primitives
-        DescribeStub name found ->
-            if withinFoundLeaf offset found then
-                [ description ]
-
-            else
-                []
-
         DescribeBoolean details ->
             if withinFoundLeaf offset details.found then
                 [ description ]
@@ -1431,20 +1232,6 @@ getContainingDescriptions description offset =
                 []
 
         DescribeFloat details ->
-            if withinFoundLeaf offset details.found then
-                [ description ]
-
-            else
-                []
-
-        DescribeFloatBetween details ->
-            if withinFoundLeaf offset details.found then
-                [ description ]
-
-            else
-                []
-
-        DescribeIntBetween details ->
             if withinFoundLeaf offset details.found then
                 [ description ]
 
@@ -1467,13 +1254,6 @@ getContainingDescriptions description offset =
 
         DescribeMultiline id range str ->
             if withinOffsetRange offset range then
-                [ description ]
-
-            else
-                []
-
-        DescribeStringExactly rng str ->
-            if withinOffsetRange offset rng then
                 [ description ]
 
             else

@@ -317,9 +317,6 @@ getUnexpecteds description =
 
         -- List.concatMap getNestedUnexpecteds (Tuple.second details.found)
         -- Primitives
-        DescribeStub name found ->
-            unexpectedFromFound found
-
         DescribeBoolean details ->
             unexpectedFromFound details.found
 
@@ -329,12 +326,6 @@ getUnexpecteds description =
         DescribeFloat details ->
             unexpectedFromFound details.found
 
-        DescribeFloatBetween details ->
-            unexpectedFromFound details.found
-
-        DescribeIntBetween details ->
-            unexpectedFromFound details.found
-
         DescribeText details ->
             []
 
@@ -342,9 +333,6 @@ getUnexpecteds description =
             []
 
         DescribeMultiline rng _ str ->
-            []
-
-        DescribeStringExactly rng str ->
             []
 
         DescribeNothing ->
@@ -589,8 +577,8 @@ verify fn myBlock =
 
 
 {-| -}
-onError : (List { range : Range } -> a) -> Block a -> Block a
-onError recover myBlock =
+onError : a -> Block a -> Block a
+onError newValue myBlock =
     case myBlock of
         Block name details ->
             Block name
@@ -607,13 +595,7 @@ onError recover myBlock =
 
                             Outcome.Almost (Uncertain x) ->
                                 Outcome.Almost
-                                    (Recovered x
-                                        (recover
-                                            (List.map (\err -> { range = err.range })
-                                                (errorsToList x)
-                                            )
-                                        )
-                                    )
+                                    (Recovered x newValue)
 
                             Outcome.Failure f ->
                                 Outcome.Failure f
@@ -634,13 +616,7 @@ onError recover myBlock =
 
                             Outcome.Almost (Uncertain x) ->
                                 Outcome.Almost
-                                    (Recovered x
-                                        (recover
-                                            (List.map (\err -> { range = err.range })
-                                                (errorsToList x)
-                                            )
-                                        )
-                                    )
+                                    (Recovered x newValue)
 
                             Outcome.Failure f ->
                                 Outcome.Failure f

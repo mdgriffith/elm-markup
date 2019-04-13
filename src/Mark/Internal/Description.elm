@@ -197,7 +197,6 @@ type Description
         , expected : Expectation
         }
       -- Primitives
-    | DescribeStub String (Found String)
     | DescribeBoolean
         { id : Id Bool
         , found : Found Bool
@@ -206,21 +205,9 @@ type Description
         { id : Id Int
         , found : Found Int
         }
-    | DescribeIntBetween
-        { max : Int
-        , min : Int
-        , found : Found Int
-        , id : Id Int
-        }
     | DescribeFloat
         { id : Id Float
         , found : Found ( String, Float )
-        }
-    | DescribeFloatBetween
-        { max : Float
-        , min : Float
-        , found : Found ( String, Float )
-        , id : Id Float
         }
     | DescribeText
         { id : Id Text
@@ -229,7 +216,6 @@ type Description
         }
     | DescribeString (Id String) Range String
     | DescribeMultiline (Id String) Range String
-    | DescribeStringExactly Range String
     | DescribeNothing
 
 
@@ -392,7 +378,6 @@ emptyStyles =
 {-| -}
 type Expectation
     = ExpectBlock String Expectation
-    | ExpectStub String
     | ExpectRecord String (List ( String, Expectation ))
     | ExpectOneOf (List Expectation)
     | ExpectManyOf (List Expectation)
@@ -400,20 +385,9 @@ type Expectation
     | ExpectBoolean Bool
     | ExpectInteger Int
     | ExpectFloat Float
-    | ExpectFloatBetween
-        { min : Float
-        , max : Float
-        , default : Float
-        }
-    | ExpectIntBetween
-        { min : Int
-        , max : Int
-        , default : Int
-        }
     | ExpectText (List InlineExpectation)
     | ExpectString String
     | ExpectMultiline String
-    | ExpectStringExactly String
     | ExpectTree Expectation
     | ExpectNothing
 
@@ -509,14 +483,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeStub name found ->
-            case exp of
-                ExpectStub expectedName ->
-                    name == expectedName
-
-                _ ->
-                    False
-
         Record details ->
             matchExpected details.expected exp
 
@@ -561,22 +527,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeFloatBetween _ ->
-            case exp of
-                ExpectFloatBetween _ ->
-                    True
-
-                _ ->
-                    False
-
-        DescribeIntBetween _ ->
-            case exp of
-                ExpectIntBetween _ ->
-                    True
-
-                _ ->
-                    False
-
         DescribeText _ ->
             case exp of
                 ExpectText _ ->
@@ -601,14 +551,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeStringExactly _ _ ->
-            case exp of
-                ExpectStringExactly _ ->
-                    True
-
-                _ ->
-                    False
-
 
 {-| Is the first expectation a subset of the second?
 -}
@@ -617,9 +559,6 @@ matchExpected subExp expected =
     case ( subExp, expected ) of
         ( ExpectBlock oneName oneExp, ExpectBlock twoName twoExp ) ->
             oneName == twoName && matchExpected oneExp twoExp
-
-        ( ExpectStub one, ExpectStub two ) ->
-            one == two
 
         ( ExpectRecord one oneFields, ExpectRecord two twoFields ) ->
             one == two && List.all (matchFields twoFields) oneFields
@@ -643,12 +582,6 @@ matchExpected subExp expected =
         ( ExpectFloat _, ExpectFloat _ ) ->
             True
 
-        ( ExpectFloatBetween oneDetails, ExpectFloatBetween twoDetails ) ->
-            oneDetails.max == twoDetails.max && oneDetails.min == twoDetails.min
-
-        ( ExpectIntBetween oneDetails, ExpectIntBetween twoDetails ) ->
-            oneDetails.max == twoDetails.max && oneDetails.min == twoDetails.min
-
         ( ExpectText oneInline, ExpectText twoInline ) ->
             True
 
@@ -657,9 +590,6 @@ matchExpected subExp expected =
 
         ( ExpectMultiline _, ExpectMultiline _ ) ->
             True
-
-        ( ExpectStringExactly oneName, ExpectStringExactly twoName ) ->
-            oneName == twoName
 
         ( ExpectTree oneContent, ExpectTree twoContent ) ->
             True
@@ -853,9 +783,6 @@ isPrimitive description =
             False
 
         -- Primitives
-        DescribeStub name found ->
-            True
-
         DescribeBoolean found ->
             True
 
@@ -865,12 +792,6 @@ isPrimitive description =
         DescribeFloat found ->
             True
 
-        DescribeFloatBetween _ ->
-            True
-
-        DescribeIntBetween _ ->
-            True
-
         DescribeText _ ->
             True
 
@@ -878,9 +799,6 @@ isPrimitive description =
             True
 
         DescribeMultiline _ _ _ ->
-            True
-
-        DescribeStringExactly rng str ->
             True
 
         DescribeNothing ->
@@ -933,13 +851,6 @@ getContainingDescriptions description offset =
                         []
 
         -- Primitives
-        DescribeStub name found ->
-            if withinFoundLeaf offset found then
-                [ description ]
-
-            else
-                []
-
         DescribeBoolean details ->
             if withinFoundLeaf offset details.found then
                 [ description ]
@@ -955,20 +866,6 @@ getContainingDescriptions description offset =
                 []
 
         DescribeFloat details ->
-            if withinFoundLeaf offset details.found then
-                [ description ]
-
-            else
-                []
-
-        DescribeFloatBetween details ->
-            if withinFoundLeaf offset details.found then
-                [ description ]
-
-            else
-                []
-
-        DescribeIntBetween details ->
             if withinFoundLeaf offset details.found then
                 [ description ]
 
@@ -991,13 +888,6 @@ getContainingDescriptions description offset =
 
         DescribeMultiline id range str ->
             if withinOffsetRange offset range then
-                [ description ]
-
-            else
-                []
-
-        DescribeStringExactly rng str ->
-            if withinOffsetRange offset rng then
                 [ description ]
 
             else
@@ -1180,11 +1070,6 @@ writeDescription description cursor =
                 |> writeFound writeDescription details.found
                 |> dedent
 
-        DescribeStub name found ->
-            cursor
-                |> write "|> "
-                |> writeFound (writeWith identity) found
-
         Record details ->
             cursor
                 |> writeFound
@@ -1225,12 +1110,6 @@ writeDescription description cursor =
 
         DescribeFloat details ->
             writeFound (writeWith Tuple.first) details.found cursor
-
-        DescribeFloatBetween details ->
-            writeFound (writeWith Tuple.first) details.found cursor
-
-        DescribeIntBetween details ->
-            writeFound (writeWith String.fromInt) details.found cursor
 
         DescribeText txt ->
             cursor
@@ -1273,11 +1152,6 @@ writeDescription description cursor =
                             indented
                    )
                 |> Tuple.second
-
-        DescribeStringExactly range str ->
-            cursor
-                |> advanceTo range
-                |> write str
 
         DescribeTree tree ->
             case tree.found of
@@ -1448,23 +1322,6 @@ create current =
             , seed = new.seed
             }
 
-        ExpectStub name ->
-            let
-                end =
-                    moveColumn (String.length name) current.base
-            in
-            { pos = end
-            , desc =
-                DescribeStub name
-                    (Found
-                        { start = current.base
-                        , end = end
-                        }
-                        name
-                    )
-            , seed = current.seed
-            }
-
         ExpectRecord name fields ->
             let
                 new =
@@ -1520,7 +1377,7 @@ create current =
                     create
                         { indent = current.indent + 1
                         , base = current.base
-                        , expectation = Maybe.withDefault (ExpectStub "Unknown") (List.head choices)
+                        , expectation = Maybe.withDefault ExpectNothing (List.head choices)
                         , seed = newSeed
                         }
             in
@@ -1700,63 +1557,6 @@ create current =
             , seed = newSeed
             }
 
-        ExpectFloatBetween details ->
-            let
-                end =
-                    moveColumn
-                        (String.length (String.fromFloat details.default))
-                        current.base
-
-                pos =
-                    { start = current.base
-                    , end =
-                        end
-                    }
-
-                ( newId, newSeed ) =
-                    Id.step current.seed
-            in
-            { pos = end
-            , desc =
-                DescribeFloatBetween
-                    { id = newId
-                    , min = details.min
-                    , max = details.max
-                    , found =
-                        Found pos
-                            ( String.fromFloat details.default
-                            , details.default
-                            )
-                    }
-            , seed = newSeed
-            }
-
-        ExpectIntBetween details ->
-            let
-                end =
-                    moveColumn
-                        (String.length (String.fromInt details.default))
-                        current.base
-
-                pos =
-                    { start = current.base
-                    , end = end
-                    }
-
-                ( newId, newSeed ) =
-                    Id.step current.seed
-            in
-            { pos = end
-            , desc =
-                DescribeIntBetween
-                    { id = newId
-                    , min = details.min
-                    , max = details.max
-                    , found = Found pos details.default
-                    }
-            , seed = newSeed
-            }
-
         ExpectString str ->
             let
                 end =
@@ -1793,21 +1593,6 @@ create current =
             { pos = end
             , desc = DescribeMultiline newId pos str
             , seed = newSeed
-            }
-
-        ExpectStringExactly str ->
-            let
-                end =
-                    moveColumn (String.length str) current.base
-
-                pos =
-                    { start = current.base
-                    , end = end
-                    }
-            in
-            { pos = end
-            , desc = DescribeStringExactly pos str
-            , seed = current.seed
             }
 
         -- ExpectDate ->
@@ -2122,9 +1907,6 @@ humanReadableExpectations expect =
         ExpectBlock name exp ->
             "| " ++ name
 
-        ExpectStub stubName ->
-            "| " ++ stubName
-
         ExpectRecord name fields ->
             "| " ++ name
 
@@ -2146,12 +1928,6 @@ humanReadableExpectations expect =
         ExpectFloat _ ->
             "A Float"
 
-        ExpectFloatBetween bounds ->
-            "A Float between " ++ String.fromFloat bounds.min ++ " and " ++ String.fromFloat bounds.max
-
-        ExpectIntBetween bounds ->
-            "An Int between " ++ String.fromInt bounds.min ++ " and " ++ String.fromInt bounds.max
-
         ExpectText inlines ->
             "Styled Text"
 
@@ -2160,9 +1936,6 @@ humanReadableExpectations expect =
 
         ExpectMultiline _ ->
             "A Multiline String"
-
-        ExpectStringExactly exact ->
-            exact
 
         ExpectTree content ->
             "A tree starting of "

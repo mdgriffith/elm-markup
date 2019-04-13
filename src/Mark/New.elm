@@ -1,13 +1,22 @@
 module Mark.New exposing
-    ( Block, from, field
-    , bool, float, int, string
+    ( Block, block, record
+    , string, int, float, bool
+    , many
+    , text, unstyled, bold, italicized, strike, styled
+    , Attribute, annotation, token, verbatim
     )
 
 {-|
 
-@docs Block, from, field
+@docs Block, block, record
 
-@docs bool, float, int, string
+@docs string, int, float, bool
+
+@docs many
+
+@docs text, unstyled, bold, italicized, strike, styled
+
+@docs Attribute, annotation, token, verbatim
 
 -}
 
@@ -49,7 +58,7 @@ block =
 
 
 {-| -}
-record : String -> List ( String, Block )
+record : String -> List ( String, Block ) -> Block
 record =
     ExpectRecord
 
@@ -96,19 +105,24 @@ text =
 
 
 {-| -}
-annotation : Text -> List Attributes -> Text
-annotation =
-    ExpectAnnotation
+type alias Attribute =
+    AttrExpectation
 
 
 {-| -}
-token : String -> List Attributes -> Text
+annotation : Text -> List Attribute -> Text
+annotation =
+    Debug.todo "ugh"
+
+
+{-| -}
+token : String -> List Attribute -> Text
 token =
     ExpectToken
 
 
 {-| -}
-verbatim : String -> List Attributes -> Text
+verbatim : String -> List Attribute -> Text
 verbatim =
     ExpectVerbatim
 
@@ -135,3 +149,9 @@ bold =
 strike : String -> Text
 strike =
     Debug.todo "nada"
+
+
+{-| -}
+unstyled : String -> Text
+unstyled =
+    Debug.todo "nope"
