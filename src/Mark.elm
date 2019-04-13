@@ -11,7 +11,7 @@ module Mark exposing
     , Text(..), Styles, text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
     , Error, errorToString, errorToHtml, Theme(..)
-    , Position, Range
+    , ErrorDetails, errorDetails, Range, Position
     )
 
 {-| `elm-markup` is about defining what you're expecting in a markup document.
@@ -74,6 +74,8 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 ## Displaying Errors
 
 @docs Error, errorToString, errorToHtml, Theme
+
+@docs ErrorDetails, errorDetails, Range, Position
 
 -}
 
@@ -224,25 +226,6 @@ type Outcome failure almost success
     = Success success
     | Almost almost
     | Failure failure
-
-
-
--- {-| This doesn't cause something to completely fail, but logs the error.
--- -}
--- logErrors :
---     ( ErrorWithRange, List ErrorWithRange )
---     -> Outcome.Outcome f (Uncertain success) success
---     -> Outcome.Outcome f (Uncertain success) success
--- logErrors (( fst, remainingErrs ) as err) outcome =
---     case outcome of
---         Outcome.Success s ->
---             Outcome.Almost (Recovered err s)
---         Outcome.Almost (Uncertain u) ->
---             Outcome.Almost (Uncertain (mergeErrors u err))
---         Outcome.Almost (Recovered e a) ->
---             Outcome.Almost (Recovered (mergeErrors e err) a)
---         Outcome.Failure failures ->
---             Outcome.Failure failures
 
 
 {-| -}
@@ -1891,6 +1874,8 @@ type Text
 
     Mark.text (\styles string -> Html.span [] [ Html.text string ])
 
+**NOTE** includes `Mark.commonReplacements` by default.
+
 -}
 text :
     (Text -> rendered)
@@ -1902,7 +1887,7 @@ text view =
             renderText
                 { view = view
                 , inlines = []
-                , replacements = []
+                , replacements = commonReplacements
                 }
         , parser =
             \seed ->
@@ -1913,7 +1898,7 @@ text view =
                         (\pos ->
                             Parse.styledText
                                 { inlines = []
-                                , replacements = []
+                                , replacements = commonReplacements
                                 }
                                 seed
                                 pos
@@ -3697,6 +3682,34 @@ rev nest ( cursor, found ) =
     ( next cursor, reverseTree cursor nest :: found )
 
 
+{-| This is a set of common character replacements with some typographical niceties.
+
+  - `...` is converted to the ellipses unicode character(`…`).
+  - `"` Straight double quotes are [replaced with curly quotes](https://practicaltypography.com/straight-and-curly-quotes.html) (`“`, `”`)
+  - `'` Single Quotes are replaced with apostrophes(`’`).
+  - `--` is replaced with an en-dash(`–`).
+  - `---` is replaced with an em-dash(`—`).
+  - `<>` also known as "glue", will create a non-breaking space (`&nbsp;`). This is not for manually increasing space (sequential `<>` tokens will only render as one `&nbsp;`), but to signify that the space between two words shouldn't break when wrapping. Like glueing two words together!
+  - `//` will change to `/`. Normally `/` starts italic formatting. To escape this, we'd normally do `\/`, though that looks pretty funky. `//` just feels better!
+
+**NOTE** this is included by default in `Mark.text`
+
+-}
+commonReplacements : List Replacement
+commonReplacements =
+    [ Parse.Replacement "..." "…"
+    , Parse.Replacement "<>" "\u{00A0}"
+    , Parse.Replacement "---" "—"
+    , Parse.Replacement "--" "–"
+    , Parse.Replacement "//" "/"
+    , Parse.Replacement "'" "’"
+    , Parse.Balanced
+        { start = ( "\"", "“" )
+        , end = ( "\"", "”" )
+        }
+    ]
+
+
 {-| Replace a string with another string. This can be useful to have shortcuts to unicode characters.
 
 For example, in `Mark.Default`, this is used to replace `...` with the unicode ellipses character: `…`.
@@ -3743,6 +3756,31 @@ errorToString error =
                 { title = global.title
                 , message = global.message
                 }
+
+
+{-| -}
+type alias ErrorDetails =
+    { title : String
+    , message : String
+    , region : Maybe Range
+    }
+
+
+{-| -}
+errorDetails : Error -> ErrorDetails
+errorDetails error =
+    case error of
+        Error.Rendered details ->
+            { title = details.title
+            , message = String.join "" (List.map .text details.message)
+            , region = Just details.region
+            }
+
+        Error.Global global ->
+            { title = global.title
+            , message = String.join "" (List.map .text global.message)
+            , region = Nothing
+            }
 
 
 formatErrorString error =
