@@ -2,7 +2,7 @@ module Mark.Internal.Description exposing
     ( render, compile
     , Found(..), Nested(..), Icon(..)
     , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
-    , Expectation(..), InlineExpectation(..), AttrExpectation(..)
+    , Expectation(..), InlineExpectation(..), AttrExpectation(..), TreeExpectation(..)
     , Parsed(..), startingPoint, descriptionToString, toString
     , create
     , Styling, emptyStyles
@@ -20,7 +20,7 @@ module Mark.Internal.Description exposing
 
 @docs Description, TextDescription, InlineAttribute, Text, Style
 
-@docs Expectation, InlineExpectation, AttrExpectation
+@docs Expectation, InlineExpectation, AttrExpectation, TreeExpectation
 
 @docs Parsed, startingPoint, descriptionToString, toString
 
@@ -306,8 +306,17 @@ type Expectation
     | ExpectTextBlock (List InlineExpectation)
     | ExpectString String
     | ExpectMultiline String
-    | ExpectTree Expectation
+    | ExpectTree Expectation (List TreeExpectation)
     | ExpectNothing
+
+
+{-| -}
+type TreeExpectation
+    = TreeExpectation
+        { icon : Icon
+        , content : List Expectation
+        , children : List TreeExpectation
+        }
 
 
 {-| -}
@@ -645,7 +654,7 @@ matchExpected subExp expected =
         ( ExpectMultiline _, ExpectMultiline _ ) ->
             True
 
-        ( ExpectTree oneContent, ExpectTree twoContent ) ->
+        ( ExpectTree oneContent _, ExpectTree twoContent _ ) ->
             True
 
         _ ->
@@ -1408,7 +1417,7 @@ create current =
             , seed = new.seed
             }
 
-        ExpectTree content ->
+        ExpectTree content _ ->
             let
                 range =
                     { start = current.base
@@ -1997,7 +2006,7 @@ humanReadableExpectations expect =
         ExpectMultiline _ ->
             "A Multiline String"
 
-        ExpectTree content ->
+        ExpectTree content _ ->
             "A tree starting of "
                 ++ humanReadableExpectations content
                 ++ " content"

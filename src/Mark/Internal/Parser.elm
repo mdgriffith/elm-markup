@@ -1,5 +1,6 @@
 module Mark.Internal.Parser exposing
     ( Replacement(..)
+    , blocksOrNewlines
     , float
     , getFailableBlock
     , getPosition
@@ -1692,3 +1693,140 @@ removeByIndex index list =
         list
         |> Tuple.second
         |> List.reverse
+
+
+{-| -}
+blocksOrNewlines indentation blocks cursor =
+    Parser.oneOf
+        [ Parser.end End
+            |> Parser.map
+                (\_ ->
+                    Parser.Done (List.reverse cursor.found)
+                )
+        , Parser.succeed
+            (Parser.Loop
+                { parsedSomething = True
+                , found = cursor.found
+                , seed = cursor.seed
+                }
+            )
+            |. newlineWith "empty Parse.newline"
+        , if not cursor.parsedSomething then
+            -- First thing already has indentation accounted for.
+            makeBlocksParser blocks cursor.seed
+                |> Parser.map
+                    (\foundBlock ->
+                        let
+                            ( _, newSeed ) =
+                                Id.step cursor.seed
+                        in
+                        Parser.Loop
+                            { parsedSomething = True
+                            , found = foundBlock :: cursor.found
+                            , seed = newSeed
+                            }
+                    )
+
+          else
+            Parser.oneOf
+                [ Parser.succeed
+                    (\foundBlock ->
+                        let
+                            ( _, newSeed ) =
+                                Id.step cursor.seed
+                        in
+                        Parser.Loop
+                            { parsedSomething = True
+                            , found = foundBlock :: cursor.found
+                            , seed = newSeed
+                            }
+                    )
+                    |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
+                    |= makeBlocksParser blocks cursor.seed
+                , Parser.succeed
+                    (Parser.Loop
+                        { parsedSomething = True
+                        , found = cursor.found
+                        , seed = cursor.seed
+                        }
+                    )
+                    |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                    |. Parser.backtrackable newline
+
+                -- We reach here because the indentation parsing was not successful,
+                -- meaning the indentation has been lowered and the block is done
+                , Parser.succeed (Parser.Done (List.reverse cursor.found))
+                ]
+
+        -- Whitespace Line
+        , Parser.succeed
+            (Parser.Loop
+                { parsedSomething = True
+                , found = cursor.found
+                , seed = cursor.seed
+                }
+            )
+            |. Parser.chompWhile (\c -> c == ' ')
+            |. newlineWith "ws-line"
+        ]
+
+
+makeBlocksParser blocks seed =
+    let
+        gatherParsers myBlock details =
+            let
+                -- We don't care about the new seed because that's handled by the loop.
+                ( _, parser ) =
+                    getParserNoBar seed myBlock
+            in
+            case blockName myBlock of
+                Just name ->
+                    { blockNames = name :: details.blockNames
+                    , childBlocks = Parser.map Ok parser :: details.childBlocks
+                    , childValues = details.childValues
+                    }
+
+                Nothing ->
+                    { blockNames = details.blockNames
+                    , childBlocks = details.childBlocks
+                    , childValues = Parser.map Ok (withRange parser) :: details.childValues
+                    }
+
+        children =
+            List.foldl gatherParsers
+                { blockNames = []
+                , childBlocks = []
+                , childValues = []
+                }
+                blocks
+
+        blockParser =
+            Parser.map
+                (\( pos, result ) ->
+                    Result.map (\desc -> ( pos, desc )) result
+                )
+                (withRange
+                    (Parser.succeed identity
+                        |. Parser.token (Parser.Token "|>" BlockStart)
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |= Parser.oneOf
+                            (List.reverse children.childBlocks
+                                ++ [ withIndent
+                                        (\indentation ->
+                                            Parser.succeed
+                                                (\( pos, foundWord ) ->
+                                                    Err ( pos, Error.UnknownBlock children.blockNames )
+                                                )
+                                                |= withRange word
+                                                |. newline
+                                                |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                        )
+                                   ]
+                            )
+                    )
+                )
+    in
+    Parser.oneOf
+        (blockParser
+            :: List.reverse children.childValues
+        )

@@ -1,7 +1,7 @@
 module Mark.New exposing
     ( Block, block, record
     , string, int, float, bool
-    , many
+    , many, tree, Tree(..)
     , text, unstyled, bold, italicized, strike, styled
     , Attribute, annotation, token, verbatim, verbatimWith
     )
@@ -12,7 +12,7 @@ module Mark.New exposing
 
 @docs string, int, float, bool
 
-@docs many
+@docs many, tree, Tree
 
 @docs text, unstyled, bold, italicized, strike, styled
 
@@ -20,7 +20,8 @@ module Mark.New exposing
 
 -}
 
-import Mark.Internal.Description exposing (..)
+import Mark
+import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome as Outcome
@@ -90,6 +91,40 @@ bool =
 many : List Block -> Block
 many =
     ExpectManyOf
+
+
+{-| -}
+type Tree
+    = Tree
+        { icon : Mark.Icon
+        , content : List Block
+        , children : List Tree
+        }
+
+
+{-| -}
+tree : List Tree -> Block
+tree treeContents =
+    -- BUGBUG: ExpectNothing is not right
+    ExpectTree ExpectNothing
+        (List.map convertToTreeExpectation treeContents)
+
+
+{-| This is necessary to make the types work out, but would be nice to remove.
+-}
+convertToTreeExpectation (Tree details) =
+    TreeExpectation
+        { icon =
+            case details.icon of
+                Mark.Bullet ->
+                    Desc.Bullet
+
+                Mark.Number ->
+                    Desc.AutoNumber
+        , content = details.content
+        , children =
+            List.map convertToTreeExpectation details.children
+        }
 
 
 {-| -}
