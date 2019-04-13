@@ -104,14 +104,13 @@ It also kinda works because the arrow gives a visual clue that the content will 
 
 Inlines moved from 
 
-```
+```elm
 {Link| some styled text | url = elm-lang.org }
-
 ```
 
 to `Mark.annotation`, which looks like this:
 
-```
+```elm
 [some styled text]{link| url = elm-lang.org }
 ```
 
