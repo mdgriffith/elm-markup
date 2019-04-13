@@ -1,10 +1,13 @@
 module Mark.Internal.Parser exposing
     ( Replacement(..)
+    , addToChildren
     , blocksOrNewlines
+    , buildTree
     , float
     , getFailableBlock
     , getPosition
     , getRangeAndSource
+    , indentedBlocksOrNewlines
     , indentedString
     , int
     , newline
@@ -12,6 +15,7 @@ module Mark.Internal.Parser exposing
     , oneOf
     , peek
     , raggedIndentedStringAbove
+    , skipBlankLineWith
     , styledText
     , withIndent
     , withRange
@@ -1830,3 +1834,537 @@ makeBlocksParser blocks seed =
         (blockParser
             :: List.reverse children.childValues
         )
+
+
+type alias NestedIndex =
+    { base : Int
+    , prev : Int
+    }
+
+
+type alias FlatCursor =
+    { icon : Maybe Icon
+    , indent : Int
+    , content : Description
+    }
+
+
+{-| Results in a flattened version of the parsed list.
+
+    ( 0, Maybe Icon, [ "item one" ] )
+
+    ( 0, Maybe Icon, [ "item two" ] )
+
+    ( 4, Maybe Icon, [ "nested item two", "additional text for nested item two" ] )
+
+    ( 0, Maybe Icon, [ "item three" ] )
+
+    ( 4, Maybe Icon, [ "nested item three" ] )
+
+-}
+indentedBlocksOrNewlines :
+    Id.Seed
+    -> Block thing
+    -> ( NestedIndex, List FlatCursor )
+    -> Parser Context Problem (Parser.Step ( NestedIndex, List FlatCursor ) (List FlatCursor))
+indentedBlocksOrNewlines seed item ( indentation, existing ) =
+    Parser.oneOf
+        [ Parser.end End
+            |> Parser.map
+                (\_ ->
+                    Parser.Done (List.reverse existing)
+                )
+
+        -- Whitespace Line
+        , skipBlankLineWith (Parser.Loop ( indentation, existing ))
+        , Parser.oneOf
+            [ -- block with required indent
+              expectIndentation indentation.base indentation.prev
+                |> Parser.andThen
+                    (\newIndent ->
+                        let
+                            ( itemSeed, itemParser ) =
+                                getParser seed item
+                        in
+                        -- If the indent has changed, then the delimiter is required
+                        Parser.withIndent newIndent <|
+                            Parser.oneOf
+                                ((Parser.succeed
+                                    (\iconResult itemResult ->
+                                        let
+                                            newIndex =
+                                                { prev = newIndent
+                                                , base = indentation.base
+                                                }
+                                        in
+                                        Parser.Loop
+                                            ( newIndex
+                                            , { indent = newIndent
+                                              , icon = Just iconResult
+                                              , content = itemResult
+                                              }
+                                                :: existing
+                                            )
+                                    )
+                                    |= iconParser
+                                    |= itemParser
+                                 )
+                                    :: (if newIndent - 4 == indentation.prev then
+                                            [ itemParser
+                                                |> Parser.map
+                                                    (\foundBlock ->
+                                                        let
+                                                            newIndex =
+                                                                { prev = indentation.prev
+                                                                , base = indentation.base
+                                                                }
+                                                        in
+                                                        Parser.Loop
+                                                            ( newIndex
+                                                            , { indent = indentation.prev
+                                                              , icon = Nothing
+                                                              , content = foundBlock
+                                                              }
+                                                                :: existing
+                                                            )
+                                                    )
+                                            ]
+
+                                        else
+                                            []
+                                       )
+                                )
+                    )
+
+            -- We reach here because the indentation parsing was not successful,
+            -- This means any issues are handled by whatever parser comes next.
+            , Parser.succeed (Parser.Done (List.reverse existing))
+            ]
+        ]
+
+
+{-| We only expect nearby indentations.
+
+We can't go below the `base` indentation.
+
+Based on the previous indentation:
+
+  - previous - 4
+  - previous
+  - previous + 4
+
+If we don't match the above rules, we might want to count the mismatched number.
+
+-}
+expectIndentation : Int -> Int -> Parser Context Problem Int
+expectIndentation base previous =
+    Parser.succeed Tuple.pair
+        |= Parser.oneOf
+            ([ Parser.succeed (previous + 4)
+                |. Parser.token (Parser.Token (String.repeat (previous + 4) " ") (ExpectingIndentation (previous + 4)))
+             , Parser.succeed previous
+                |. Parser.token (Parser.Token (String.repeat previous " ") (ExpectingIndentation previous))
+             ]
+                ++ descending base previous
+            )
+        |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
+        |> Parser.andThen
+            (\( indentLevel, extraSpaces ) ->
+                if extraSpaces == "" then
+                    Parser.succeed indentLevel
+
+                else
+                    Parser.problem
+                        (ExpectingIndentation (base + indentLevel))
+            )
+
+
+iconParser =
+    Parser.oneOf
+        [ Parser.succeed Bullet
+            |. Parser.chompIf (\c -> c == '-') (Expecting "-")
+            |. Parser.chompWhile (\c -> c == '-' || c == ' ')
+        , Parser.succeed AutoNumber
+            |. Parser.chompIf (\c -> c == '#') (Expecting "#")
+            |. Parser.chompWhile (\c -> c == '.' || c == ' ')
+        ]
+
+
+skipBlankLineWith : thing -> Parser Context Problem thing
+skipBlankLineWith x =
+    Parser.succeed x
+        |. Parser.token (Parser.Token "\n" Newline)
+        |. Parser.oneOf
+            [ Parser.succeed ()
+                |. Parser.backtrackable (Parser.chompWhile (\c -> c == ' '))
+                |. Parser.backtrackable (Parser.token (Parser.Token "\n" Newline))
+            , Parser.succeed ()
+            ]
+
+
+{-| Parse all indentation levels between `prev` and `base` in increments of 4.
+-}
+descending : Int -> Int -> List (Parser Context Problem Int)
+descending base prev =
+    if prev <= base then
+        []
+
+    else
+        List.reverse
+            (List.map
+                (\x ->
+                    let
+                        level =
+                            base + (x * 4)
+                    in
+                    Parser.succeed level
+                        |. Parser.token (Parser.Token (String.repeat level " ") (ExpectingIndentation level))
+                )
+                (List.range 0 (((prev - 4) - base) // 4))
+            )
+
+
+buildTree : Int -> List FlatCursor -> List (Nested Description)
+buildTree baseIndent items =
+    let
+        -- gather ( indentation, icon, item ) (TreeBuilder builder) =
+        gather item builder =
+            addItem (item.indent - baseIndent) item.icon item.content builder
+
+        groupByIcon item maybeCursor =
+            case maybeCursor of
+                Nothing ->
+                    case item.icon of
+                        Just icon ->
+                            Just
+                                { indent = item.indent
+                                , icon = icon
+                                , items = [ item.content ]
+                                , accumulated = []
+                                }
+
+                        Nothing ->
+                            -- Because of how the code runs, we have a tenuous guarantee that this branch won't execute.
+                            -- Not entirely sure how to make the types work to eliminate this.
+                            Nothing
+
+                Just cursor ->
+                    Just <|
+                        case item.icon of
+                            Nothing ->
+                                { indent = cursor.indent
+                                , icon = cursor.icon
+                                , items = item.content :: cursor.items
+                                , accumulated = cursor.accumulated
+                                }
+
+                            Just icon ->
+                                { indent = item.indent
+                                , icon = icon
+                                , items = [ item.content ]
+                                , accumulated =
+                                    { indent = cursor.indent
+                                    , icon = cursor.icon
+                                    , content = cursor.items
+                                    }
+                                        :: cursor.accumulated
+                                }
+
+        finalizeGrouping maybeCursor =
+            case maybeCursor of
+                Nothing ->
+                    []
+
+                Just cursor ->
+                    case cursor.items of
+                        [] ->
+                            cursor.accumulated
+
+                        _ ->
+                            { indent = cursor.indent
+                            , icon = cursor.icon
+                            , content = cursor.items
+                            }
+                                :: cursor.accumulated
+
+        newTree =
+            items
+                |> List.foldl groupByIcon Nothing
+                |> finalizeGrouping
+                |> List.reverse
+                |> List.foldl gather emptyTreeBuilder
+    in
+    case newTree of
+        TreeBuilder builder ->
+            List.reverse (renderLevels builder.levels)
+
+
+{-| A list item started with a list icon.
+
+If indent stays the same
+-> add to items at the current stack
+
+if ident increases
+-> create a new level in the stack
+
+if ident decreases
+-> close previous group
+->
+
+    1 Icon
+        1.1 Content
+        1.2 Icon
+        1.3 Icon
+           1.3.1 Icon
+
+        1.4
+
+    2 Icon
+
+    Steps =
+    []
+
+    [ Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.3, Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 1.3.1 ]
+    , Level [ Item 1.3, Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+
+    [ Level [ Item 1.4, Item 1.3([ Item 1.3.1 ]), Item 1.2, Item 1.1 ]
+    , Level [ Item 1. [] ]
+    ]
+
+    [ Level [ Item 2., Item 1. (Level [ Item 1.4, Item 1.3([ Item 1.3.1 ]), Item 1.2, Item 1.1 ]) ]
+    ]
+
+-}
+addItem : Int -> Icon -> List Description -> TreeBuilder -> TreeBuilder
+addItem indentation icon content (TreeBuilder builder) =
+    let
+        newItem : Int -> Nested Description
+        newItem index =
+            Nested
+                { index = [ index ]
+                , icon = icon
+                , children = []
+                , content = content
+                }
+    in
+    case builder.levels of
+        [] ->
+            TreeBuilder
+                { previousIndent = indentation
+                , levels =
+                    [ newItem 1 ]
+                }
+
+        lvl :: remaining ->
+            if indentation == 0 then
+                -- add to current level
+                TreeBuilder
+                    { previousIndent = indentation
+                    , levels =
+                        newItem (List.length remaining + 2) :: lvl :: remaining
+                    }
+
+            else
+                -- We've dedented, so we need to first collapse the current level
+                -- into the one below, then add an item to that level
+                TreeBuilder
+                    { previousIndent = indentation
+                    , levels =
+                        addToLevel
+                            ((abs indentation // 4) - 1)
+                            (newItem (List.length remaining + 1))
+                            lvl
+                            :: remaining
+                    }
+
+
+indentIndex (Nested nested) =
+    Nested
+        { nested
+            | index = 1 :: nested.index
+        }
+
+
+indexTo i (Nested nested) =
+    case nested.index of
+        [] ->
+            Nested { nested | index = [ i ] }
+
+        top :: tail ->
+            Nested { nested | index = i :: tail }
+
+
+addToLevel index brandNewItem (Nested parent) =
+    if index <= 0 then
+        Nested
+            { parent
+                | children =
+                    indexTo
+                        (List.length parent.children + 1)
+                        (indentIndex brandNewItem)
+                        :: parent.children
+            }
+
+    else
+        case parent.children of
+            [] ->
+                Nested parent
+
+            top :: remain ->
+                let
+                    withNewIndex =
+                        brandNewItem
+                            |> indentIndex
+                            |> indexTo (List.length parent.children)
+                in
+                Nested
+                    { parent
+                        | children =
+                            addToLevel (index - 1) withNewIndex top
+                                :: remain
+                    }
+
+
+addToChildren : Nested Description -> Nested Description -> Nested Description
+addToChildren child (Nested parent) =
+    Nested { parent | children = child :: parent.children }
+
+
+
+{- NESTED LIST HELPERS -}
+{- Nested Lists -}
+
+
+{-| = indentLevel icon space content
+| indentLevel content
+
+Where the second variation can only occur if the indentation is larger than the previous one.
+
+A list item started with a list icon.
+
+    If indent stays the same
+    -> add to items at the current stack
+
+    if ident increases
+    -> create a new level in the stack
+
+    if ident decreases
+    -> close previous group
+    ->
+
+    <list>
+        <*item>
+            <txt> -> add to head sections
+            <txt> -> add to head sections
+            <item> -> add to head sections
+            <item> -> add to head sections
+                <txt> -> add to content
+                <txt> -> add to content
+                <item> -> add to content
+                <item> -> add to content
+            <item> -> add to content
+
+        <*item>
+        <*item>
+
+    Section
+        [ IconSection
+            { icon = *
+            , sections =
+                [ Text
+                , Text
+                , IconSection Text
+                , IconSection
+                    [ Text
+                    , Text
+                    , item
+                    , item
+                    ]
+                ]
+            }
+        , Icon -> Content
+        , Icon -> Content
+        ]
+
+-}
+type TreeBuilder
+    = TreeBuilder
+        { previousIndent : Int
+        , levels :
+            -- (mostRecent :: remaining)
+            List (Nested Description)
+        }
+
+
+emptyTreeBuilder : TreeBuilder
+emptyTreeBuilder =
+    TreeBuilder
+        { previousIndent = 0
+        , levels = []
+        }
+
+
+renderLevels : List (Nested Description) -> List (Nested Description)
+renderLevels levels =
+    case levels of
+        [] ->
+            []
+
+        _ ->
+            List.indexedMap
+                (\index level ->
+                    reverseTree { index = index, level = [] } level
+                )
+                levels
+
+
+reverseTree cursor (Nested nest) =
+    Nested
+        { index = nest.index
+        , icon = nest.icon
+        , content = List.reverse nest.content
+        , children =
+            List.foldl rev ( dive cursor, [] ) nest.children
+                |> Tuple.second
+        }
+
+
+rev nest ( cursor, found ) =
+    ( next cursor, reverseTree cursor nest :: found )
+
+
+type alias TreeIndex =
+    { index : Int
+    , level : List Int
+    }
+
+
+dive cursor =
+    { cursor
+        | index = 0
+        , level = cursor.index :: cursor.level
+    }
+
+
+next cursor =
+    { cursor
+        | index = cursor.index + 1
+    }

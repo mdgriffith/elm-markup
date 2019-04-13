@@ -199,7 +199,9 @@ type Description
         , expected : Expectation
         }
     | DescribeTree
-        { found : ( Range, List (Nested Description) )
+        { id : Id ManyOptions
+        , range : Range
+        , children : List (Nested Description)
         , expected : Expectation
         }
       -- Primitives
@@ -908,13 +910,11 @@ getContainingDescriptions description offset =
                 []
 
         DescribeTree details ->
-            case details.found of
-                ( range, items ) ->
-                    if withinOffsetRange offset range then
-                        List.concatMap (getWithinNested offset) items
+            if withinOffsetRange offset details.range then
+                List.concatMap (getWithinNested offset) details.children
 
-                    else
-                        []
+            else
+                []
 
         -- Primitives
         DescribeBoolean details ->
@@ -1220,11 +1220,9 @@ writeDescription description cursor =
                 |> Tuple.second
 
         DescribeTree tree ->
-            case tree.found of
-                ( range, nestedItems ) ->
-                    cursor
-                        |> advanceTo range
-                        |> (\curs -> List.foldl writeNested curs nestedItems)
+            cursor
+                |> advanceTo tree.range
+                |> (\curs -> List.foldl writeNested curs tree.children)
 
 
 writeNested (Nested node) cursor =
@@ -1429,14 +1427,19 @@ create current =
 
                 items =
                     []
+
+                ( parentId, newSeed ) =
+                    Id.step current.seed
             in
             { pos = moveNewline current.base
             , desc =
                 DescribeTree
-                    { found = ( range, items )
+                    { children = items
+                    , id = parentId
+                    , range = range
                     , expected = current.expectation
                     }
-            , seed = current.seed
+            , seed = newSeed
             }
 
         ExpectOneOf choices ->

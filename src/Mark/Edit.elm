@@ -1,5 +1,6 @@
 module Mark.Edit exposing
-    ( bool, int, float, string, multiline, oneOf
+    ( bool, int, float, string, multiline, oneOf, manyOf
+    , Tree(..), Icon(..), tree
     , update
     , Edit, updateInt, updateFloat, updateString
     , replace, delete, insertAt
@@ -10,7 +11,9 @@ module Mark.Edit exposing
 
 # Editable Blocks
 
-@docs bool, int, float, string, multiline, oneOf
+@docs bool, int, float, string, multiline, oneOf, manyOf
+
+@docs Tree, Icon, tree
 
 
 # Making Edits
@@ -23,7 +26,7 @@ module Mark.Edit exposing
 
 -}
 
-import Mark.Internal.Description exposing (..)
+import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Format as Format
 import Mark.Internal.Id as Id exposing (..)
@@ -318,8 +321,8 @@ match description exp =
                 _ ->
                     False
 
-        DescribeTree tree ->
-            matchExpected tree.expected exp
+        DescribeTree myTree ->
+            matchExpected myTree.expected exp
 
         DescribeBoolean foundBoolean ->
             case exp of
@@ -1187,13 +1190,11 @@ getContainingDescriptions description offset =
                 []
 
         DescribeTree details ->
-            case details.found of
-                ( range, items ) ->
-                    if withinOffsetRange offset range then
-                        List.concatMap (getWithinNested offset) items
+            if withinOffsetRange offset details.range then
+                List.concatMap (getWithinNested offset) details.children
 
-                    else
-                        []
+            else
+                []
 
         -- Primitives
         DescribeBoolean details ->
@@ -1745,3 +1746,198 @@ manyOf view blocks =
                         )
                 )
         }
+
+
+{-| -}
+type Tree item
+    = Tree
+        { index : List Int
+        , icon : Icon
+        , content : List item
+        , children :
+            List (Tree item)
+        }
+
+
+{-| -}
+type Icon
+    = Bullet
+    | Number
+
+
+{-| It can be useful to parse a tree structure. For example, here's a nested list.
+
+    | List
+        - item one
+        - item two
+            - nested item two
+
+            additional text for nested item two
+        - item three
+            - nested item three
+
+In order to parse the above, you could define a block as
+
+    Mark.nested "List"
+        ((Nested nested) ->
+        -- Do something with nested.content and nested.children
+        )
+        text
+
+**Note** the indentation is always a multiple of 4.
+
+-}
+tree :
+    String
+    ->
+        ({ id : Id ManyOptions
+         , range : Range
+         }
+         -> List (Tree item)
+         -> result
+        )
+    -> Block item
+    -> Block result
+tree name view contentBlock =
+    let
+        expectation =
+            ExpectTree (getBlockExpectation contentBlock) []
+    in
+    Block name
+        { expect = expectation
+        , converter =
+            \description ->
+                case description of
+                    DescribeTree details ->
+                        details.children
+                            |> reduceRender (renderTreeNodeSmall contentBlock)
+                            |> mapSuccessAndRecovered
+                                (view
+                                    { id = details.id
+                                    , range = details.range
+                                    }
+                                )
+
+                    _ ->
+                        Outcome.Failure Error.NoMatch
+        , parser =
+            \seed ->
+                -- TODO: AHHHH, A NEW SEED NEEDS TO GET CREATED
+                let
+                    ( newId, newSeed ) =
+                        Id.step seed
+
+                    reseeded =
+                        Id.reseed newSeed
+                in
+                ( reseeded
+                , Parse.withIndent
+                    (\baseIndent ->
+                        Parser.succeed identity
+                            |. Parser.keyword
+                                (Parser.Token name
+                                    (Error.ExpectingBlockName name)
+                                )
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |. Parse.skipBlankLineWith ()
+                            |= Parser.map
+                                (\( pos, result ) ->
+                                    DescribeTree
+                                        { id = newId
+                                        , children = Parse.buildTree (baseIndent + 4) result
+                                        , range = pos
+                                        , expected = expectation
+                                        }
+                                )
+                                (Parse.withRange
+                                    (Parser.loop
+                                        ( { base = baseIndent + 4
+                                          , prev = baseIndent + 4
+                                          }
+                                        , []
+                                        )
+                                        (Parse.indentedBlocksOrNewlines
+                                            seed
+                                            contentBlock
+                                        )
+                                    )
+                                )
+                    )
+                )
+        }
+
+
+iconParser =
+    Parser.oneOf
+        [ Parser.succeed Desc.Bullet
+            |. Parser.chompIf (\c -> c == '-') (Error.Expecting "-")
+            |. Parser.chompWhile (\c -> c == '-' || c == ' ')
+        , Parser.succeed Desc.AutoNumber
+            |. Parser.chompIf (\c -> c == '#') (Error.Expecting "#")
+            |. Parser.chompWhile (\c -> c == '.' || c == ' ')
+        ]
+
+
+{-| -}
+renderTreeNodeSmall :
+    Block item
+    -> Nested Description
+    -> Outcome.Outcome Error.AstError (Uncertain (Tree item)) (Tree item)
+renderTreeNodeSmall contentBlock (Nested cursor) =
+    let
+        renderedChildren =
+            reduceRender (renderTreeNodeSmall contentBlock) cursor.children
+
+        renderedContent =
+            reduceRender (renderBlock contentBlock) cursor.content
+    in
+    mergeWith
+        (\content children ->
+            Tree
+                { icon =
+                    case cursor.icon of
+                        Desc.Bullet ->
+                            Bullet
+
+                        Desc.AutoNumber ->
+                            Number
+                , index = cursor.index
+                , content = content
+                , children = children
+                }
+        )
+        renderedContent
+        renderedChildren
+
+
+reduceRender :
+    (thing -> Outcome.Outcome Error.AstError (Uncertain other) other)
+    -> List thing
+    -> Outcome.Outcome Error.AstError (Uncertain (List other)) (List other)
+reduceRender fn list =
+    list
+        |> List.foldl
+            (\x gathered ->
+                case gathered of
+                    Outcome.Success remain ->
+                        case fn x of
+                            Outcome.Success newThing ->
+                                Outcome.Success (newThing :: remain)
+
+                            Outcome.Almost (Uncertain err) ->
+                                Outcome.Almost (Uncertain err)
+
+                            Outcome.Almost (Recovered err data) ->
+                                Outcome.Almost
+                                    (Recovered err
+                                        (data :: remain)
+                                    )
+
+                            Outcome.Failure f ->
+                                Outcome.Failure f
+
+                    almostOrfailure ->
+                        almostOrfailure
+            )
+            (Outcome.Success [])
+        |> Outcome.mapSuccess List.reverse

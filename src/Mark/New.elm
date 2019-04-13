@@ -1,7 +1,7 @@
 module Mark.New exposing
     ( Block, block, record
     , string, int, float, bool
-    , many, tree, Tree(..)
+    , many, tree, Tree(..), Icon(..)
     , text, unstyled, bold, italicized, strike, styled
     , Attribute, annotation, token, verbatim, verbatimWith
     )
@@ -12,7 +12,7 @@ module Mark.New exposing
 
 @docs string, int, float, bool
 
-@docs many, tree, Tree
+@docs many, tree, Tree, Icon
 
 @docs text, unstyled, bold, italicized, strike, styled
 
@@ -21,6 +21,7 @@ module Mark.New exposing
 -}
 
 import Mark
+import Mark.Edit
 import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
@@ -96,10 +97,16 @@ many =
 {-| -}
 type Tree
     = Tree
-        { icon : Mark.Icon
+        { icon : Icon
         , content : List Block
         , children : List Tree
         }
+
+
+{-| -}
+type Icon
+    = Bullet
+    | Number
 
 
 {-| -}
@@ -116,10 +123,10 @@ convertToTreeExpectation (Tree details) =
     TreeExpectation
         { icon =
             case details.icon of
-                Mark.Bullet ->
+                Bullet ->
                     Desc.Bullet
 
-                Mark.Number ->
+                Number ->
                     Desc.AutoNumber
         , content = details.content
         , children =
