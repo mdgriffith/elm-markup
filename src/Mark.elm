@@ -9,9 +9,9 @@ module Mark exposing
     , tree, Tree(..)
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
     , Text(..), Styles, text, textWith, replacement, balanced, Replacement
-    , Inline, token, annotation, verbatim, attrString
-    , Range, Position
+    , Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
     , Error, errorToString, errorToHtml, Theme(..)
+    , Position, Range
     )
 
 {-| `elm-markup` is about defining what you're expecting in a markup document.
@@ -68,9 +68,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 @docs Text, Styles, text, textWith, replacement, balanced, Replacement
 
-@docs Inline, token, annotation, verbatim, attrString
-
-@docs Range, Position
+@docs Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
 
 
 ## Displaying Errors
@@ -2260,16 +2258,95 @@ attrString name newInline =
                             (AttrString attr) :: remaining ->
                                 details.converter textPieces remaining
                                     |> mapSuccessAndRecovered (List.map (\x -> x (String.trim attr.value)))
+
+                            _ ->
+                                Outcome.Failure NoMatch
                 , expect =
                     case details.expect of
                         ExpectToken tokenName attrs ->
-                            ExpectToken tokenName (ExpectAttrString name :: attrs)
+                            ExpectToken tokenName (ExpectAttrString name "" :: attrs)
 
                         ExpectAnnotation noteName attrs placeholder ->
-                            ExpectAnnotation noteName (ExpectAttrString name :: attrs) placeholder
+                            ExpectAnnotation noteName (ExpectAttrString name "" :: attrs) placeholder
 
                         ExpectVerbatim verbatimName attrs placeholder ->
-                            ExpectVerbatim verbatimName (ExpectAttrString name :: attrs) placeholder
+                            ExpectVerbatim verbatimName (ExpectAttrString name "" :: attrs) placeholder
+
+                        -- This shouldn't happen
+                        ExpectText x ->
+                            ExpectText x
+                , name = details.name
+                }
+
+
+{-| -}
+attrInt : String -> Inline (Int -> result) -> Inline result
+attrInt name newInline =
+    case newInline of
+        Inline details ->
+            Inline
+                { converter =
+                    \textPieces attrs ->
+                        case attrs of
+                            [] ->
+                                Outcome.Failure NoMatch
+
+                            (AttrInt attr) :: remaining ->
+                                details.converter textPieces remaining
+                                    |> mapSuccessAndRecovered (List.map (\x -> x attr.value))
+
+                            _ ->
+                                Outcome.Failure NoMatch
+                , expect =
+                    case details.expect of
+                        ExpectToken tokenName attrs ->
+                            ExpectToken tokenName (ExpectAttrInt name 0 :: attrs)
+
+                        ExpectAnnotation noteName attrs placeholder ->
+                            ExpectAnnotation noteName (ExpectAttrInt name 0 :: attrs) placeholder
+
+                        ExpectVerbatim verbatimName attrs placeholder ->
+                            ExpectVerbatim verbatimName (ExpectAttrInt name 0 :: attrs) placeholder
+
+                        -- This shouldn't happen
+                        ExpectText x ->
+                            ExpectText x
+                , name = details.name
+                }
+
+
+defaultFloatAttr =
+    ( "0", 0 )
+
+
+{-| -}
+attrFloat : String -> Inline (Float -> result) -> Inline result
+attrFloat name newInline =
+    case newInline of
+        Inline details ->
+            Inline
+                { converter =
+                    \textPieces attrs ->
+                        case attrs of
+                            [] ->
+                                Outcome.Failure NoMatch
+
+                            (AttrFloat attr) :: remaining ->
+                                details.converter textPieces remaining
+                                    |> mapSuccessAndRecovered (List.map (\x -> x (Tuple.second attr.value)))
+
+                            _ ->
+                                Outcome.Failure NoMatch
+                , expect =
+                    case details.expect of
+                        ExpectToken tokenName attrs ->
+                            ExpectToken tokenName (ExpectAttrFloat name defaultFloatAttr :: attrs)
+
+                        ExpectAnnotation noteName attrs placeholder ->
+                            ExpectAnnotation noteName (ExpectAttrFloat name defaultFloatAttr :: attrs) placeholder
+
+                        ExpectVerbatim verbatimName attrs placeholder ->
+                            ExpectVerbatim verbatimName (ExpectAttrFloat name defaultFloatAttr :: attrs) placeholder
 
                         -- This shouldn't happen
                         ExpectText x ->

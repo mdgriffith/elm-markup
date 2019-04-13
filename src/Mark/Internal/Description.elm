@@ -270,6 +270,16 @@ type InlineAttribute
         , range : Range
         , value : String
         }
+    | AttrInt
+        { name : String
+        , range : Range
+        , value : Int
+        }
+    | AttrFloat
+        { name : String
+        , range : Range
+        , value : ( String, Float )
+        }
 
 
 
@@ -326,8 +336,12 @@ noInlineAttributes expect =
 
 
 {-| -}
-type AttrExpectation
-    = ExpectAttrString String
+type
+    AttrExpectation
+    --                 name   default
+    = ExpectAttrString String String
+    | ExpectAttrFloat String ( String, Float )
+    | ExpectAttrInt String Int
 
 
 
@@ -462,8 +476,14 @@ inlineExample inline =
 
         renderAttr attr =
             case attr of
-                ExpectAttrString name ->
+                ExpectAttrString name _ ->
                     name ++ " = A String"
+
+                ExpectAttrFloat name _ ->
+                    name ++ " = A Float"
+
+                ExpectAttrInt name _ ->
+                    name ++ " = An Int"
     in
     case inline of
         ExpectText text ->
@@ -1250,6 +1270,12 @@ inlineDescToString inlineDesc =
     case inlineDesc of
         AttrString { name, range, value } ->
             name ++ " = " ++ value
+
+        AttrFloat { name, range, value } ->
+            name ++ " = " ++ Tuple.first value
+
+        AttrInt { name, range, value } ->
+            name ++ " = " ++ String.fromInt value
 
 
 

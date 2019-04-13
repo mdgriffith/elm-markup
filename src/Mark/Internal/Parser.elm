@@ -1,7 +1,5 @@
 module Mark.Internal.Parser exposing
     ( Replacement(..)
-    , attribute
-    , attributeList
     , float
     , getFailableBlock
     , getPosition
@@ -67,33 +65,36 @@ int =
                         }
         )
         (withRangeResult
-            (Parser.oneOf
-                [ Parser.succeed
-                    (\i str ->
-                        if str == "" then
-                            Ok (negate i)
-
-                        else
-                            Err ()
-                    )
-                    |. Parser.token (Parser.Token "-" (Expecting "-"))
-                    |= Parser.int Integer InvalidNumber
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed
-                    (\i str ->
-                        if str == "" then
-                            Ok i
-
-                        else
-                            Err ()
-                    )
-                    |= Parser.int Integer InvalidNumber
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed (Err ())
-                    |. word
-                ]
-            )
+            integer
         )
+
+
+integer =
+    Parser.oneOf
+        [ Parser.succeed
+            (\i str ->
+                if str == "" then
+                    Ok (negate i)
+
+                else
+                    Err InvalidNumber
+            )
+            |. Parser.token (Parser.Token "-" (Expecting "-"))
+            |= Parser.int Integer InvalidNumber
+            |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+        , Parser.succeed
+            (\i str ->
+                if str == "" then
+                    Ok i
+
+                else
+                    Err InvalidNumber
+            )
+            |= Parser.int Integer InvalidNumber
+            |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+        , Parser.succeed (Err InvalidNumber)
+            |. word
+        ]
 
 
 {-| Parses a float and must end with whitespace, not additional characters.
@@ -113,39 +114,42 @@ float =
                         }
         )
         (withRangeResult
-            (Parser.oneOf
-                [ Parser.succeed
-                    (\start fl end src extra ->
-                        if extra == "" then
-                            Ok ( String.slice start end src, negate fl )
-
-                        else
-                            Err ()
-                    )
-                    |= Parser.getOffset
-                    |. Parser.token (Parser.Token "-" (Expecting "-"))
-                    |= Parser.float FloatingPoint InvalidNumber
-                    |= Parser.getOffset
-                    |= Parser.getSource
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed
-                    (\start fl end src extra ->
-                        if extra == "" then
-                            Ok ( String.slice start end src, fl )
-
-                        else
-                            Err ()
-                    )
-                    |= Parser.getOffset
-                    |= Parser.float FloatingPoint InvalidNumber
-                    |= Parser.getOffset
-                    |= Parser.getSource
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-                , Parser.succeed (Err ())
-                    |. word
-                ]
-            )
+            floating
         )
+
+
+floating =
+    Parser.oneOf
+        [ Parser.succeed
+            (\start fl end src extra ->
+                if extra == "" then
+                    Ok ( String.slice start end src, negate fl )
+
+                else
+                    Err InvalidNumber
+            )
+            |= Parser.getOffset
+            |. Parser.token (Parser.Token "-" (Expecting "-"))
+            |= Parser.float FloatingPoint InvalidNumber
+            |= Parser.getOffset
+            |= Parser.getSource
+            |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+        , Parser.succeed
+            (\start fl end src extra ->
+                if extra == "" then
+                    Ok ( String.slice start end src, fl )
+
+                else
+                    Err InvalidNumber
+            )
+            |= Parser.getOffset
+            |= Parser.float FloatingPoint InvalidNumber
+            |= Parser.getOffset
+            |= Parser.getSource
+            |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+        , Parser.succeed (Err InvalidNumber)
+            |. word
+        ]
 
 
 {-| -}
@@ -976,7 +980,21 @@ reorder original current =
                     case result of
                         Err i ->
                             case expectation of
-                                ExpectAttrString expName ->
+                                ExpectAttrString expName _ ->
+                                    if expName == name then
+                                        Ok i
+
+                                    else
+                                        Err (i + 1)
+
+                                ExpectAttrFloat expName _ ->
+                                    if expName == name then
+                                        Ok i
+
+                                    else
+                                        Err (i + 1)
+
+                                ExpectAttrInt expName _ ->
                                     if expName == name then
                                         Ok i
 
@@ -1001,6 +1019,12 @@ reorder original current =
         (\attr ->
             case attr of
                 AttrString details ->
+                    findIndex details.name original
+
+                AttrFloat details ->
+                    findIndex details.name original
+
+                AttrInt details ->
                     findIndex details.name original
         )
         current
@@ -1035,12 +1059,17 @@ attributeList cursor =
             let
                 parseAttr i expectation =
                     Parser.succeed
-                        (\attr ->
-                            Parser.Loop
-                                { remaining = removeByIndex i cursor.remaining
-                                , original = cursor.original
-                                , found = attr :: cursor.found
-                                }
+                        (\attrResult ->
+                            case attrResult of
+                                Ok attr ->
+                                    Parser.Loop
+                                        { remaining = removeByIndex i cursor.remaining
+                                        , original = cursor.original
+                                        , found = attr :: cursor.found
+                                        }
+
+                                Err err ->
+                                    Parser.Done (Err [ err ])
                         )
                         |= attribute expectation
                         |. (if List.length cursor.remaining > 1 then
@@ -1059,35 +1088,81 @@ attributeList cursor =
                 )
 
 
-attribute : AttrExpectation -> Parser Context Problem InlineAttribute
+attribute : AttrExpectation -> Parser Context Problem (Result Problem InlineAttribute)
 attribute attr =
-    case attr of
-        ExpectAttrString inlineName ->
-            Parser.succeed
-                (\start equals str end ->
-                    AttrString
-                        { name = inlineName
-                        , range =
-                            { start = start
-                            , end = end
-                            }
-                        , value = str
-                        }
+    let
+        name =
+            case attr of
+                ExpectAttrString attrName _ ->
+                    attrName
+
+                ExpectAttrFloat attrName _ ->
+                    attrName
+
+                ExpectAttrInt attrName _ ->
+                    attrName
+    in
+    Parser.succeed
+        (\start equals content end ->
+            Result.map
+                (\expected ->
+                    case expected of
+                        ExpectAttrString inlineName value ->
+                            AttrString
+                                { name = inlineName
+                                , range =
+                                    { start = start
+                                    , end = end
+                                    }
+                                , value = value
+                                }
+
+                        ExpectAttrFloat inlineName value ->
+                            AttrFloat
+                                { name = inlineName
+                                , range =
+                                    { start = start
+                                    , end = end
+                                    }
+                                , value = value
+                                }
+
+                        ExpectAttrInt inlineName value ->
+                            AttrInt
+                                { name = inlineName
+                                , range =
+                                    { start = start
+                                    , end = end
+                                    }
+                                , value = value
+                                }
                 )
-                |= getPosition
-                |. Parser.keyword
-                    (Parser.Token
-                        inlineName
-                        (ExpectingFieldName inlineName)
-                    )
-                |. Parser.chompWhile (\c -> c == ' ')
-                |= Parser.oneOf
-                    [ Parser.map (always True) (Parser.chompIf (\c -> c == '=') (Expecting "="))
-                    , Parser.succeed False
-                    ]
-                |= Parser.getChompedString
-                    (Parser.chompWhile (\c -> c /= '|' && c /= '}' && c /= '\n' && c /= ','))
-                |= getPosition
+                content
+        )
+        |= getPosition
+        |. Parser.keyword
+            (Parser.Token name (ExpectingFieldName name))
+        |. Parser.chompWhile (\c -> c == ' ')
+        |= Parser.oneOf
+            [ Parser.map (always True) (Parser.chompIf (\c -> c == '=') (Expecting "="))
+            , Parser.succeed False
+            ]
+        |. Parser.chompWhile (\c -> c == ' ')
+        |= (case attr of
+                ExpectAttrString inlineName _ ->
+                    Parser.succeed (Ok << ExpectAttrString inlineName)
+                        |= Parser.getChompedString
+                            (Parser.chompWhile (\c -> c /= '|' && c /= '}' && c /= '\n' && c /= ','))
+
+                ExpectAttrFloat inlineName _ ->
+                    Parser.succeed (Result.map (ExpectAttrFloat inlineName))
+                        |= floating
+
+                ExpectAttrInt inlineName _ ->
+                    Parser.succeed (Result.map (ExpectAttrInt inlineName))
+                        |= integer
+           )
+        |= getPosition
 
 
 

@@ -3,7 +3,7 @@ module Mark.New exposing
     , string, int, float, bool
     , many
     , text, unstyled, bold, italicized, strike, styled
-    , Attribute, annotation, token, verbatim
+    , Attribute, annotation, token, verbatim, verbatimWith
     )
 
 {-|
@@ -16,7 +16,7 @@ module Mark.New exposing
 
 @docs text, unstyled, bold, italicized, strike, styled
 
-@docs Attribute, annotation, token, verbatim
+@docs Attribute, annotation, token, verbatim, verbatimWith
 
 -}
 
@@ -107,6 +107,12 @@ text =
 {-| -}
 type alias Attribute =
     AttrExpectation
+
+
+{-| -}
+attrString : String -> String -> Attribute
+attrString =
+    ExpectAttrString
 
 
 {-| -}
