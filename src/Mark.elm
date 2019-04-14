@@ -893,7 +893,7 @@ manyOf blocks =
                 , Parser.succeed
                     (\( range, results ) ->
                         ManyOf
-                            { choices = List.map (Choice parentId) expectations
+                            { choices = expectations
                             , id = parentId
                             , range = range
                             , children = List.map resultToFound results

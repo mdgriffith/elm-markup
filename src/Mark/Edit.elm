@@ -1,9 +1,7 @@
 module Mark.Edit exposing
     ( bool, int, float, string, multiline, oneOf, manyOf
     , Tree(..), Icon(..), tree
-    , update
-    , Edit, updateInt, updateFloat, updateString
-    , replace, delete, insertAt
+    , update, Edit, replace, delete, insertAt
     )
 
 {-|
@@ -18,11 +16,7 @@ module Mark.Edit exposing
 
 # Making Edits
 
-@docs update
-
-@docs Edit, updateInt, updateFloat, updateString
-
-@docs replace, delete, insertAt
+@docs update, Edit, replace, delete, insertAt
 
 -}
 
@@ -32,6 +26,7 @@ import Mark.Internal.Format as Format
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
+import Mark.New
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
@@ -44,8 +39,8 @@ type alias Error =
 
 
 {-| -}
-type alias Id kind =
-    Id.Id kind
+type alias Id =
+    Id.Id
 
 
 {-| -}
@@ -72,130 +67,65 @@ type alias Range =
 
 {-| -}
 type Proved
-    = Proved (Id ManyOptions) (List (Found Description))
+    = Proved Id (List (Found Description))
 
 
 {-| -}
 type Edit
-    = UpdateFloat (Id Float) Float
-    | UpdateString (Id String) String
-    | UpdateBool (Id Bool) Bool
-    | UpdateInt (Id Int) Int
-    | ReplaceOneOf (Choice (Id Options) Expectation)
+    = Replace Id Mark.New.Block
       -- Create an element in a ManyOf
       -- Indexes overflow, so if it's too large, it just puts it at the end.
       -- Indexes that are below 0 and clamped to 0
-    | InsertAt Int (Choice (Id ManyOptions) Expectation)
-    | Delete (Id ManyOptions) Int
+    | InsertAt Id Int Mark.New.Block
+    | Delete Id
 
 
 {-| -}
-updateInt : Id Int -> Int -> Edit
-updateInt =
-    UpdateInt
-
-
-{-| -}
-updateString : Id String -> String -> Edit
-updateString =
-    UpdateString
-
-
-{-| -}
-replace : Choice (Id Options) Expectation -> Edit
+replace : Id -> Mark.New.Block -> Edit
 replace =
-    ReplaceOneOf
+    Replace
 
 
 {-| -}
-delete : Id ManyOptions -> Int -> Edit
+delete : Id -> Edit
 delete =
     Delete
 
 
 {-| -}
-insertAt : Int -> Choice (Id ManyOptions) Expectation -> Edit
+insertAt : Id -> Int -> Mark.New.Block -> Edit
 insertAt =
     InsertAt
-
-
-{-| -}
-updateFloat : Id Float -> Float -> Edit
-updateFloat =
-    UpdateFloat
 
 
 {-| -}
 update : Edit -> Parsed -> Parsed
 update edit (Parsed original) =
     case edit of
-        UpdateBool id newBool ->
-            Parsed
-                { original
-                    | found =
-                        makeFoundEdit
-                            { makeEdit = \i pos desc -> updateFoundBool id newBool desc
-                            , indentation = 0
-                            }
-                            original.found
-                }
+        Replace id new ->
+            Parsed original
 
-        UpdateFloat id newFloat ->
-            Parsed
-                { original
-                    | found =
-                        makeFoundEdit
-                            { makeEdit = \i pos desc -> updateFoundFloat id newFloat desc
-                            , indentation = 0
-                            }
-                            original.found
-                }
-
-        UpdateString id newStr ->
-            Parsed
-                { original
-                    | found =
-                        makeFoundEdit
-                            { makeEdit = \i pos desc -> updateFoundString id newStr desc
-                            , indentation = 0
-                            }
-                            original.found
-                }
-
-        UpdateInt id newInt ->
-            Parsed
-                { original
-                    | found =
-                        makeFoundEdit
-                            { makeEdit = \i pos desc -> updateFoundInt id newInt desc
-                            , indentation = 0
-                            }
-                            original.found
-                }
-
-        ReplaceOneOf (Choice id expectation) ->
-            Parsed
-                { original
-                    | found =
-                        makeFoundEdit
-                            { makeEdit =
-                                \i pos desc ->
-                                    let
-                                        new =
-                                            create
-                                                { indent = i
-                                                , base = pos
-                                                , expectation = expectation
-                                                , seed = original.currentSeed
-                                                }
-                                    in
-                                    replaceOption id new.desc desc
-                            , indentation = 0
-                            }
-                            original.found
-                }
-
-        InsertAt index (Choice id expectation) ->
+        -- Parsed
+        --     { original
+        --         | found =
+        --             makeFoundEdit
+        --                 { makeEdit =
+        --                     \i pos desc ->
+        --                         let
+        --                             new =
+        --                                 create
+        --                                     { indent = i
+        --                                     , base = pos
+        --                                     , expectation = expectation
+        --                                     , seed = original.currentSeed
+        --                                     }
+        --                         in
+        --                         replaceOption id new.desc desc
+        --                 , indentation = 0
+        --                 }
+        --                 original.found
+        --     }
+        InsertAt id index expectation ->
             Parsed
                 { original
                     | found =
@@ -222,23 +152,24 @@ update edit (Parsed original) =
                             original.found
                 }
 
-        Delete id index ->
-            Parsed
-                { original
-                    | found =
-                        makeFoundEdit
-                            { makeEdit = \i pos desc -> makeDeleteBlock id index desc
-                            , indentation = 0
-                            }
-                            original.found
-                }
+        Delete id ->
+            -- Parsed
+            --     { original
+            --         | found =
+            --             makeFoundEdit
+            --                 { makeEdit = \i pos desc -> makeDeleteBlock id index desc
+            --                 , indentation = 0
+            --                 }
+            --                 original.found
+            --     }
+            Parsed original
 
 
 {-| -}
-prove : List (Found Description) -> List (Choice (Id ManyOptions) Expectation) -> Maybe Proved
+prove : List (Found Description) -> List ( Id, Expectation ) -> Maybe Proved
 prove found choices =
     let
-        combineChoices (Choice id exp) ( lastId, foundExpectations, matchingIds ) =
+        combineChoices ( id, exp ) ( lastId, foundExpectations, matchingIds ) =
             case lastId of
                 Nothing ->
                     ( Just id, exp :: foundExpectations, matchingIds )
@@ -286,10 +217,6 @@ validate expectations found validated =
                     Nothing
 
 
-choiceExpectation (Choice id exp) =
-    exp
-
-
 match description exp =
     case description of
         DescribeBlock details ->
@@ -308,10 +235,10 @@ match description exp =
             matchExpected details.expected exp
 
         OneOf one ->
-            matchExpected (ExpectOneOf (List.map choiceExpectation one.choices)) exp
+            matchExpected (ExpectOneOf one.choices) exp
 
         ManyOf many ->
-            matchExpected (ExpectManyOf (List.map choiceExpectation many.choices)) exp
+            matchExpected (ExpectManyOf many.choices) exp
 
         StartsWith range start end ->
             case exp of
@@ -612,7 +539,7 @@ withinOffsetRange offset range =
            2. What operations can be performed at that point
            3. A valid payload
 
-       For ReplaceOneOf
+       For Replace
 
            -> Can we accept an Expectation ++ ID Combo?
 
@@ -666,12 +593,12 @@ withinOffsetRange offset range =
 
 {-| Given an expectation and a list of choices, verify that the expectation is a valid choice.
 -}
-make : Expectation -> List (Choice id Expectation) -> Maybe (Choice id Expectation)
+make : Expectation -> List ( id, Expectation ) -> Maybe ( id, Expectation )
 make expected options =
     List.filterMap
-        (\(Choice id exp) ->
+        (\( id, exp ) ->
             if matchExpected expected exp then
-                Just (Choice id expected)
+                Just ( id, expected )
 
             else
                 Nothing
@@ -1265,7 +1192,7 @@ getWithinNested offset (Nested nest) =
 
 {-| Parse an `Int` block.
 -}
-int : ({ id : Id Int, range : Range } -> Int -> a) -> Block a
+int : ({ id : Id, range : Range } -> Int -> a) -> Block a
 int view =
     Value
         { converter =
@@ -1308,7 +1235,7 @@ int view =
 
 
 {-| -}
-float : ({ id : Id Float, range : Range } -> ( String, Float ) -> a) -> Block a
+float : ({ id : Id, range : Range } -> ( String, Float ) -> a) -> Block a
 float view =
     Value
         { converter =
@@ -1351,7 +1278,7 @@ float view =
 
 
 {-| -}
-string : ({ id : Id String, range : Range } -> String -> a) -> Block a
+string : ({ id : Id, range : Range } -> String -> a) -> Block a
 string view =
     Value
         { expect = ExpectString "-- Replace Me --"
@@ -1395,7 +1322,7 @@ string view =
 
 
 {-| -}
-multiline : ({ id : Id String, range : Range } -> String -> a) -> Block a
+multiline : ({ id : Id, range : Range } -> String -> a) -> Block a
 multiline view =
     Value
         { expect = ExpectMultiline "REPLACE"
@@ -1438,7 +1365,7 @@ multiline view =
 
 {-| Parse either `True` or `False`.
 -}
-bool : ({ id : Id Bool, range : Range } -> Bool -> a) -> Block a
+bool : ({ id : Id, range : Range } -> Bool -> a) -> Block a
 bool view =
     Value
         { expect = ExpectBoolean False
@@ -1501,9 +1428,9 @@ bool view =
 
 {-| -}
 oneOf :
-    ({ id : Id Options
+    ({ id : Id
      , range : Range
-     , options : List (Choice (Id Options) Expectation)
+     , options : List Expectation
      }
      -> a
      -> b
@@ -1613,14 +1540,14 @@ oneOf view blocks =
                         case result of
                             Ok found ->
                                 OneOf
-                                    { choices = List.map (Choice parentId) expectations
+                                    { choices = expectations
                                     , child = Found range found
                                     , id = parentId
                                     }
 
                             Err ( pos, unexpected ) ->
                                 OneOf
-                                    { choices = List.map (Choice parentId) expectations
+                                    { choices = expectations
                                     , child =
                                         Unexpected
                                             { range = pos
@@ -1652,7 +1579,7 @@ unexpectedInOneOf expectations =
 {-| Many blocks that are all at the same indentation level.
 -}
 manyOf :
-    ({ id : Id ManyOptions
+    ({ id : Id
      , range : Range
      }
      -> List a
@@ -1727,7 +1654,7 @@ manyOf view blocks =
                 , Parser.succeed
                     (\( range, results ) ->
                         ManyOf
-                            { choices = List.map (Choice parentId) expectations
+                            { choices = expectations
                             , id = parentId
                             , range = range
                             , children = List.map resultToFound results
@@ -1790,7 +1717,7 @@ In order to parse the above, you could define a block as
 tree :
     String
     ->
-        ({ id : Id ManyOptions
+        ({ id : Id
          , range : Range
          }
          -> List (Tree item)
@@ -1822,7 +1749,6 @@ tree name view contentBlock =
                         Outcome.Failure Error.NoMatch
         , parser =
             \seed ->
-                -- TODO: AHHHH, A NEW SEED NEEDS TO GET CREATED
                 let
                     ( newId, newSeed ) =
                         Id.step seed
@@ -1941,3 +1867,60 @@ reduceRender fn list =
             )
             (Outcome.Success [])
         |> Outcome.mapSuccess List.reverse
+
+
+errorToList ( x, xs ) =
+    x :: xs
+
+
+{-| -}
+onError : (List { range : Range } -> a) -> Block a -> Block a
+onError recover myBlock =
+    case myBlock of
+        Block name details ->
+            Block name
+                { expect = details.expect
+                , parser = details.parser
+                , converter =
+                    \desc ->
+                        case details.converter desc of
+                            Outcome.Success a ->
+                                Outcome.Success a
+
+                            Outcome.Almost (Recovered err a) ->
+                                Outcome.Almost (Recovered err a)
+
+                            Outcome.Almost (Uncertain errs) ->
+                                Outcome.Almost
+                                    (Recovered errs
+                                        (recover
+                                            (List.map (\e -> { range = e.range }) (errorToList errs))
+                                        )
+                                    )
+
+                            Outcome.Failure f ->
+                                Outcome.Failure f
+                }
+
+        Value details ->
+            Value
+                { expect = details.expect
+                , parser = details.parser
+                , converter =
+                    \desc ->
+                        case details.converter desc of
+                            Outcome.Success a ->
+                                Outcome.Success a
+
+                            Outcome.Almost (Recovered err a) ->
+                                Outcome.Almost (Recovered err a)
+
+                            Outcome.Almost (Uncertain errs) ->
+                                Outcome.Almost
+                                    (Recovered errs
+                                        (recover (List.map (\e -> { range = e.range }) (errorToList errs)))
+                                    )
+
+                            Outcome.Failure f ->
+                                Outcome.Failure f
+                }

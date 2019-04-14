@@ -313,14 +313,14 @@ oneOf blocks expectations seed =
             case result of
                 Ok details ->
                     OneOf
-                        { choices = List.map (Choice parentId) expectations
+                        { choices = expectations
                         , child = Found details.range details.value
                         , id = parentId
                         }
 
                 Err details ->
                     OneOf
-                        { choices = List.map (Choice parentId) expectations
+                        { choices = expectations
                         , child =
                             Unexpected
                                 { range = details.range

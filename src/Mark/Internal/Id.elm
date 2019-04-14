@@ -1,8 +1,5 @@
 module Mark.Internal.Id exposing
-    ( Choice(..)
-    , Id(..)
-    , ManyOptions(..)
-    , Options(..)
+    ( Id(..)
     , Seed
     , initialSeed
     , reseed
@@ -46,7 +43,7 @@ reseed (Seed seed) =
     Seed (0 :: seed)
 
 
-step : Seed -> ( Id category, Seed )
+step : Seed -> ( Id, Seed )
 step (Seed seed) =
     case seed of
         [] ->
@@ -70,18 +67,5 @@ threadThrough current ( seed, past ) =
     ( newSeed, result :: past )
 
 
-type Id category
+type Id
     = Id (List Int)
-
-
-{-| -}
-type Choice id expectation
-    = Choice id expectation
-
-
-type ManyOptions
-    = ManyOptions
-
-
-type Options
-    = Options

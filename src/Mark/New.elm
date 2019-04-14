@@ -4,6 +4,7 @@ module Mark.New exposing
     , many, tree, Tree(..), Icon(..)
     , text, unstyled, bold, italicized, strike, styled
     , Attribute, annotation, token, verbatim, verbatimWith
+    , attrString, attrFloat, attrInt
     )
 
 {-|
@@ -18,10 +19,10 @@ module Mark.New exposing
 
 @docs Attribute, annotation, token, verbatim, verbatimWith
 
+@docs attrString, attrFloat, attrInt
+
 -}
 
-import Mark
-import Mark.Edit
 import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Id as Id exposing (..)
@@ -157,6 +158,18 @@ attrString =
 
 
 {-| -}
+attrFloat : String -> Float -> Attribute
+attrFloat name fl =
+    ExpectAttrFloat name ( String.fromFloat fl, fl )
+
+
+{-| -}
+attrInt : String -> Int -> Attribute
+attrInt =
+    ExpectAttrInt
+
+
+{-| -}
 annotation : List Text -> String -> List Attribute -> Text
 annotation content name attrs =
     ExpectAnnotation name attrs (List.filterMap onlyText content)
@@ -217,3 +230,53 @@ strike str =
 unstyled : String -> Text
 unstyled str =
     ExpectText (Text emptyStyles str)
+
+
+{-| Modifying existing text
+-}
+type Selection
+    = -- offset start, offset end
+      Relative Int Int
+
+
+{-| Create a selection of text with starting and ending offset of the text.
+-}
+select : Int -> Int -> Selection
+select =
+    Relative
+
+
+{-| -}
+restyle : Selection -> Styling -> Text -> Text
+restyle styling selection txt =
+    txt
+
+
+{-| -}
+addStyle : Selection -> Styling -> Text -> Text
+addStyle styling selection txt =
+    txt
+
+
+{-| -}
+unstyle : Selection -> Text -> Text
+unstyle selection txt =
+    txt
+
+
+{-| -}
+annotate : Selection -> String -> List Attribute -> Text -> Text
+annotate seletion name attrs txt =
+    txt
+
+
+{-| -}
+makeVerbatim : Selection -> Text -> Text
+makeVerbatim selection txt =
+    txt
+
+
+{-| -}
+makeVerbatimWith : Selection -> String -> List Attribute -> Text -> Text
+makeVerbatimWith selection name attrs txt =
+    txt

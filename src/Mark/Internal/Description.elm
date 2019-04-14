@@ -180,14 +180,14 @@ type Description
         , expected : Expectation
         }
     | OneOf
-        { id : Id Options
-        , choices : List (Choice (Id Options) Expectation)
+        { id : Id
+        , choices : List Expectation
         , child : Found Description
         }
     | ManyOf
-        { id : Id ManyOptions
+        { id : Id
         , range : Range
-        , choices : List (Choice (Id ManyOptions) Expectation)
+        , choices : List Expectation
         , children : List (Found Description)
         }
     | StartsWith
@@ -199,37 +199,37 @@ type Description
         , expected : Expectation
         }
     | DescribeTree
-        { id : Id ManyOptions
+        { id : Id
         , range : Range
         , children : List (Nested Description)
         , expected : Expectation
         }
       -- Primitives
     | DescribeBoolean
-        { id : Id Bool
+        { id : Id
         , found : Found Bool
         }
     | DescribeInteger
-        { id : Id Int
+        { id : Id
         , found : Found Int
         }
     | DescribeFloat
-        { id : Id Float
+        { id : Id
         , found : Found ( String, Float )
         }
     | DescribeText
-        { id : Id Text
+        { id : Id
         , range : Range
         , text : List TextDescription
         }
-    | DescribeString (Id String) Range String
-    | DescribeMultiline (Id String) Range String
+    | DescribeString Id Range String
+    | DescribeMultiline Id Range String
     | DescribeNothing
 
 
 {-| -}
 type Proved
-    = Proved (Id ManyOptions) (List (Found Description))
+    = Proved Id (List (Found Description))
 
 
 {-| -}
@@ -525,10 +525,6 @@ inlineExample inline =
                 "`some styled text`{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
 
 
-choiceExpectation (Choice id exp) =
-    exp
-
-
 match description exp =
     case description of
         DescribeNothing ->
@@ -555,10 +551,10 @@ match description exp =
             matchExpected details.expected exp
 
         OneOf one ->
-            matchExpected (ExpectOneOf (List.map choiceExpectation one.choices)) exp
+            matchExpected (ExpectOneOf one.choices) exp
 
         ManyOf many ->
-            matchExpected (ExpectManyOf (List.map choiceExpectation many.choices)) exp
+            matchExpected (ExpectManyOf many.choices) exp
 
         StartsWith range start end ->
             case exp of
@@ -692,12 +688,12 @@ withinOffsetRange offset range =
 
 {-| Given an expectation and a list of choices, verify that the expectation is a valid choice.
 -}
-make : Expectation -> List (Choice id Expectation) -> Maybe (Choice id Expectation)
+make : Expectation -> List Expectation -> Maybe Expectation
 make expected options =
     List.filterMap
-        (\(Choice id exp) ->
+        (\exp ->
             if matchExpected expected exp then
-                Just (Choice id expected)
+                Just expected
 
             else
                 Nothing
@@ -1460,7 +1456,7 @@ create current =
             , desc =
                 OneOf
                     { id = newId
-                    , choices = List.map (Choice newId) choices
+                    , choices = choices
                     , child =
                         Found
                             { start = current.base
@@ -1519,7 +1515,7 @@ create current =
                         { start = current.base
                         , end = lastPos
                         }
-                    , choices = List.map (Choice parentId) choices
+                    , choices = choices
                     , children = children
                     }
             }
