@@ -127,8 +127,14 @@ annotate id selection name attrs =
 
 
 {-| -}
-makeVerbatim : Id -> Selection -> String -> List Mark.New.Attribute -> Edit
-makeVerbatim id selection name attrs =
+makeVerbatim : Id -> Selection -> String -> Edit
+makeVerbatim id selection name =
+    Annotate id selection (Verbatim name [])
+
+
+{-| -}
+makeVerbatimWith : Id -> Selection -> String -> List Mark.New.Attribute -> Edit
+makeVerbatimWith id selection name attrs =
     Annotate id selection (Verbatim name attrs)
 
 
@@ -263,7 +269,9 @@ update doc edit (Parsed original) =
                                         newTexts =
                                             details.text
                                                 |> List.foldl
-                                                    (doRestyle selection restyleAction)
+                                                    (doTextEdit selection
+                                                        (List.map (applyStyles restyleAction))
+                                                    )
                                                     emptySelectionEdit
                                                 |> .elements
                                                 |> List.foldl mergeStyles []
@@ -278,10 +286,77 @@ update doc edit (Parsed original) =
                         )
 
                 Annotate id selection wrapper ->
-                    Debug.todo "do it"
+                    editAtId id
+                        (\indent pos desc ->
+                            case desc of
+                                DescribeText details ->
+                                    let
+                                        newTexts =
+                                            details.text
+                                                |> List.foldl
+                                                    (doTextEdit selection
+                                                        (\els ->
+                                                            case wrapper of
+                                                                Annotation name attrs ->
+                                                                    [ InlineAnnotation
+                                                                        { name = name
+                                                                        , attributes = List.map expectationToAttr attrs
+
+                                                                        -- TODO: this isn't right, need real range
+                                                                        , range = emptyRange
+                                                                        , text = List.concatMap onlyText els
+                                                                        }
+                                                                    ]
+
+                                                                Verbatim name attrs ->
+                                                                    [ InlineVerbatim
+                                                                        { name = Just name
+                                                                        , attributes = List.map Desc.expectationToAttr attrs
+
+                                                                        -- TODO: this isn't right, need real range
+                                                                        , range = emptyRange
+                                                                        , text = Text emptyStyles ""
+                                                                        }
+                                                                    ]
+                                                        )
+                                                    )
+                                                    emptySelectionEdit
+                                                |> .elements
+                                                |> List.foldl mergeStyles []
+                                    in
+                                    Just
+                                        (DescribeText
+                                            { details | text = newTexts }
+                                        )
+
+                                _ ->
+                                    Nothing
+                        )
 
                 ReplaceSelection id selection newTextEls ->
-                    Debug.todo "do it"
+                    editAtId id
+                        (\indent pos desc ->
+                            case desc of
+                                DescribeText details ->
+                                    let
+                                        newTexts =
+                                            details.text
+                                                |> List.foldl
+                                                    (doTextEdit selection
+                                                        (always (createInline newTextEls))
+                                                    )
+                                                    emptySelectionEdit
+                                                |> .elements
+                                                |> List.foldl mergeStyles []
+                                    in
+                                    Just
+                                        (DescribeText
+                                            { details | text = newTexts }
+                                        )
+
+                                _ ->
+                                    Nothing
+                        )
     in
     original.found
         |> makeFoundEdit
@@ -2449,6 +2524,22 @@ type Restyle
 {- TEXT EDITING HELP -}
 
 
+onlyText : TextDescription -> List Text
+onlyText txt =
+    case txt of
+        InlineAnnotation details ->
+            details.text
+
+        InlineToken details ->
+            []
+
+        InlineVerbatim details ->
+            [ details.text ]
+
+        x ->
+            []
+
+
 {-| Folds over a list of styles and merges them if they're compatible
 -}
 mergeStyles : TextDescription -> List TextDescription -> List TextDescription
@@ -2509,9 +2600,9 @@ emptySelectionEdit =
     }
 
 
-doRestyle :
+doTextEdit :
     Selection
-    -> Restyle
+    -> (List TextDescription -> List TextDescription)
     -> TextDescription
     ->
         { elements : List TextDescription
@@ -2523,7 +2614,7 @@ doRestyle :
         , offset : Int
         , selection : Maybe (List TextDescription)
         }
-doRestyle { anchor, focus } newStyles current cursor =
+doTextEdit { anchor, focus } editFn current cursor =
     let
         start =
             min anchor focus
@@ -2549,7 +2640,7 @@ doRestyle { anchor, focus } newStyles current cursor =
                     in
                     { offset = cursor.offset + len
                     , elements =
-                        after :: applyStyles newStyles selected :: before :: cursor.elements
+                        after :: editFn [ selected ] ++ (before :: cursor.elements)
                     , selection =
                         Nothing
                     }
@@ -2582,7 +2673,7 @@ doRestyle { anchor, focus } newStyles current cursor =
                         before :: selection
                 in
                 { offset = cursor.offset + len
-                , elements = after :: List.map (applyStyles newStyles) fullSelection ++ cursor.elements
+                , elements = after :: editFn fullSelection ++ cursor.elements
                 , selection = Nothing
                 }
 

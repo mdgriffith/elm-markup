@@ -4,13 +4,13 @@ module Mark.Internal.Description exposing
     , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), AttrExpectation(..), TreeExpectation(..)
     , Parsed(..), startingPoint, descriptionToString, toString, mergeWith
-    , create
+    , create, createInline
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
     , Block(..), Document(..), Inline(..)
     , boldStyle, italicStyle, strikeStyle
-    , resultToFound, getId
+    , resultToFound, getId, expectationToAttr
     )
 
 {-|
@@ -25,7 +25,7 @@ module Mark.Internal.Description exposing
 
 @docs Parsed, startingPoint, descriptionToString, toString, mergeWith
 
-@docs create
+@docs create, createInline
 
 @docs Styling, emptyStyles
 
@@ -37,7 +37,7 @@ module Mark.Internal.Description exposing
 
 @docs boldStyle, italicStyle, strikeStyle
 
-@docs resultToFound, getId
+@docs resultToFound, getId, expectationToAttr
 
 -}
 
@@ -233,6 +233,20 @@ type Description
     | DescribeNothing Id
 
 
+emptyRange =
+    { start =
+        { offset = 0
+        , line = 1
+        , column = 1
+        }
+    , end =
+        { offset = 0
+        , line = 1
+        , column = 1
+        }
+    }
+
+
 getId description =
     case description of
         DescribeBlock details ->
@@ -405,6 +419,31 @@ noInlineAttributes expect =
             True
 
 
+expectationToAttr : AttrExpectation -> InlineAttribute
+expectationToAttr exp =
+    case exp of
+        ExpectAttrString name default ->
+            AttrString
+                { name = name
+                , range = emptyRange
+                , value = default
+                }
+
+        ExpectAttrFloat name default ->
+            AttrFloat
+                { name = name
+                , range = emptyRange
+                , value = default
+                }
+
+        ExpectAttrInt name default ->
+            AttrInt
+                { name = name
+                , range = emptyRange
+                , value = default
+                }
+
+
 {-| -}
 type
     AttrExpectation
@@ -412,12 +451,6 @@ type
     = ExpectAttrString String String
     | ExpectAttrFloat String ( String, Float )
     | ExpectAttrInt String Int
-
-
-
--- | ExpectAttr
--- | ExpectInlineText
--- | DescribeInlineText Range (List Text)
 
 
 {-| -}
@@ -1395,6 +1428,50 @@ writeField ( name, foundVal ) cursor =
 {- CREATION -}
 
 
+createInline :
+    List InlineExpectation
+    -> List TextDescription
+createInline current =
+    List.map inlineExpectationToDesc current
+
+
+inlineExpectationToDesc exp =
+    -- TODO: add ranges
+    case exp of
+        ExpectText txt ->
+            Styled emptyRange txt
+
+        ExpectAnnotation name attrs txts ->
+            InlineAnnotation
+                { name = name
+                , range = emptyRange
+                , text = txts
+                , attributes = List.map expectationToAttr attrs
+                }
+
+        -- tokens have no placeholder
+        ExpectToken name attrs ->
+            InlineToken
+                { name = name
+                , range = emptyRange
+                , attributes = List.map expectationToAttr attrs
+                }
+
+        -- name, attrs, placeholder content
+        ExpectVerbatim name attrs content ->
+            InlineVerbatim
+                { name =
+                    if name == "" && attrs == [] then
+                        Nothing
+
+                    else
+                        Just name
+                , range = emptyRange
+                , text = Text emptyStyles content
+                , attributes = List.map expectationToAttr attrs
+                }
+
+
 {-|
 
     `Position` is the starting position for a block.
@@ -1740,7 +1817,6 @@ create current =
             , seed = newSeed
             }
 
-        -- ExpectDate ->
         _ ->
             let
                 end =
