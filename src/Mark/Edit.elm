@@ -1,7 +1,9 @@
 module Mark.Edit exposing
     ( bool, int, float, string, multiline, oneOf, manyOf
+    , text, Replacement, Inline
     , Tree(..), Icon(..), tree
-    , update, Edit, replace, delete, insertAt
+    , update, Error, Edit, replace, delete, insertAt
+    , restyle, addStyle
     )
 
 {-|
@@ -11,12 +13,16 @@ module Mark.Edit exposing
 
 @docs bool, int, float, string, multiline, oneOf, manyOf
 
+@docs text, Replacement, Inline
+
 @docs Tree, Icon, tree
 
 
 # Making Edits
 
-@docs update, Edit, replace, delete, insertAt
+@docs update, Error, Edit, replace, delete, insertAt
+
+@docs restyle, addStyle, removeStyle
 
 -}
 
@@ -30,12 +36,18 @@ import Mark.New
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
+
+-- {-| -}
+-- type alias Error =
+--     { message : List Format.Text
+--     , region : { start : Position, end : Position }
+--     , title : String
+--     }
+
+
 {-| -}
 type alias Error =
-    { message : List Format.Text
-    , region : { start : Position, end : Position }
-    , title : String
-    }
+    Error.Rendered
 
 
 {-| -}
@@ -43,11 +55,12 @@ type alias Id =
     Id.Id
 
 
-{-| -}
-type alias UnexpectedDetails =
-    { range : Range
-    , problem : Error.Error
-    }
+
+-- {-| -}
+-- type alias UnexpectedDetails =
+--     { range : Range
+--     , problem : Error.Error
+--     }
 
 
 {-| -}
@@ -77,7 +90,16 @@ type Edit
       -- Indexes overflow, so if it's too large, it just puts it at the end.
       -- Indexes that are below 0 and clamped to 0
     | InsertAt Id Int Mark.New.Block
-    | Delete Id
+    | Delete Id Int
+      -- Text Editing
+    | StyleText Id Selection Restyle
+    | Annotate Id Selection Annotation
+    | ReplaceSelection Id Selection (List Mark.New.Text)
+
+
+type Annotation
+    = Annotation String (List Mark.New.Attribute)
+    | Verbatim String (List Mark.New.Attribute)
 
 
 {-| -}
@@ -87,7 +109,7 @@ replace =
 
 
 {-| -}
-delete : Id -> Edit
+delete : Id -> Int -> Edit
 delete =
     Delete
 
@@ -99,70 +121,174 @@ insertAt =
 
 
 {-| -}
-update : Edit -> Parsed -> Parsed
-update edit (Parsed original) =
-    case edit of
-        Replace id new ->
-            Parsed original
+annotate : Id -> Selection -> String -> List Mark.New.Attribute -> Edit
+annotate id selection name attrs =
+    Annotate id selection (Annotation name attrs)
 
-        -- Parsed
-        --     { original
-        --         | found =
-        --             makeFoundEdit
-        --                 { makeEdit =
-        --                     \i pos desc ->
-        --                         let
-        --                             new =
-        --                                 create
-        --                                     { indent = i
-        --                                     , base = pos
-        --                                     , expectation = expectation
-        --                                     , seed = original.currentSeed
-        --                                     }
-        --                         in
-        --                         replaceOption id new.desc desc
-        --                 , indentation = 0
-        --                 }
-        --                 original.found
-        --     }
-        InsertAt id index expectation ->
-            Parsed
-                { original
-                    | found =
-                        makeFoundEdit
-                            { makeEdit =
-                                \indentation pos desc ->
-                                    case desc of
-                                        ManyOf many ->
-                                            if id == many.id then
-                                                Just
-                                                    (ManyOf
-                                                        { many
-                                                            | children = makeInsertAt original.currentSeed index indentation many expectation
-                                                        }
-                                                    )
 
-                                            else
-                                                Nothing
+{-| -}
+makeVerbatim : Id -> Selection -> String -> List Mark.New.Attribute -> Edit
+makeVerbatim id selection name attrs =
+    Annotate id selection (Verbatim name attrs)
 
-                                        _ ->
-                                            Nothing
-                            , indentation = 0
-                            }
-                            original.found
-                }
 
-        Delete id ->
-            -- Parsed
-            --     { original
-            --         | found =
-            --             makeFoundEdit
-            --                 { makeEdit = \i pos desc -> makeDeleteBlock id index desc
-            --                 , indentation = 0
-            --                 }
-            --                 original.found
-            --     }
-            Parsed original
+{-| -}
+restyle : Id -> Selection -> Styles -> Edit
+restyle id selection styles =
+    StyleText id selection (Restyle styles)
+
+
+{-| -}
+removeStyles : Id -> Selection -> Styles -> Edit
+removeStyles id selection styles =
+    StyleText id selection (RemoveStyle styles)
+
+
+{-| -}
+addStyle : Id -> Selection -> Styles -> Edit
+addStyle id selection styles =
+    StyleText id selection (AddStyle styles)
+
+
+prepareResults doc original ( edited, newDescription ) =
+    case edited of
+        NoEditMade ->
+            Err [ Error.idNotFound ]
+
+        YesEditMade ->
+            let
+                newParsed =
+                    Parsed { original | found = newDescription }
+            in
+            case Desc.render doc newParsed of
+                Outcome.Success _ ->
+                    Ok newParsed
+
+                Outcome.Almost details ->
+                    Err details.errors
+
+                Outcome.Failure errs ->
+                    Err errs
+
+
+editAtId id fn indentation pos desc =
+    if Desc.getId desc == id then
+        fn indentation pos desc
+
+    else
+        Nothing
+
+
+replaceOption id new desc =
+    case desc of
+        OneOf one ->
+            -- When we're replacing the OneOf, we actually want to replace it's contents.
+            case one.child of
+                Found range val ->
+                    Just (OneOf { one | child = Found range new })
+
+                Unexpected unexpected ->
+                    Just (OneOf { one | child = Found unexpected.range new })
+
+        _ ->
+            Just new
+
+
+makeDeleteBlock id index indentation pos desc =
+    case desc of
+        ManyOf many ->
+            Just
+                (ManyOf
+                    { many
+                        | children = removeByIndex index many.children
+                    }
+                )
+
+        _ ->
+            Nothing
+
+
+{-| -}
+update : Document data -> Edit -> Parsed -> Result (List Error) Parsed
+update doc edit (Parsed original) =
+    let
+        editFn =
+            case edit of
+                Replace id new ->
+                    editAtId id <|
+                        \i pos desc ->
+                            let
+                                created =
+                                    create
+                                        { indent = i
+                                        , base = pos
+                                        , expectation = new
+                                        , seed = original.currentSeed
+                                        }
+                            in
+                            replaceOption id created.desc desc
+
+                InsertAt id index expectation ->
+                    editAtId id <|
+                        \indentation pos desc ->
+                            case desc of
+                                ManyOf many ->
+                                    Just <|
+                                        ManyOf
+                                            { many
+                                                | children =
+                                                    makeInsertAt
+                                                        original.currentSeed
+                                                        index
+                                                        indentation
+                                                        many
+                                                        expectation
+                                            }
+
+                                _ ->
+                                    -- inserts only work for
+                                    -- `ManyOf`, `Tree`, and `Text`
+                                    Nothing
+
+                Delete id index ->
+                    editAtId id
+                        (makeDeleteBlock id index)
+
+                StyleText id selection restyleAction ->
+                    editAtId id
+                        (\indent pos desc ->
+                            case desc of
+                                DescribeText details ->
+                                    let
+                                        newTexts =
+                                            details.text
+                                                |> List.foldl
+                                                    (doRestyle selection restyleAction)
+                                                    emptySelectionEdit
+                                                |> .elements
+                                                |> List.foldl mergeStyles []
+                                    in
+                                    Just
+                                        (DescribeText
+                                            { details | text = newTexts }
+                                        )
+
+                                _ ->
+                                    Nothing
+                        )
+
+                Annotate id selection wrapper ->
+                    Debug.todo "do it"
+
+                ReplaceSelection id selection newTextEls ->
+                    Debug.todo "do it"
+    in
+    original.found
+        |> makeFoundEdit
+            { makeEdit = editFn
+            , indentation = 0
+            }
+        |> prepareResults doc original
 
 
 {-| -}
@@ -240,10 +366,11 @@ match description exp =
         ManyOf many ->
             matchExpected (ExpectManyOf many.choices) exp
 
-        StartsWith range start end ->
+        StartsWith details ->
             case exp of
                 ExpectStartsWith startExp endExp ->
-                    match start.found startExp && match end.found endExp
+                    match details.first.found startExp
+                        && match details.second.found endExp
 
                 _ ->
                     False
@@ -299,7 +426,7 @@ match description exp =
                 _ ->
                     False
 
-        DescribeNothing ->
+        DescribeNothing _ ->
             False
 
 
@@ -374,19 +501,26 @@ type alias EditCursor =
     }
 
 
-makeFoundEdit : EditCursor -> Found Description -> Found Description
+type EditMade
+    = YesEditMade
+    | NoEditMade
+
+
+{-| -}
+makeFoundEdit : EditCursor -> Found Description -> ( EditMade, Found Description )
 makeFoundEdit cursor foundDesc =
     case foundDesc of
         Found range desc ->
             case cursor.makeEdit cursor.indentation range.start desc of
                 Nothing ->
-                    Found range (makeEdit cursor desc)
+                    makeEdit cursor desc
+                        |> Tuple.mapSecond (Found range)
 
                 Just newDesc ->
-                    Found range newDesc
+                    ( YesEditMade, Found range newDesc )
 
         Unexpected unexpected ->
-            foundDesc
+            ( NoEditMade, foundDesc )
 
 
 increaseIndent x =
@@ -394,90 +528,184 @@ increaseIndent x =
 
 
 {-| -}
-makeEdit : EditCursor -> Description -> Description
+makeEdit : EditCursor -> Description -> ( EditMade, Description )
 makeEdit cursor desc =
     case desc of
         DescribeBlock details ->
             case cursor.makeEdit cursor.indentation (foundStart details.found) desc of
                 Just newDesc ->
                     -- replace current description
-                    newDesc
+                    ( YesEditMade, newDesc )
 
                 Nothing ->
                     -- dive further
-                    case details.found of
-                        Found rng child ->
-                            DescribeBlock
-                                { details
-                                    | found = Found rng (makeEdit (increaseIndent cursor) child)
-                                }
+                    makeFoundEdit (increaseIndent cursor) details.found
+                        |> (\( editMade, newFound ) ->
+                                case editMade of
+                                    NoEditMade ->
+                                        ( NoEditMade, desc )
 
-                        Unexpected unexpected ->
-                            desc
+                                    YesEditMade ->
+                                        ( YesEditMade
+                                        , DescribeBlock
+                                            { details
+                                                | found = newFound
+                                            }
+                                        )
+                           )
 
         Record details ->
             case cursor.makeEdit (cursor.indentation + 1) (foundStart details.found) desc of
                 Just newDesc ->
-                    newDesc
+                    ( YesEditMade, newDesc )
 
                 Nothing ->
                     case details.found of
                         Found rng fields ->
-                            Record
-                                { details
-                                    | found =
-                                        Found rng
-                                            (List.map
-                                                (Tuple.mapSecond
-                                                    (makeFoundEdit (increaseIndent (increaseIndent cursor)))
-                                                )
-                                                fields
-                                            )
-                                }
+                            let
+                                ( fieldsEdited, updatedFields ) =
+                                    List.foldl
+                                        (\(( fieldName, foundField ) as field) ( editMade, pastFields ) ->
+                                            case editMade of
+                                                YesEditMade ->
+                                                    ( editMade, field :: pastFields )
+
+                                                NoEditMade ->
+                                                    case makeFoundEdit (increaseIndent (increaseIndent cursor)) foundField of
+                                                        ( NoEditMade, _ ) ->
+                                                            ( NoEditMade, field :: pastFields )
+
+                                                        ( YesEditMade, newField ) ->
+                                                            ( YesEditMade, ( fieldName, newField ) :: pastFields )
+                                        )
+                                        ( NoEditMade, [] )
+                                        fields
+                            in
+                            case fieldsEdited of
+                                NoEditMade ->
+                                    ( NoEditMade, desc )
+
+                                YesEditMade ->
+                                    ( YesEditMade
+                                    , Record
+                                        { details
+                                            | found =
+                                                Found rng (List.reverse updatedFields)
+                                        }
+                                    )
 
                         Unexpected unexpected ->
-                            desc
+                            ( NoEditMade, desc )
 
-        OneOf one ->
-            case cursor.makeEdit cursor.indentation (foundStart one.child) desc of
+        OneOf details ->
+            case cursor.makeEdit cursor.indentation (foundStart details.child) desc of
                 Just newDesc ->
                     -- replace current description
-                    newDesc
+                    ( YesEditMade, newDesc )
 
                 Nothing ->
                     -- dive further
-                    case one.child of
-                        Found rng child ->
-                            OneOf
-                                { one
-                                    | child =
-                                        Found rng (makeEdit cursor child)
-                                }
+                    makeFoundEdit (increaseIndent cursor) details.child
+                        |> (\( editMade, newFound ) ->
+                                case editMade of
+                                    NoEditMade ->
+                                        ( NoEditMade, desc )
 
-                        Unexpected unexpected ->
-                            desc
+                                    YesEditMade ->
+                                        ( YesEditMade
+                                        , OneOf
+                                            { details
+                                                | child = newFound
+                                            }
+                                        )
+                           )
 
         ManyOf many ->
             case cursor.makeEdit cursor.indentation many.range.start desc of
                 Just newDesc ->
                     -- replace current description
-                    newDesc
+                    ( YesEditMade, newDesc )
 
                 Nothing ->
                     -- dive further
-                    ManyOf
-                        { many
-                            | children = List.map (makeFoundEdit cursor) many.children
-                        }
+                    let
+                        ( childrenEdited, updatedChildren ) =
+                            List.foldl
+                                (\foundChild ( editMade, pastChildren ) ->
+                                    case editMade of
+                                        YesEditMade ->
+                                            ( editMade, foundChild :: pastChildren )
 
-        StartsWith range fst snd ->
-            StartsWith range
-                { fst | found = makeEdit cursor fst.found }
-                { snd | found = makeEdit cursor snd.found }
+                                        NoEditMade ->
+                                            case makeFoundEdit (increaseIndent (increaseIndent cursor)) foundChild of
+                                                ( NoEditMade, _ ) ->
+                                                    ( NoEditMade, foundChild :: pastChildren )
+
+                                                ( YesEditMade, newChild ) ->
+                                                    ( YesEditMade, newChild :: pastChildren )
+                                )
+                                ( NoEditMade, [] )
+                                many.children
+                    in
+                    case childrenEdited of
+                        NoEditMade ->
+                            ( NoEditMade, desc )
+
+                        YesEditMade ->
+                            ( YesEditMade
+                            , ManyOf
+                                { many
+                                    | children =
+                                        updatedChildren
+                                }
+                            )
+
+        StartsWith details ->
+            let
+                ( firstEdited, firstUpdated ) =
+                    makeEdit cursor details.first.found
+            in
+            case firstEdited of
+                NoEditMade ->
+                    let
+                        ( secondEdited, secondUpdated ) =
+                            makeEdit cursor details.second.found
+                    in
+                    case secondEdited of
+                        NoEditMade ->
+                            ( NoEditMade, desc )
+
+                        YesEditMade ->
+                            ( YesEditMade
+                            , StartsWith
+                                { range = details.range
+                                , id = details.id
+                                , first = details.first
+                                , second =
+                                    details.second
+                                        |> (\snd ->
+                                                { snd | found = secondUpdated }
+                                           )
+                                }
+                            )
+
+                YesEditMade ->
+                    ( YesEditMade
+                    , StartsWith
+                        { range = details.range
+                        , id = details.id
+                        , second = details.second
+                        , first =
+                            details.first
+                                |> (\fst ->
+                                        { fst | found = firstUpdated }
+                                   )
+                        }
+                    )
 
         DescribeTree details ->
             -- TODO
-            desc
+            ( NoEditMade, desc )
 
         -- Primitives
         DescribeBoolean details ->
@@ -498,8 +726,8 @@ makeEdit cursor desc =
         DescribeMultiline id range str ->
             replacePrimitive cursor range.start desc
 
-        DescribeNothing ->
-            desc
+        DescribeNothing _ ->
+            ( NoEditMade, desc )
 
 
 foundStart found =
@@ -514,10 +742,10 @@ foundStart found =
 replacePrimitive cursor startingPos desc =
     case cursor.makeEdit cursor.indentation startingPos desc of
         Just newDesc ->
-            newDesc
+            ( YesEditMade, newDesc )
 
         Nothing ->
-            desc
+            ( NoEditMade, desc )
 
 
 within rangeOne rangeTwo =
@@ -655,24 +883,6 @@ startDocRange =
     , end =
         startingPoint
     }
-
-
-makeDeleteBlock id index desc =
-    case desc of
-        ManyOf many ->
-            if id == many.id then
-                Just
-                    (ManyOf
-                        { many
-                            | children = removeByIndex index many.children
-                        }
-                    )
-
-            else
-                Nothing
-
-        _ ->
-            Nothing
 
 
 push maybePush found =
@@ -858,24 +1068,6 @@ getFoundRange found =
             unexp.range
 
 
-replaceOption id new desc =
-    case desc of
-        OneOf one ->
-            if id == one.id then
-                case one.child of
-                    Found range val ->
-                        Just (OneOf { one | child = Found range new })
-
-                    Unexpected unexpected ->
-                        Just (OneOf { one | child = Found unexpected.range new })
-
-            else
-                Nothing
-
-        _ ->
-            Nothing
-
-
 updateFoundBool id newBool desc =
     case desc of
         DescribeBoolean details ->
@@ -1048,7 +1240,7 @@ isPrimitive description =
         ManyOf _ ->
             False
 
-        StartsWith _ fst snd ->
+        StartsWith _ ->
             False
 
         DescribeTree details ->
@@ -1073,7 +1265,7 @@ isPrimitive description =
         DescribeMultiline _ _ _ ->
             True
 
-        DescribeNothing ->
+        DescribeNothing _ ->
             True
 
 
@@ -1081,7 +1273,7 @@ isPrimitive description =
 getContainingDescriptions : Description -> { start : Int, end : Int } -> List Description
 getContainingDescriptions description offset =
     case description of
-        DescribeNothing ->
+        DescribeNothing _ ->
             []
 
         DescribeBlock details ->
@@ -1109,9 +1301,10 @@ getContainingDescriptions description offset =
         ManyOf many ->
             List.concatMap (getWithinFound offset) many.children
 
-        StartsWith range fst snd ->
-            if withinOffsetRange offset range then
-                getContainingDescriptions fst.found offset ++ getContainingDescriptions snd.found offset
+        StartsWith details ->
+            if withinOffsetRange offset details.range then
+                getContainingDescriptions details.first.found offset
+                    ++ getContainingDescriptions details.second.found offset
 
             else
                 []
@@ -1924,3 +2117,680 @@ onError recover myBlock =
                             Outcome.Failure f ->
                                 Outcome.Failure f
                 }
+
+
+
+{- EDITING TEXT -}
+
+
+{-| -}
+type alias Inline data =
+    Desc.Inline data
+
+
+{-| -}
+type alias Replacement =
+    Parse.Replacement
+
+
+{-| -}
+type alias Styles =
+    { bold : Bool
+    , italic : Bool
+    , strike : Bool
+    }
+
+
+{-| -}
+type alias Selection =
+    { anchor : Offset
+    , focus : Offset
+    }
+
+
+{-| -}
+type alias Offset =
+    Int
+
+
+{-| Handling formatted text is a little more involved than may be initially apparent.
+
+Text styling can be overlapped such as
+
+    /My italicized sentence can have *bold* words./
+
+In order to render this, the above sentence is chopped up into `Text` fragments that can have multiple styles active.
+
+  - `view` is the function to render an individual fragment.
+  - `inlines` are custom inline blocks.
+  - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
+
+-}
+text :
+    { view :
+        { id : Id
+        , range : Range
+        , selection : Selection
+        }
+        -> Styles
+        -> String
+        -> rendered
+    , inlines : List (Inline rendered)
+    , replacements : List Replacement
+    }
+    -> Block (List rendered)
+text options =
+    let
+        inlineExpectations =
+            List.map getInlineExpectation options.inlines
+    in
+    Value
+        { expect = ExpectTextBlock inlineExpectations
+        , converter = renderText options
+        , parser =
+            \seed ->
+                -- TODO:  probably need a seed for text editing.
+                ( seed
+                , Parse.getPosition
+                    |> Parser.andThen
+                        (\pos ->
+                            Parse.styledText
+                                { inlines = inlineExpectations
+                                , replacements = options.replacements
+                                }
+                                seed
+                                pos
+                                emptyStyles
+                                []
+                        )
+                )
+        }
+
+
+getInlineExpectation (Inline details) =
+    details.expect
+
+
+type alias Cursor data =
+    Outcome.Outcome Error.AstError (Uncertain data) data
+
+
+renderText :
+    { view :
+        { id : Id
+        , range : Range
+        , selection : Selection
+        }
+        -> Styles
+        -> String
+        -> rendered
+    , inlines : List (Inline rendered)
+    , replacements : List Replacement
+    }
+    -> Description
+    -> Cursor (List rendered)
+renderText options description =
+    case description of
+        DescribeText details ->
+            List.foldl (convertTextDescription details.id options) (Outcome.Success []) details.text
+                |> mapSuccessAndRecovered List.reverse
+
+        _ ->
+            Outcome.Failure Error.NoMatch
+
+
+textToText (Desc.Text styling txt) =
+    Text styling txt
+
+
+convertTextDescription :
+    Id
+    ->
+        { view :
+            { id : Id
+            , range : Range
+            , selection : Selection
+            }
+            -> Styles
+            -> String
+            -> rendered
+        , inlines : List (Inline rendered)
+        , replacements : List Replacement
+        }
+    -> TextDescription
+    -> Cursor (List rendered)
+    -> Cursor (List rendered)
+convertTextDescription id options comp cursor =
+    case comp of
+        Styled range (Desc.Text styling str) ->
+            mergeWith (::)
+                (Outcome.Success
+                    (options.view
+                        { id = id
+                        , range = range
+                        , selection =
+                            { anchor = 0
+                            , focus = 0
+                            }
+                        }
+                        styling
+                        str
+                    )
+                )
+                cursor
+
+        InlineToken details ->
+            let
+                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+                    case maybeFound of
+                        Nothing ->
+                            if name == inlineDetails.name && isToken inline then
+                                Just inlineDetails
+
+                            else
+                                Nothing
+
+                        _ ->
+                            maybeFound
+
+                maybeMatched =
+                    List.foldl
+                        (matchInlineName details.name)
+                        Nothing
+                        options.inlines
+            in
+            case maybeMatched of
+                Nothing ->
+                    uncertain
+                        { range = details.range
+                        , problem =
+                            Error.UnknownInline
+                                (List.map
+                                    (Desc.inlineExample
+                                        << getInlineExpectation
+                                    )
+                                    options.inlines
+                                )
+                        }
+
+                Just matchedInline ->
+                    mergeWith (++)
+                        (matchedInline.converter [] details.attributes)
+                        cursor
+
+        InlineAnnotation details ->
+            let
+                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+                    case maybeFound of
+                        Nothing ->
+                            if name == inlineDetails.name && not (isToken inline) then
+                                Just inlineDetails
+
+                            else
+                                Nothing
+
+                        _ ->
+                            maybeFound
+
+                maybeMatched =
+                    List.foldl
+                        (matchInlineName details.name)
+                        Nothing
+                        options.inlines
+            in
+            case maybeMatched of
+                Just matchedInline ->
+                    mergeWith (++)
+                        (matchedInline.converter
+                            (List.map textToText details.text)
+                            details.attributes
+                        )
+                        cursor
+
+                Nothing ->
+                    uncertain
+                        { range = details.range
+                        , problem =
+                            Error.UnknownInline
+                                (List.map
+                                    (Desc.inlineExample
+                                        << getInlineExpectation
+                                    )
+                                    options.inlines
+                                )
+                        }
+
+        InlineVerbatim details ->
+            let
+                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+                    case maybeFound of
+                        Nothing ->
+                            if
+                                isVerbatim inline
+                                    && noInlineAttributes inlineDetails.expect
+                                    && (name == Nothing)
+                            then
+                                Just inlineDetails
+
+                            else if isVerbatim inline && name == Just inlineDetails.name then
+                                Just inlineDetails
+
+                            else
+                                Nothing
+
+                        _ ->
+                            maybeFound
+
+                maybeMatched =
+                    List.foldl
+                        (matchInlineName details.name)
+                        Nothing
+                        options.inlines
+            in
+            case maybeMatched of
+                Just matchedInline ->
+                    mergeWith (++)
+                        (matchedInline.converter
+                            [ textToText details.text ]
+                            details.attributes
+                        )
+                        cursor
+
+                Nothing ->
+                    uncertain
+                        { range = details.range
+                        , problem =
+                            Error.UnknownInline
+                                (List.map
+                                    (Desc.inlineExample
+                                        << getInlineExpectation
+                                    )
+                                    options.inlines
+                                )
+                        }
+
+        UnexpectedInline details ->
+            uncertain details
+
+
+{-| -}
+isToken : Inline data -> Bool
+isToken (Inline inline) =
+    case inline.expect of
+        ExpectToken _ _ ->
+            True
+
+        _ ->
+            False
+
+
+{-| -}
+isVerbatim : Inline data -> Bool
+isVerbatim (Inline inline) =
+    case inline.expect of
+        ExpectVerbatim _ _ _ ->
+            True
+
+        _ ->
+            False
+
+
+
+{- TEXT EDITING -}
+
+
+type Restyle
+    = Restyle Styles
+    | AddStyle Styles
+    | RemoveStyle Styles
+
+
+
+{- TEXT EDITING HELP -}
+
+
+{-| Folds over a list of styles and merges them if they're compatible
+-}
+mergeStyles : TextDescription -> List TextDescription -> List TextDescription
+mergeStyles inlineEl gathered =
+    case gathered of
+        [] ->
+            [ inlineEl ]
+
+        prev :: tail ->
+            case attemptMerge inlineEl prev of
+                Nothing ->
+                    inlineEl :: prev :: tail
+
+                Just merged ->
+                    merged :: tail
+
+
+attemptMerge : TextDescription -> TextDescription -> Maybe TextDescription
+attemptMerge first second =
+    case ( first, second ) of
+        ( Styled rngOne (Text stylingOne strOne), Styled rngTwo (Text stylingTwo strTwo) ) ->
+            if stylingOne == stylingTwo then
+                Just (Styled (mergeRanges rngOne rngTwo) (Text stylingOne (strOne ++ strTwo)))
+
+            else
+                Nothing
+
+        ( InlineAnnotation one, InlineAnnotation two ) ->
+            if one.name == two.name && one.attributes == two.attributes then
+                Just <|
+                    InlineAnnotation
+                        { name = one.name
+                        , attributes = one.attributes
+                        , range = mergeRanges one.range two.range
+                        , text = one.text ++ two.text
+                        }
+
+            else
+                Nothing
+
+        ( InlineVerbatim one, InlineVerbatim two ) ->
+            Nothing
+
+        ( _, _ ) ->
+            Nothing
+
+
+mergeRanges one two =
+    { start = one.start
+    , end = two.end
+    }
+
+
+emptySelectionEdit =
+    { offset = 0
+    , elements = []
+    , selection = Nothing
+    }
+
+
+doRestyle :
+    Selection
+    -> Restyle
+    -> TextDescription
+    ->
+        { elements : List TextDescription
+        , offset : Int
+        , selection : Maybe (List TextDescription)
+        }
+    ->
+        { elements : List TextDescription
+        , offset : Int
+        , selection : Maybe (List TextDescription)
+        }
+doRestyle { anchor, focus } newStyles current cursor =
+    let
+        start =
+            min anchor focus
+
+        end =
+            max anchor focus
+
+        len =
+            length current
+    in
+    case cursor.selection of
+        Nothing ->
+            if cursor.offset <= start && cursor.offset + len >= start then
+                {- Start Selection -}
+                if cursor.offset + len >= end then
+                    {- We finish the selection in this element -}
+                    let
+                        ( before, afterLarge ) =
+                            splitAt (start - cursor.offset) current
+
+                        ( selected, after ) =
+                            splitAt (end - cursor.offset) afterLarge
+                    in
+                    { offset = cursor.offset + len
+                    , elements =
+                        after :: applyStyles newStyles selected :: before :: cursor.elements
+                    , selection =
+                        Nothing
+                    }
+
+                else
+                    let
+                        ( before, after ) =
+                            splitAt (start - cursor.offset) current
+                    in
+                    { offset = cursor.offset + len
+                    , elements =
+                        before :: cursor.elements
+                    , selection =
+                        Just [ after ]
+                    }
+
+            else
+                { offset = cursor.offset + len
+                , elements = current :: cursor.elements
+                , selection = cursor.selection
+                }
+
+        Just selection ->
+            if cursor.offset + len >= end then
+                let
+                    ( before, after ) =
+                        splitAt (end - cursor.offset) current
+
+                    fullSelection =
+                        before :: selection
+                in
+                { offset = cursor.offset + len
+                , elements = after :: List.map (applyStyles newStyles) fullSelection ++ cursor.elements
+                , selection = Nothing
+                }
+
+            else
+                { offset = cursor.offset + len
+                , elements = cursor.elements
+                , selection = Just (current :: selection)
+                }
+
+
+applyStyles : Restyle -> TextDescription -> TextDescription
+applyStyles styling inlineEl =
+    case inlineEl of
+        Styled range txt ->
+            Styled range (applyStylesToText styling txt)
+
+        InlineAnnotation details ->
+            InlineAnnotation
+                { details
+                    | text = List.map (applyStylesToText styling) details.text
+                }
+
+        InlineToken details ->
+            InlineToken details
+
+        InlineVerbatim details ->
+            InlineVerbatim details
+
+        x ->
+            x
+
+
+applyStylesToText styling (Text styles str) =
+    case styling of
+        Restyle newStyle ->
+            Text newStyle str
+
+        RemoveStyle toRemove ->
+            Text
+                { bold = styles.bold && not toRemove.bold
+                , italic = styles.italic && not toRemove.italic
+                , strike = styles.strike && not toRemove.strike
+                }
+                str
+
+        AddStyle toAdd ->
+            Text
+                { bold = styles.bold || toAdd.bold
+                , italic = styles.italic || toAdd.italic
+                , strike = styles.strike || toAdd.strike
+                }
+                str
+
+
+length : TextDescription -> Int
+length inlineEl =
+    case inlineEl of
+        Styled _ txt ->
+            textLength txt
+
+        InlineAnnotation details ->
+            List.sum (List.map textLength details.text)
+
+        InlineToken _ ->
+            0
+
+        InlineVerbatim details ->
+            textLength details.text
+
+        UnexpectedInline err ->
+            0
+
+
+textLength : Desc.Text -> Int
+textLength (Text _ str) =
+    String.length str
+
+
+{-| Splits the current element based on an index.
+
+This function should only be called when the offset is definitely contained within the element provided, not on the edges.
+
+-}
+splitAt : Offset -> TextDescription -> ( TextDescription, TextDescription )
+splitAt offset inlineEl =
+    case inlineEl of
+        Styled range txt ->
+            let
+                ( leftRange, rightRange ) =
+                    splitRange offset range
+
+                ( leftText, rightText ) =
+                    splitText offset txt
+            in
+            ( Styled leftRange leftText
+            , Styled rightRange rightText
+            )
+
+        -- InlineAnnotation name attrs textElements ->
+        InlineAnnotation details ->
+            let
+                { left, right } =
+                    List.foldl (splitTextElements offset)
+                        { offset = 0
+                        , left = []
+                        , right = []
+                        }
+                        details.text
+
+                splitTextElements off (Text styling txt) cursor =
+                    if off >= cursor.offset && off <= cursor.offset + String.length txt then
+                        { offset = cursor.offset + String.length txt
+                        , left = Text styling (String.left (offset - cursor.offset) txt) :: cursor.left
+                        , right = Text styling (String.dropLeft (offset - cursor.offset) txt) :: cursor.right
+                        }
+
+                    else if off < cursor.offset then
+                        { offset = cursor.offset + String.length txt
+                        , left = cursor.left
+                        , right = Text styling txt :: cursor.right
+                        }
+
+                    else
+                        { offset = cursor.offset + String.length txt
+                        , left = Text styling txt :: cursor.left
+                        , right = cursor.right
+                        }
+
+                ( leftRange, rightRange ) =
+                    splitRange offset details.range
+            in
+            ( InlineAnnotation
+                { name = details.name
+                , range = leftRange
+                , text = List.reverse left
+                , attributes = details.attributes
+                }
+            , InlineAnnotation
+                { name = details.name
+                , range = rightRange
+                , text = List.reverse right
+                , attributes = details.attributes
+                }
+            )
+
+        InlineToken details ->
+            -- This shoudn't happen because we're expecting the offset
+            -- to be within the range, and a token has a lenght of 0
+            ( Styled emptyRange (Text emptyStyles "")
+            , InlineToken details
+            )
+
+        InlineVerbatim details ->
+            let
+                ( leftRange, rightRange ) =
+                    splitRange offset details.range
+
+                ( leftText, rightText ) =
+                    splitText offset details.text
+            in
+            ( --ExpectVerbatim name attrs (String.left offset str)
+              InlineVerbatim
+                { details
+                    | range = leftRange
+                    , text = leftText
+                }
+            , InlineVerbatim
+                { details
+                    | range = rightRange
+                    , text = rightText
+                }
+            )
+
+        UnexpectedInline err ->
+            ( UnexpectedInline err
+            , UnexpectedInline err
+            )
+
+
+splitText offset (Text styling str) =
+    ( Text styling (String.left offset str)
+    , Text styling (String.dropLeft offset str)
+    )
+
+
+splitRange offset range =
+    let
+        -- TODO: This stays on the same line
+        middle =
+            { offset = range.start.offset + offset
+            , line = range.start.line
+            , column = range.start.column + offset
+            }
+    in
+    ( range
+    , range
+    )
+
+
+emptyRange =
+    { start =
+        { offset = 0
+        , line = 1
+        , column = 1
+        }
+    , end =
+        { offset = 0
+        , line = 1
+        , column = 1
+        }
+    }

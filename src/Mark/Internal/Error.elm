@@ -1,6 +1,6 @@
 module Mark.Internal.Error exposing
     ( Error(..), render
-    , Context(..), Problem(..), UnexpectedDetails, documentMismatch, renderParsingErrors
+    , Context(..), Problem(..), UnexpectedDetails, documentMismatch, renderParsingErrors, idNotFound
     , AstError(..), Rendered(..), compilerError
     )
 
@@ -8,7 +8,7 @@ module Mark.Internal.Error exposing
 
 @docs Error, render
 
-@docs Context, Problem, UnexpectedDetails, documentMismatch, renderParsingErrors
+@docs Context, Problem, UnexpectedDetails, documentMismatch, renderParsingErrors, idNotFound
 
 -}
 
@@ -63,6 +63,8 @@ type Error
         { title : String
         , message : List String
         }
+      --
+    | IdNotFound
 
 
 
@@ -221,6 +223,18 @@ renderParsingErrors source issues =
         }
 
 
+idNotFound =
+    Global
+        { title = "ID NOT FOUND"
+        , problem = IdNotFound
+        , message =
+            [ Format.text "I tried to edit your document but couldn't find any blocks with the "
+            , Format.yellow (Format.text "Mark.Edit.Id")
+            , Format.text " that you provided."
+            ]
+        }
+
+
 render : String -> UnexpectedDetails -> Rendered
 render source current =
     case current.problem of
@@ -229,6 +243,9 @@ render source current =
 
         DocumentMismatch ->
             documentMismatch
+
+        IdNotFound ->
+            idNotFound
 
         ParsingIssue issues ->
             renderParsingErrors source issues

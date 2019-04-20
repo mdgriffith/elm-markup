@@ -8,9 +8,9 @@ module Mark.Internal.Description exposing
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
-    , Block(..), Document(..)
+    , Block(..), Document(..), Inline(..)
     , boldStyle, italicStyle, strikeStyle
-    , resultToFound
+    , resultToFound, getId
     )
 
 {-|
@@ -33,11 +33,11 @@ module Mark.Internal.Description exposing
 
 @docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
 
-@docs Block, Document
+@docs Block, Document, Inline
 
 @docs boldStyle, italicStyle, strikeStyle
 
-@docs resultToFound
+@docs resultToFound, getId
 
 -}
 
@@ -170,12 +170,14 @@ type Block data
 {-| -}
 type Description
     = DescribeBlock
-        { name : String
+        { id : Id
+        , name : String
         , found : Found Description
         , expected : Expectation
         }
     | Record
-        { name : String
+        { id : Id
+        , name : String
         , found : Found (List ( String, Found Description ))
         , expected : Expectation
         }
@@ -191,12 +193,16 @@ type Description
         , children : List (Found Description)
         }
     | StartsWith
-        Range
-        { found : Description
-        , expected : Expectation
-        }
-        { found : Description
-        , expected : Expectation
+        { range : Range
+        , id : Id
+        , first :
+            { found : Description
+            , expected : Expectation
+            }
+        , second :
+            { found : Description
+            , expected : Expectation
+            }
         }
     | DescribeTree
         { id : Id
@@ -224,7 +230,49 @@ type Description
         }
     | DescribeString Id Range String
     | DescribeMultiline Id Range String
-    | DescribeNothing
+    | DescribeNothing Id
+
+
+getId description =
+    case description of
+        DescribeBlock details ->
+            details.id
+
+        Record details ->
+            details.id
+
+        OneOf details ->
+            details.id
+
+        ManyOf details ->
+            details.id
+
+        StartsWith details ->
+            details.id
+
+        DescribeTree details ->
+            details.id
+
+        DescribeBoolean details ->
+            details.id
+
+        DescribeInteger details ->
+            details.id
+
+        DescribeFloat details ->
+            details.id
+
+        DescribeText details ->
+            details.id
+
+        DescribeString id _ _ ->
+            id
+
+        DescribeMultiline id _ _ ->
+            id
+
+        DescribeNothing id ->
+            id
 
 
 {-| -}
@@ -259,6 +307,14 @@ type TextDescription
 -}
 type Text
     = Text Styling String
+
+
+type Inline data
+    = Inline
+        { converter : List Text -> List InlineAttribute -> Outcome Error.AstError (Uncertain (List data)) (List data)
+        , expect : InlineExpectation
+        , name : String
+        }
 
 
 type alias Styling =
@@ -527,7 +583,7 @@ inlineExample inline =
 
 match description exp =
     case description of
-        DescribeNothing ->
+        DescribeNothing _ ->
             case exp of
                 ExpectNothing ->
                     True
@@ -556,10 +612,11 @@ match description exp =
         ManyOf many ->
             matchExpected (ExpectManyOf many.choices) exp
 
-        StartsWith range start end ->
+        StartsWith details ->
             case exp of
                 ExpectStartsWith startExp endExp ->
-                    match start.found startExp && match end.found endExp
+                    match details.first.found startExp
+                        && match details.second.found endExp
 
                 _ ->
                     False
@@ -840,7 +897,7 @@ isPrimitive description =
         ManyOf _ ->
             False
 
-        StartsWith _ fst snd ->
+        StartsWith _ ->
             False
 
         DescribeTree details ->
@@ -865,7 +922,7 @@ isPrimitive description =
         DescribeMultiline _ _ _ ->
             True
 
-        DescribeNothing ->
+        DescribeNothing _ ->
             False
 
 
@@ -898,9 +955,10 @@ getContainingDescriptions description offset =
         ManyOf many ->
             List.concatMap (getWithinFound offset) many.children
 
-        StartsWith range fst snd ->
-            if withinOffsetRange offset range then
-                getContainingDescriptions fst.found offset ++ getContainingDescriptions snd.found offset
+        StartsWith details ->
+            if withinOffsetRange offset details.range then
+                getContainingDescriptions details.first.found offset
+                    ++ getContainingDescriptions details.second.found offset
 
             else
                 []
@@ -955,7 +1013,7 @@ getContainingDescriptions description offset =
             else
                 []
 
-        DescribeNothing ->
+        DescribeNothing _ ->
             []
 
 
@@ -1122,7 +1180,7 @@ writeIcon icon cursor =
 writeDescription : Description -> PrintCursor -> PrintCursor
 writeDescription description cursor =
     case description of
-        DescribeNothing ->
+        DescribeNothing _ ->
             cursor
 
         DescribeBlock details ->
@@ -1159,10 +1217,10 @@ writeDescription description cursor =
                 cursor
                 many.children
 
-        StartsWith range start end ->
+        StartsWith details ->
             cursor
-                |> writeDescription start.found
-                |> writeDescription end.found
+                |> writeDescription details.first.found
+                |> writeDescription details.second.found
 
         DescribeBoolean details ->
             writeFound (writeWith boolToString) details.found cursor
@@ -1372,11 +1430,15 @@ create current =
                         , expectation = childExpectation
                         , seed = current.seed
                         }
+
+                ( newId, newSeed ) =
+                    Id.step new.seed
             in
             { pos = new.pos
             , desc =
                 DescribeBlock
                     { name = name
+                    , id = newId
                     , found =
                         Found
                             { start = current.base
@@ -1385,7 +1447,7 @@ create current =
                             new.desc
                     , expected = current.expectation
                     }
-            , seed = new.seed
+            , seed = newSeed
             }
 
         ExpectRecord name fields ->
@@ -1398,11 +1460,15 @@ create current =
                         , seed = current.seed
                         }
                         fields
+
+                ( newId, newSeed ) =
+                    Id.step new.seed
             in
             { pos = new.position
             , desc =
                 Record
                     { name = name
+                    , id = newId
                     , found =
                         Found
                             { start = current.base
@@ -1411,7 +1477,7 @@ create current =
                             new.fields
                     , expected = current.expectation
                     }
-            , seed = new.seed
+            , seed = newSeed
             }
 
         ExpectTree content _ ->
@@ -1522,12 +1588,15 @@ create current =
 
         ExpectStartsWith start remaining ->
             let
+                ( parentId, newSeed ) =
+                    Id.step current.seed
+
                 first =
                     create
                         { indent = current.indent
                         , base = current.base
                         , expectation = start
-                        , seed = current.seed
+                        , seed = newSeed
                         }
 
                 second =
@@ -1541,14 +1610,19 @@ create current =
             { pos = second.pos
             , desc =
                 StartsWith
-                    { start = current.base
-                    , end = second.pos
-                    }
-                    { found = first.desc
-                    , expected = start
-                    }
-                    { found = second.desc
-                    , expected = remaining
+                    { id = parentId
+                    , range =
+                        { start = current.base
+                        , end = second.pos
+                        }
+                    , first =
+                        { found = first.desc
+                        , expected = start
+                        }
+                    , second =
+                        { found = second.desc
+                        , expected = remaining
+                        }
                     }
             , seed = second.seed
             }

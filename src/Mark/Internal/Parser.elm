@@ -1,6 +1,8 @@
 module Mark.Internal.Parser exposing
     ( Replacement(..)
     , addToChildren
+    , attribute
+    , attributeList
     , blocksOrNewlines
     , buildTree
     , float

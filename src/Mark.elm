@@ -8,7 +8,7 @@ module Mark exposing
     , block, oneOf, manyOf, startWith
     , tree
     , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
-    , Text(..), Styles, text, textWith, replacement, balanced, Replacement
+    , Styles, text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
     , Error, errorToString, errorToHtml, Theme(..)
     , ErrorDetails, errorDetails, Range, Position
@@ -66,7 +66,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Handling Text and Inline
 
-@docs Text, Styles, text, textWith, replacement, balanced, Replacement
+@docs Styles, text, textWith, replacement, balanced, Replacement
 
 @docs Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
 
@@ -289,8 +289,9 @@ getUnexpecteds description =
         ManyOf many ->
             List.concatMap spelunkUnexpectedsFromFound many.children
 
-        StartsWith _ fst snd ->
-            getUnexpecteds fst.found ++ getUnexpecteds snd.found
+        StartsWith details ->
+            getUnexpecteds details.first.found
+                ++ getUnexpecteds details.second.found
 
         DescribeTree details ->
             -- TODO: Get unexpecteds!!
@@ -316,7 +317,7 @@ getUnexpecteds description =
         DescribeMultiline rng _ str ->
             []
 
-        DescribeNothing ->
+        DescribeNothing _ ->
             []
 
 
@@ -350,7 +351,7 @@ unexpectedFromFound found =
 
 {-| -}
 type alias Error =
-    Error.Rendered
+    Mark.Edit.Error
 
 
 {-| -}
@@ -648,8 +649,11 @@ block name view child =
                 let
                     ( newSeed, childParser ) =
                         getParser seed child
+
+                    ( parentId, finalSeed ) =
+                        Id.step newSeed
                 in
-                ( newSeed
+                ( finalSeed
                 , Parser.map
                     (\result ->
                         case result of
@@ -657,12 +661,14 @@ block name view child =
                                 DescribeBlock
                                     { found = Found details.range details.value
                                     , name = name
+                                    , id = parentId
                                     , expected = ExpectBlock name (getBlockExpectation child)
                                     }
 
                             Err details ->
                                 DescribeBlock
                                     { name = name
+                                    , id = parentId
                                     , found =
                                         Unexpected
                                             { range = details.range
@@ -743,18 +749,21 @@ startWith fn startBlock endBlock =
         , converter =
             \desc ->
                 case desc of
-                    StartsWith range start end ->
+                    StartsWith details ->
                         mergeWith fn
-                            (renderBlock startBlock start.found)
-                            (renderBlock endBlock end.found)
+                            (renderBlock startBlock details.first.found)
+                            (renderBlock endBlock details.second.found)
 
                     _ ->
                         Outcome.Failure NoMatch
         , parser =
             \seed ->
                 let
+                    ( parentId, newSeed ) =
+                        Id.step seed
+
                     ( startSeed, startParser ) =
-                        getParser seed startBlock
+                        getParser newSeed startBlock
 
                     ( remainSeed, endParser ) =
                         getParser startSeed endBlock
@@ -762,12 +771,17 @@ startWith fn startBlock endBlock =
                 ( remainSeed
                 , Parser.succeed
                     (\( range, ( begin, end ) ) ->
-                        StartsWith range
-                            { found = begin
-                            , expected = getBlockExpectation startBlock
-                            }
-                            { found = end
-                            , expected = getBlockExpectation endBlock
+                        StartsWith
+                            { range = range
+                            , id = parentId
+                            , first =
+                                { found = begin
+                                , expected = getBlockExpectation startBlock
+                                }
+                            , second =
+                                { found = end
+                                , expected = getBlockExpectation endBlock
+                                }
                             }
                     )
                     |= Parse.withRange
@@ -1030,14 +1044,18 @@ record2 name view field1 field2 =
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1087,15 +1105,19 @@ record3 name view field1 field2 field3 =
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             , fieldParser field3
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1148,8 +1170,11 @@ record4 name view field1 field2 field3 field4 =
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             , fieldParser field3
@@ -1157,7 +1182,8 @@ record4 name view field1 field2 field3 field4 =
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1213,8 +1239,11 @@ record5 name view field1 field2 field3 field4 field5 =
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             , fieldParser field3
@@ -1223,7 +1252,8 @@ record5 name view field1 field2 field3 field4 field5 =
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1282,8 +1312,11 @@ record6 name view field1 field2 field3 field4 field5 field6 =
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             , fieldParser field3
@@ -1293,7 +1326,8 @@ record6 name view field1 field2 field3 field4 field5 field6 =
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1355,8 +1389,11 @@ record7 name view field1 field2 field3 field4 field5 field6 field7 =
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             , fieldParser field3
@@ -1367,7 +1404,8 @@ record7 name view field1 field2 field3 field4 field5 field6 field7 =
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1432,8 +1470,11 @@ record8 name view field1 field2 field3 field4 field5 field6 field7 field8 =
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             , fieldParser field3
@@ -1445,7 +1486,8 @@ record8 name view field1 field2 field3 field4 field5 field6 field7 field8 =
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1513,8 +1555,11 @@ record9 name view field1 field2 field3 field4 field5 field6 field7 field8 field9
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             , fieldParser field3
@@ -1527,7 +1572,8 @@ record9 name view field1 field2 field3 field4 field5 field6 field7 field8 field9
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1598,8 +1644,11 @@ record10 name view field1 field2 field3 field4 field5 field6 field7 field8 field
         , parser =
             \seed ->
                 let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
                     ( newSeed, fields ) =
-                        Id.thread seed
+                        Id.thread parentSeed
                             [ fieldParser field1
                             , fieldParser field2
                             , fieldParser field3
@@ -1613,7 +1662,8 @@ record10 name view field1 field2 field3 field4 field5 field6 field7 field8 field
                             ]
                 in
                 ( newSeed
-                , parseRecord name
+                , parseRecord parentId
+                    name
                     expectations
                     fields
                 )
@@ -1632,11 +1682,6 @@ type alias Styles =
     }
 
 
-{-| -}
-type Text
-    = Text Styles String
-
-
 {-|
 
     Mark.text (\styles string -> Html.span [] [ Html.text string ])
@@ -1645,35 +1690,43 @@ type Text
 
 -}
 text :
-    (Text -> rendered)
+    (Styles -> String -> rendered)
     -> Block (List rendered)
 text view =
-    Value
-        { expect = ExpectTextBlock []
-        , converter =
-            renderText
-                { view = view
-                , inlines = []
-                , replacements = commonReplacements
-                }
-        , parser =
-            \seed ->
-                -- TODO:  probably need a seed for text editing.
-                ( seed
-                , Parse.getPosition
-                    |> Parser.andThen
-                        (\pos ->
-                            Parse.styledText
-                                { inlines = []
-                                , replacements = commonReplacements
-                                }
-                                seed
-                                pos
-                                emptyStyles
-                                []
-                        )
-                )
+    textWith
+        { view = view
+        , inlines = []
+        , replacements = commonReplacements
         }
+
+
+
+-- Value
+--     { expect = ExpectTextBlock []
+--     , converter =
+--         renderText
+--             { view = view
+--             , inlines = []
+--             , replacements = commonReplacements
+--             }
+--     , parser =
+--         \seed ->
+--             -- TODO:  probably need a seed for text editing.
+--             ( seed
+--             , Parse.getPosition
+--                 |> Parser.andThen
+--                     (\pos ->
+--                         Parse.styledText
+--                             { inlines = []
+--                             , replacements = commonReplacements
+--                             }
+--                             seed
+--                             pos
+--                             emptyStyles
+--                             []
+--                     )
+--             )
+--     }
 
 
 {-| Handling formatted text is a little more involved than may be initially apparent.
@@ -1690,211 +1743,20 @@ In order to render this, the above sentence is chopped up into `Text` fragments 
 
 -}
 textWith :
-    { view : Text -> rendered
+    { view : Styles -> String -> rendered
     , inlines : List (Inline rendered)
     , replacements : List Replacement
     }
     -> Block (List rendered)
 textWith options =
-    let
-        inlineExpectations =
-            List.map getInlineExpectation options.inlines
-    in
-    Value
-        { expect = ExpectTextBlock inlineExpectations
-        , converter = renderText options
-        , parser =
-            \seed ->
-                -- TODO:  probably need a seed for text editing.
-                ( seed
-                , Parse.getPosition
-                    |> Parser.andThen
-                        (\pos ->
-                            Parse.styledText
-                                { inlines = inlineExpectations
-                                , replacements = options.replacements
-                                }
-                                seed
-                                pos
-                                emptyStyles
-                                []
-                        )
-                )
+    Mark.Edit.text
+        { view = always options.view
+        , inlines = options.inlines
+        , replacements = options.replacements
         }
 
 
-type alias Cursor data =
-    Outcome.Outcome AstError (Uncertain data) data
-
-
-renderText :
-    { view : Text -> rendered
-    , inlines : List (Inline rendered)
-    , replacements : List Replacement
-    }
-    -> Description
-    -> Cursor (List rendered)
-renderText options description =
-    case description of
-        DescribeText details ->
-            List.foldl (convertTextDescription options) (Outcome.Success []) details.text
-                |> mapSuccessAndRecovered List.reverse
-
-        _ ->
-            Outcome.Failure NoMatch
-
-
-textToText (Desc.Text styling txt) =
-    Text styling txt
-
-
-convertTextDescription :
-    { view : Text -> rendered
-    , inlines : List (Inline rendered)
-    , replacements : List Replacement
-    }
-    -> TextDescription
-    -> Cursor (List rendered)
-    -> Cursor (List rendered)
-convertTextDescription options comp cursor =
-    case comp of
-        Styled range (Desc.Text styling str) ->
-            mergeWith (::) (Outcome.Success (options.view (Text styling str))) cursor
-
-        InlineToken details ->
-            let
-                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
-                    case maybeFound of
-                        Nothing ->
-                            if name == inlineDetails.name && isToken inline then
-                                Just inlineDetails
-
-                            else
-                                Nothing
-
-                        _ ->
-                            maybeFound
-
-                maybeMatched =
-                    List.foldl
-                        (matchInlineName details.name)
-                        Nothing
-                        options.inlines
-            in
-            case maybeMatched of
-                Nothing ->
-                    uncertain
-                        { range = details.range
-                        , problem =
-                            Error.UnknownInline
-                                (List.map
-                                    (Desc.inlineExample
-                                        << getInlineExpectation
-                                    )
-                                    options.inlines
-                                )
-                        }
-
-                Just matchedInline ->
-                    mergeWith (++)
-                        (matchedInline.converter [] details.attributes)
-                        cursor
-
-        InlineAnnotation details ->
-            let
-                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
-                    case maybeFound of
-                        Nothing ->
-                            if name == inlineDetails.name && not (isToken inline) then
-                                Just inlineDetails
-
-                            else
-                                Nothing
-
-                        _ ->
-                            maybeFound
-
-                maybeMatched =
-                    List.foldl
-                        (matchInlineName details.name)
-                        Nothing
-                        options.inlines
-            in
-            case maybeMatched of
-                Just matchedInline ->
-                    mergeWith (++)
-                        (matchedInline.converter
-                            (List.map textToText details.text)
-                            details.attributes
-                        )
-                        cursor
-
-                Nothing ->
-                    uncertain
-                        { range = details.range
-                        , problem =
-                            Error.UnknownInline
-                                (List.map
-                                    (Desc.inlineExample
-                                        << getInlineExpectation
-                                    )
-                                    options.inlines
-                                )
-                        }
-
-        InlineVerbatim details ->
-            let
-                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
-                    case maybeFound of
-                        Nothing ->
-                            if
-                                isVerbatim inline
-                                    && noInlineAttributes inlineDetails.expect
-                                    && (name == Nothing)
-                            then
-                                Just inlineDetails
-
-                            else if isVerbatim inline && name == Just inlineDetails.name then
-                                Just inlineDetails
-
-                            else
-                                Nothing
-
-                        _ ->
-                            maybeFound
-
-                maybeMatched =
-                    List.foldl
-                        (matchInlineName details.name)
-                        Nothing
-                        options.inlines
-            in
-            case maybeMatched of
-                Just matchedInline ->
-                    mergeWith (++)
-                        (matchedInline.converter
-                            [ textToText details.text ]
-                            details.attributes
-                        )
-                        cursor
-
-                Nothing ->
-                    uncertain
-                        { range = details.range
-                        , problem =
-                            Error.UnknownInline
-                                (List.map
-                                    (Desc.inlineExample
-                                        << getInlineExpectation
-                                    )
-                                    options.inlines
-                                )
-                        }
-
-        UnexpectedInline details ->
-            uncertain details
-
-
+{-| -}
 type alias Replacement =
     Parse.Replacement
 
@@ -1922,32 +1784,8 @@ type alias Replacement =
 -}
 
 
-type Inline data
-    = Inline
-        { converter : List Text -> List InlineAttribute -> Outcome.Outcome AstError (Uncertain (List data)) (List data)
-        , expect : InlineExpectation
-        , name : String
-        }
-
-
-isToken : Inline data -> Bool
-isToken (Inline inline) =
-    case inline.expect of
-        ExpectToken _ _ ->
-            True
-
-        _ ->
-            False
-
-
-isVerbatim : Inline data -> Bool
-isVerbatim (Inline inline) =
-    case inline.expect of
-        ExpectVerbatim _ _ _ ->
-            True
-
-        _ ->
-            False
+type alias Inline data =
+    Desc.Inline data
 
 
 {-| -}
@@ -1964,20 +1802,24 @@ token name result =
 
 
 {-| -}
-annotation : String -> (List Text -> result) -> Inline result
+annotation : String -> (List ( Styles, String ) -> result) -> Inline result
 annotation name result =
     Inline
         { converter =
             \textPieces attrs ->
-                Outcome.Success [ result textPieces ]
+                Outcome.Success [ result (List.map textToTuple textPieces) ]
         , expect =
             ExpectAnnotation name [] []
         , name = name
         }
 
 
+textToTuple (Desc.Text style str) =
+    ( style, str )
+
+
 {-| -}
-verbatim : String -> (Text -> result) -> Inline result
+verbatim : String -> (String -> result) -> Inline result
 verbatim name result =
     Inline
         { converter =
@@ -1987,7 +1829,7 @@ verbatim name result =
                         -- This should never happen
                         Outcome.Failure NoMatch
 
-                    fst :: _ ->
+                    (Desc.Text _ fst) :: _ ->
                         Outcome.Success [ result fst ]
         , expect =
             ExpectVerbatim name [] "placeholder"
@@ -2389,17 +2231,19 @@ backtrackCharacters chars range =
 
 
 parseRecord :
-    String
+    Id
+    -> String
     -> Expectation
     -> List ( String, Parser Context Problem ( String, Found Description ) )
     -> Parser Context Problem Description
-parseRecord recordName expectations fields =
+parseRecord id recordName expectations fields =
     Parser.succeed
         (\result ->
             case result of
                 Ok details ->
                     Record
                         { expected = expectations
+                        , id = id
                         , name = recordName
                         , found =
                             Found (backtrackCharacters 2 details.range) details.value
@@ -2409,6 +2253,7 @@ parseRecord recordName expectations fields =
                 Err err ->
                     Record
                         { expected = expectations
+                        , id = id
                         , name = recordName
                         , found =
                             Unexpected
