@@ -1,4 +1,4 @@
-module Tests exposing (suite)
+module Tests exposing (suite, textModification)
 
 -- import Mark.Error
 -- import Mark.Default
@@ -6,21 +6,25 @@ module Tests exposing (suite)
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, int, list, string)
 import Mark
+import Mark.Edit
 import Mark.Internal.Description
 import Mark.Internal.Error as Error
 import Mark.Internal.Outcome
+import Mark.New
 import Test exposing (..)
 
 
 text =
-    Mark.text identity
+    Mark.text Tuple.pair
 
 
 inlines =
     Mark.document
         identity
         (Mark.textWith
-            { view = List.singleton
+            { view =
+                \style content ->
+                    [ ( style, content ) ]
             , replacements =
                 [ Mark.replacement "..." "…"
                 , Mark.replacement "<>" "\u{00A0}"
@@ -35,7 +39,7 @@ inlines =
                 ]
             , inlines =
                 [ Mark.annotation "highlight" identity
-                , Mark.verbatim "verb" List.singleton
+                , Mark.verbatim "verb" (List.singleton << Tuple.pair emptyStyles)
                 ]
             }
         )
@@ -46,7 +50,7 @@ inlineMultipleVerbatim =
         identity
         (Mark.textWith
             { view =
-                \(Mark.Text styling str) ->
+                \styling str ->
                     [ str ]
             , replacements =
                 [ Mark.replacement "..." "…"
@@ -63,11 +67,11 @@ inlineMultipleVerbatim =
             , inlines =
                 [ Mark.annotation "highlight" (always [ "high" ])
                 , Mark.verbatim "verb"
-                    (\(Mark.Text styling str) ->
+                    (\str ->
                         [ str ]
                     )
                 , Mark.verbatim "verb2"
-                    (\(Mark.Text styling str) one two ->
+                    (\str one two ->
                         [ str, one, two ]
                     )
                     |> Mark.attrString "one"
@@ -81,7 +85,7 @@ inlineOrder =
     Mark.document
         identity
         (Mark.textWith
-            { view = always Nothing
+            { view = \_ _ -> Nothing
             , replacements =
                 [ Mark.replacement "..." "…"
                 , Mark.replacement "<>" "\u{00A0}"
@@ -273,7 +277,7 @@ type Ordered
     = Ordered (List Int) (List Ordered)
 
 
-renderContent stack i (Mark.Tree node) =
+renderContent stack i (Mark.Edit.Tree node) =
     case node.children of
         [] ->
             Ordered node.content []
@@ -282,7 +286,7 @@ renderContent stack i (Mark.Tree node) =
             Ordered node.content (List.indexedMap (renderContent (i :: stack)) node.children)
 
 
-renderIndex stack i (Mark.Tree node) =
+renderIndex stack i (Mark.Edit.Tree node) =
     case node.children of
         [] ->
             Indexed i []
@@ -447,7 +451,7 @@ suite =
                             "Some text\nand some more text\n\n"
                         )
                         (Ok
-                            [ Mark.Text emptyStyles "Some text\nand some more text"
+                            [ ( emptyStyles, "Some text\nand some more text" )
                             ]
                         )
             , test "Double newlines signify a new paragraph" <|
@@ -463,11 +467,11 @@ suite =
                     Expect.equal
                         (toResult inlines "[my]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
-                            [ [ Mark.Text emptyStyles "my" ]
-                            , [ Mark.Text emptyStyles " highlighted " ]
-                            , [ Mark.Text emptyStyles "sentence" ]
-                            , [ Mark.Text emptyStyles " " ]
-                            , [ Mark.Text emptyStyles "order" ]
+                            [ [ ( emptyStyles, "my" ) ]
+                            , [ ( emptyStyles, " highlighted " ) ]
+                            , [ ( emptyStyles, "sentence" ) ]
+                            , [ ( emptyStyles, " " ) ]
+                            , [ ( emptyStyles, "order" ) ]
                             ]
                         )
             , test "Basic Verbatim Element." <|
@@ -475,8 +479,8 @@ suite =
                     Expect.equal
                         (toResult inlines "my `verbatim string`{verb}")
                         (Ok
-                            [ [ Mark.Text emptyStyles "my " ]
-                            , [ Mark.Text emptyStyles "verbatim string" ]
+                            [ [ ( emptyStyles, "my " ) ]
+                            , [ ( emptyStyles, "verbatim string" ) ]
                             ]
                         )
             , test "Verbatim element without attributes" <|
@@ -484,8 +488,8 @@ suite =
                     Expect.equal
                         (toResult inlines "my `verbatim string`")
                         (Ok
-                            [ [ Mark.Text emptyStyles "my " ]
-                            , [ Mark.Text emptyStyles "verbatim string" ]
+                            [ [ Tuple.pair emptyStyles "my " ]
+                            , [ Tuple.pair emptyStyles "verbatim string" ]
                             ]
                         )
             , test "Verbatim element with attributes" <|
@@ -515,22 +519,22 @@ suite =
                 \_ ->
                     Expect.equal
                         (toResult inlines "my test//text")
-                        (Ok [ [ Mark.Text emptyStyles "my test/text" ] ])
+                        (Ok [ [ Tuple.pair emptyStyles "my test/text" ] ])
             , test "replace dash" <|
                 \_ ->
                     Expect.equal
                         (toResult inlines "my test--text")
-                        (Ok [ [ Mark.Text emptyStyles "my test–text" ] ])
+                        (Ok [ [ Tuple.pair emptyStyles "my test–text" ] ])
             , test "Inline elements should maintain escaped italics" <|
                 \_ ->
                     Expect.equal
                         (toResult inlines "[my //]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
-                            [ [ Mark.Text emptyStyles "my /" ]
-                            , [ Mark.Text emptyStyles " highlighted " ]
-                            , [ Mark.Text emptyStyles "sentence" ]
-                            , [ Mark.Text emptyStyles " " ]
-                            , [ Mark.Text emptyStyles "order" ]
+                            [ [ Tuple.pair emptyStyles "my /" ]
+                            , [ Tuple.pair emptyStyles " highlighted " ]
+                            , [ Tuple.pair emptyStyles "sentence" ]
+                            , [ Tuple.pair emptyStyles " " ]
+                            , [ Tuple.pair emptyStyles "order" ]
                             ]
                         )
             , test "Inline elements should maintain multiple replacements" <|
@@ -538,11 +542,11 @@ suite =
                     Expect.equal
                         (toResult inlines "[my ////]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
-                            [ [ Mark.Text emptyStyles "my //" ]
-                            , [ Mark.Text emptyStyles " highlighted " ]
-                            , [ Mark.Text emptyStyles "sentence" ]
-                            , [ Mark.Text emptyStyles " " ]
-                            , [ Mark.Text emptyStyles "order" ]
+                            [ [ Tuple.pair emptyStyles "my //" ]
+                            , [ Tuple.pair emptyStyles " highlighted " ]
+                            , [ Tuple.pair emptyStyles "sentence" ]
+                            , [ Tuple.pair emptyStyles " " ]
+                            , [ Tuple.pair emptyStyles "order" ]
                             ]
                         )
             , test "Inline elements should maintain escaped characters" <|
@@ -550,11 +554,11 @@ suite =
                     Expect.equal
                         (toResult inlines "[my \\/]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
-                            [ [ Mark.Text emptyStyles "my /" ]
-                            , [ Mark.Text emptyStyles " highlighted " ]
-                            , [ Mark.Text emptyStyles "sentence" ]
-                            , [ Mark.Text emptyStyles " " ]
-                            , [ Mark.Text emptyStyles "order" ]
+                            [ [ Tuple.pair emptyStyles "my /" ]
+                            , [ Tuple.pair emptyStyles " highlighted " ]
+                            , [ Tuple.pair emptyStyles "sentence" ]
+                            , [ Tuple.pair emptyStyles " " ]
+                            , [ Tuple.pair emptyStyles "order" ]
                             ]
                         )
             , test "Incorrect inline element name" <|
@@ -673,7 +677,7 @@ Then some text.
 """
 
                         result =
-                            Ok [ Mark.Text emptyStyles "Here's my extra line" ]
+                            Ok [ Tuple.pair emptyStyles "Here’s my extra line" ]
                     in
                     Expect.equal (toResult textDoc doc1)
                         result
@@ -687,7 +691,7 @@ Then some text.
 """
 
                         result =
-                            Ok [ Mark.Text emptyStyles "Here's my extra line\nAnd some additional stuff." ]
+                            Ok [ Tuple.pair emptyStyles "Here’s my extra line\nAnd some additional stuff." ]
                     in
                     Expect.equal (toResult textDoc doc1)
                         result
@@ -740,12 +744,12 @@ Each with their own /styling/.
                         result =
                             Ok
                                 ( { one = "Test data", two = "other data" }
-                                , [ [ Mark.Text emptyStyles "Then a bunch of"
+                                , [ [ Tuple.pair emptyStyles "Then a bunch of"
                                     ]
-                                  , [ Mark.Text emptyStyles "paragraphs." ]
-                                  , [ Mark.Text emptyStyles "Each with their own "
-                                    , Mark.Text { bold = False, italic = True, strike = False } "styling"
-                                    , Mark.Text emptyStyles "."
+                                  , [ Tuple.pair emptyStyles "paragraphs." ]
+                                  , [ Tuple.pair emptyStyles "Each with their own "
+                                    , Tuple.pair { bold = False, italic = True, strike = False } "styling"
+                                    , Tuple.pair emptyStyles "."
                                     ]
                                   ]
                                 )
@@ -903,7 +907,7 @@ Finally, a sentence
 """
                     in
                     Expect.equal (toResult recordManyTextDoc doc1)
-                        (Ok { one = "hello", three = [ [ Mark.Text emptyStyles "Here is a bunch of text" ] ], two = "world" })
+                        (Ok { one = "hello", three = [ [ Tuple.pair emptyStyles "Here is a bunch of text" ] ], two = "world" })
             , test "Records with many text as a field (starting on same line)" <|
                 \_ ->
                     let
@@ -919,7 +923,7 @@ Finally, a sentence
                         (Ok
                             { one = "hello"
                             , three =
-                                [ [ Mark.Text emptyStyles "Here is a bunch of text" ] ]
+                                [ [ Tuple.pair emptyStyles "Here is a bunch of text" ] ]
                             , two = "world"
                             }
                         )
@@ -941,8 +945,8 @@ Finally, a sentence
                         (Ok
                             { one = "hello"
                             , three =
-                                [ [ Mark.Text emptyStyles "Here is a bunch of text" ]
-                                , [ Mark.Text emptyStyles "And some more on another line" ]
+                                [ [ Tuple.pair emptyStyles "Here is a bunch of text" ]
+                                , [ Tuple.pair emptyStyles "And some more on another line" ]
                                 ]
                             , two = "world"
                             }
@@ -1051,4 +1055,36 @@ Finally, a sentence
                     Expect.equal (Mark.compile intDoc doc1)
                         (Mark.Success { one = 15, two = -1, three = 2 })
             ]
+        ]
+
+
+textModification =
+    describe "New Text"
+        [ test "insert token" <|
+            \_ ->
+                Expect.equal
+                    [ Mark.New.unstyled "Hel"
+                    , Mark.Internal.Description.ExpectToken "link" []
+                    , Mark.New.unstyled "lo World"
+                    ]
+                    (Mark.New.insertToken 3
+                        "link"
+                        []
+                        [ Mark.New.unstyled "Hello "
+                        , Mark.New.unstyled "World"
+                        ]
+                    )
+        , test "restyle unstyled text" <|
+            \_ ->
+                Expect.equal
+                    [ Mark.New.unstyled "Hel"
+                    , Mark.New.styled Mark.New.bold "lo Wo"
+                    , Mark.New.unstyled "rld"
+                    ]
+                    (Mark.New.restyle (Mark.New.select 3 8)
+                        Mark.New.bold
+                        [ Mark.New.unstyled "Hello "
+                        , Mark.New.unstyled "World"
+                        ]
+                    )
         ]
