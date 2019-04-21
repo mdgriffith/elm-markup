@@ -8,6 +8,7 @@ import Mark
 import Mark.Edit
 import Mark.Internal.Description as Description
 import Mark.Internal.Id as Id
+import Mark.New
 import Test exposing (..)
 
 
@@ -34,30 +35,18 @@ createIndented exp =
 record =
     Description.ExpectRecord "Circle"
         [ ( "x"
-          , Description.ExpectIntBetween
-                { default = 5
-                , min = 10
-                , max = 550
-                }
+          , Description.ExpectInteger 5
           )
         , ( "y"
-          , Description.ExpectIntBetween
-                { default = 5
-                , min = 50
-                , max = 550
-                }
+          , Description.ExpectInteger 5
           )
         , ( "radius"
-          , Description.ExpectIntBetween
-                { default = 5
-                , min = 3
-                , max = 10
-                }
+          , Description.ExpectInteger 5
           )
         , ( "color"
           , Description.ExpectOneOf
-                [ Description.ExpectStringExactly "Red"
-                , Description.ExpectStringExactly "Black"
+                [ Description.ExpectString "Red"
+                , Description.ExpectString "Black"
                 ]
           )
         ]
@@ -141,7 +130,7 @@ suite =
                 \_ ->
                     Expect.equal
                         (Description.descriptionToString
-                            (create (Description.ExpectStringExactly "hello"))
+                            (create (Description.ExpectString "hello"))
                         )
                         "hello"
             , test "Record" <|
@@ -195,7 +184,7 @@ suite =
                 \_ ->
                     Expect.equal
                         (Description.descriptionToString
-                            (create (Description.ExpectStringExactly "hello"))
+                            (create (Description.ExpectString "hello"))
                         )
                         "hello"
             , test "Record" <|
@@ -213,6 +202,47 @@ manyIndentedHellosId =
     Id.Id [ 0 ]
 
 
+manyHelloDoc =
+    Mark.document
+        identity
+        (Mark.block "Indented"
+            identity
+            (Mark.manyOf
+                [ Mark.string
+                ]
+            )
+        )
+
+
+manyTextDocNoBlock =
+    Mark.document
+        identity
+        (Mark.manyOf
+            [ Mark.string
+            ]
+        )
+
+
+threeHellos =
+    Description.Parsed
+        { errors = []
+        , initialSeed = Id.initialSeed
+        , currentSeed = Id.initialSeed
+        , found =
+            Description.Found
+                { start = Description.startingPoint
+                , end = Description.startingPoint
+                }
+                (manyHellos ())
+        , expected =
+            Description.ExpectManyOf
+                [ Description.ExpectString "hello"
+                , Description.ExpectString "hello"
+                , Description.ExpectString "hello"
+                ]
+        }
+
+
 edits =
     describe "Edit"
         [ test "Indented - Insert at 2" <|
@@ -220,11 +250,11 @@ edits =
                 let
                     new =
                         Mark.Edit.update
-                            (Mark.Edit.insertAt 2
-                                (Id.Choice
-                                    manyIndentedHellosId
-                                    (Description.ExpectString "world")
-                                )
+                            manyHelloDoc
+                            (Mark.Edit.insertAt
+                                (Id.Id [ 0 ])
+                                2
+                                (Mark.New.string "world")
                             )
                             (Description.Parsed
                                 { errors = []
@@ -247,136 +277,70 @@ edits =
                                 }
                             )
                 in
-                Expect.equal (Description.toString new)
-                    """|> Indented
+                Expect.equal (Result.map Description.toString new)
+                    (Ok """|> Indented
     hello
     hello
     world
-    hello"""
-        , test
-            "Insert at 2"
-          <|
+    hello""")
+        , test "Insert at 2" <|
             \_ ->
                 let
                     new =
                         Mark.Edit.update
-                            (Mark.Edit.insertAt 2
-                                (Id.Choice
-                                    (Id.Id [ 0 ])
-                                    (Description.ExpectString "world")
-                                )
+                            manyTextDocNoBlock
+                            (Mark.Edit.insertAt
+                                (Id.Id [ 0 ])
+                                2
+                                (Mark.New.string "world")
                             )
-                            (Description.Parsed
-                                { errors = []
-                                , initialSeed = Id.initialSeed
-                                , currentSeed = Id.initialSeed
-                                , found =
-                                    Description.Found
-                                        { start = Description.startingPoint
-                                        , end = Description.startingPoint
-                                        }
-                                        (manyHellos ())
-                                , expected =
-                                    Description.ExpectManyOf
-                                        [ Description.ExpectString "hello"
-                                        , Description.ExpectString "hello"
-                                        , Description.ExpectString "hello"
-                                        ]
-                                }
-                            )
+                            threeHellos
                 in
-                Expect.equal (Description.toString new) "hello\n\nhello\n\nworld\n\nhello"
+                Expect.equal (Result.map Description.toString new)
+                    (Ok "hello\n\nhello\n\nworld\n\nhello")
         , test "Insert at 1" <|
             \_ ->
                 let
                     new =
                         Mark.Edit.update
-                            (Mark.Edit.insertAt 1
-                                (Id.Choice
-                                    (Id.Id [ 0 ])
-                                    (Description.ExpectString "world")
-                                )
+                            manyTextDocNoBlock
+                            (Mark.Edit.insertAt
+                                (Id.Id [ 0 ])
+                                1
+                                (Mark.New.string "world")
                             )
-                            (Description.Parsed
-                                { errors = []
-                                , initialSeed = Id.initialSeed
-                                , currentSeed = Id.initialSeed
-                                , found =
-                                    Description.Found
-                                        { start = Description.startingPoint
-                                        , end = Description.startingPoint
-                                        }
-                                        (manyHellos ())
-                                , expected =
-                                    Description.ExpectManyOf
-                                        [ Description.ExpectString "hello"
-                                        , Description.ExpectString "hello"
-                                        , Description.ExpectString "hello"
-                                        ]
-                                }
-                            )
+                            threeHellos
                 in
-                Expect.equal (Description.toString new) "hello\n\nworld\n\nhello\n\nhello"
+                Expect.equal (Result.map Description.toString new)
+                    (Ok "hello\n\nworld\n\nhello\n\nhello")
         , test "Insert at 0" <|
             \_ ->
                 let
                     new =
                         Mark.Edit.update
-                            (Mark.Edit.insertAt 0
-                                (Id.Choice
-                                    (Id.Id [ 0 ])
-                                    (Description.ExpectString "world")
-                                )
+                            manyTextDocNoBlock
+                            (Mark.Edit.insertAt
+                                (Id.Id [ 0 ])
+                                0
+                                (Mark.New.string "world")
                             )
-                            (Description.Parsed
-                                { errors = []
-                                , initialSeed = Id.initialSeed
-                                , currentSeed = Id.initialSeed
-                                , found =
-                                    Description.Found
-                                        { start = Description.startingPoint
-                                        , end = Description.startingPoint
-                                        }
-                                        (manyHellos ())
-                                , expected =
-                                    Description.ExpectManyOf
-                                        [ Description.ExpectString "hello"
-                                        , Description.ExpectString "hello"
-                                        , Description.ExpectString "hello"
-                                        ]
-                                }
-                            )
+                            threeHellos
                 in
-                Expect.equal (Description.toString new) "world\n\nhello\n\nhello\n\nhello"
+                Expect.equal (Result.map Description.toString new)
+                    (Ok "world\n\nhello\n\nhello\n\nhello")
         , test "Insert at 3" <|
             \_ ->
                 let
                     new =
                         Mark.Edit.update
-                            (Mark.Edit.insertAt 3
-                                (Id.Choice
-                                    (Id.Id [ 0 ])
-                                    (Description.ExpectString "world")
-                                )
+                            manyTextDocNoBlock
+                            (Mark.Edit.insertAt
+                                (Id.Id [ 0 ])
+                                3
+                                (Mark.New.string "world")
                             )
-                            (Description.Parsed
-                                { errors = []
-                                , initialSeed = Id.initialSeed
-                                , currentSeed = Id.initialSeed
-                                , found =
-                                    Description.Found
-                                        { start = Description.startingPoint
-                                        , end = Description.startingPoint
-                                        }
-                                        (manyHellos ())
-                                , expected =
-                                    Description.ExpectManyOf
-                                        [ Description.ExpectString "hello"
-                                        , Description.ExpectString "hello"
-                                        , Description.ExpectString "hello"
-                                        ]
-                                }
-                            )
+                            threeHellos
                 in
-                Expect.equal (Description.toString new) "hello\n\nhello\n\nhello\n\nworld"
+                Expect.equal (Result.map Description.toString new)
+                    (Ok "hello\n\nhello\n\nhello\n\nworld")
         ]
