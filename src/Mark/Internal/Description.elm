@@ -1078,6 +1078,7 @@ toString (Parsed parsed) =
         |> .printed
 
 
+descriptionToString : Description -> String
 descriptionToString desc =
     writeDescription
         desc
@@ -1267,7 +1268,17 @@ writeDescription description cursor =
         DescribeText txt ->
             cursor
                 |> advanceTo txt.range
-                |> (\c -> List.foldl writeTextDescription c txt.text)
+                |> (\c ->
+                        txt.text
+                            |> List.foldl
+                                writeTextDescription
+                                { cursor = c
+                                , styles = emptyStyles
+                                }
+                            |> writeTextDescription
+                                (Styled emptyRange (Text emptyStyles ""))
+                            |> .cursor
+                   )
 
         DescribeString id range str ->
             cursor
@@ -1321,45 +1332,55 @@ writeNested (Nested node) cursor =
         |> dedent
 
 
-textDescriptionToString txt =
+textDescriptionToString existingStyles txt =
     case txt of
         Styled range t ->
-            textToString t
+            textToString existingStyles t
 
         InlineToken details ->
-            case details.attributes of
-                [] ->
-                    "{" ++ details.name ++ "}"
+            Tuple.pair existingStyles <|
+                case details.attributes of
+                    [] ->
+                        "{" ++ details.name ++ "}"
 
-                _ ->
-                    "{"
-                        ++ details.name
-                        ++ " |"
-                        ++ String.join ", " (List.map inlineDescToString details.attributes)
-                        ++ "}"
+                    _ ->
+                        "{"
+                            ++ details.name
+                            ++ " |"
+                            ++ String.join ", " (List.map inlineDescToString details.attributes)
+                            ++ "}"
 
         InlineAnnotation details ->
-            "["
-                ++ String.join "" (List.map textToString details.text)
+            let
+                ( newStyles, renderedText ) =
+                    details.text
+                        |> List.foldl gatherText ( existingStyles, "" )
+                        |> gatherText (Text emptyStyles "")
+            in
+            ( newStyles
+            , "["
+                ++ renderedText
                 ++ "]{"
                 ++ String.join ", " (List.map inlineDescToString details.attributes)
                 ++ "}"
+            )
 
         InlineVerbatim details ->
             case details.text of
                 Text _ str ->
-                    if List.isEmpty details.attributes then
-                        "`" ++ str ++ "`"
+                    Tuple.pair existingStyles <|
+                        if List.isEmpty details.attributes then
+                            "`" ++ str ++ "`"
 
-                    else
-                        "`"
-                            ++ str
-                            ++ "`{"
-                            ++ String.join ", " (List.map inlineDescToString details.attributes)
-                            ++ "}"
+                        else
+                            "`"
+                                ++ str
+                                ++ "`{"
+                                ++ String.join ", " (List.map inlineDescToString details.attributes)
+                                ++ "}"
 
         UnexpectedInline unexpected ->
-            ""
+            ( existingStyles, "" )
 
 
 inlineDescToString : InlineAttribute -> String
@@ -1380,17 +1401,83 @@ inlineDescToString inlineDesc =
 --     String.join "" (List.map textToString txts)
 
 
-writeTextDescription desc curs =
-    write (textDescriptionToString desc) curs
+writeTextDescription desc cursorAndStyles =
+    let
+        ( newStyles, newStr ) =
+            textDescriptionToString cursorAndStyles.styles desc
+    in
+    { cursor = write newStr cursorAndStyles.cursor
+    , styles = newStyles
+    }
 
 
-writeTextNode node curs =
-    write (textToString node) curs
+
+-- writeTextNode node curs =
+--     write (textToString node) curs
 
 
-textToString : Text -> String
-textToString (Text styles txt) =
-    txt
+textToString : Styling -> Text -> ( Styling, String )
+textToString existingStyles (Text styles txt) =
+    ( styles, startingCharacters existingStyles styles ++ txt )
+
+
+gatherText : Text -> ( Styling, String ) -> ( Styling, String )
+gatherText (Text styles txt) ( existingStyles, existingStr ) =
+    ( styles, existingStr ++ startingCharacters existingStyles styles ++ txt )
+
+
+{-| Here we can standardize the order of control characters.
+-}
+startingCharacters one two =
+    let
+        boldClosing =
+            if one.bold && not two.bold then
+                "*"
+
+            else
+                ""
+
+        boldOpening =
+            if not one.bold && two.bold then
+                "*"
+
+            else
+                ""
+
+        italicClosing =
+            if one.italic && not two.italic then
+                "/"
+
+            else
+                ""
+
+        italicOpening =
+            if not one.italic && two.italic then
+                "/"
+
+            else
+                ""
+
+        strikeClosing =
+            if one.strike && not two.strike then
+                "~"
+
+            else
+                ""
+
+        strikeOpening =
+            if not one.strike && two.strike then
+                "~"
+
+            else
+                ""
+    in
+    strikeClosing
+        ++ italicClosing
+        ++ boldClosing
+        ++ strikeOpening
+        ++ italicOpening
+        ++ boldOpening
 
 
 writeWith toStr a cursor =
