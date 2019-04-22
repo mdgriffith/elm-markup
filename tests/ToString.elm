@@ -1,4 +1,4 @@
-module ToString exposing (suite)
+module ToString exposing (edits, suite)
 
 {-| -}
 
@@ -153,7 +153,7 @@ suite =
                         (Description.descriptionToString
                             (manyHellos ())
                         )
-                        "hello\nhello\nhello"
+                        "hello\n\nhello\n\nhello"
             , test "Many Indented Strings" <|
                 \_ ->
                     Expect.equal
@@ -162,7 +162,9 @@ suite =
                         )
                         """|> Indented
     hello
+
     hello
+
     hello"""
             ]
         , describe "Indented - toString"
@@ -223,6 +225,16 @@ manyTextDocNoBlock =
         )
 
 
+styledText =
+    Mark.document
+        identity
+        (Mark.text
+            (\styles str ->
+                str
+            )
+        )
+
+
 threeHellos =
     Description.Parsed
         { errors = []
@@ -280,8 +292,11 @@ edits =
                 Expect.equal (Result.map Description.toString new)
                     (Ok """|> Indented
     hello
+
     hello
+
     world
+
     hello""")
         , test "Insert at 2" <|
             \_ ->
@@ -343,4 +358,81 @@ edits =
                 in
                 Expect.equal (Result.map Description.toString new)
                     (Ok "hello\n\nhello\n\nhello\n\nworld")
+        , describe "Text Edits"
+            [ test "Add Bold" <|
+                \_ ->
+                    let
+                        parseOutcome =
+                            Mark.parse styledText "Hello World"
+
+                        new =
+                            case parseOutcome of
+                                Mark.Success parsed ->
+                                    Mark.Edit.update
+                                        styledText
+                                        (Mark.Edit.restyle
+                                            (Id.Id [ 0 ])
+                                            { anchor = 3, focus = 8 }
+                                            Mark.New.bold
+                                        )
+                                        parsed
+
+                                _ ->
+                                    Err []
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "Hel*lo Wo*rld")
+            , test "Clear Bold" <|
+                \_ ->
+                    let
+                        parseOutcome =
+                            Mark.parse styledText "Hel*lo Wo*rld"
+
+                        new =
+                            case parseOutcome of
+                                Mark.Success parsed ->
+                                    Mark.Edit.update
+                                        styledText
+                                        (Mark.Edit.restyle
+                                            (Id.Id [ 0 ])
+                                            { anchor = 3, focus = 8 }
+                                            { bold = False
+                                            , italic = False
+                                            , strike = False
+                                            }
+                                        )
+                                        parsed
+
+                                _ ->
+                                    Err []
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "Hello World")
+            , test "Add all styles" <|
+                \_ ->
+                    let
+                        parseOutcome =
+                            Mark.parse styledText "Hello World"
+
+                        new =
+                            case parseOutcome of
+                                Mark.Success parsed ->
+                                    Mark.Edit.update
+                                        styledText
+                                        (Mark.Edit.restyle
+                                            (Id.Id [ 0 ])
+                                            { anchor = 3, focus = 8 }
+                                            { bold = True
+                                            , italic = True
+                                            , strike = True
+                                            }
+                                        )
+                                        parsed
+
+                                _ ->
+                                    Err []
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "Hel~/*lo Wo*/~rld")
+            ]
         ]
