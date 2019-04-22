@@ -10,7 +10,7 @@ module Mark.Internal.Description exposing
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
     , Block(..), Document(..), Inline(..)
     , boldStyle, italicStyle, strikeStyle
-    , resultToFound, getId, expectationToAttr
+    , resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     )
 
 {-|
@@ -37,7 +37,7 @@ module Mark.Internal.Description exposing
 
 @docs boldStyle, italicStyle, strikeStyle
 
-@docs resultToFound, getId, expectationToAttr
+@docs resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
 
 -}
 
@@ -105,6 +105,17 @@ type Nested item
         , content : List item
         , children :
             List (Nested item)
+        }
+
+
+mapNested : (a -> b) -> Nested a -> Nested b
+mapNested fn (Nested nest) =
+    Nested
+        { index = nest.index
+        , icon = nest.icon
+        , content = List.map fn nest.content
+        , children =
+            List.map (mapNested fn) nest.children
         }
 
 
@@ -247,6 +258,7 @@ emptyRange =
     }
 
 
+getId : Description -> Id
 getId description =
     case description of
         DescribeBlock details ->
@@ -289,9 +301,106 @@ getId description =
             id
 
 
+minusSize :
+    { offset : Int, line : Int }
+    -> { offset : Int, line : Int }
+    -> { offset : Int, line : Int }
+minusSize one two =
+    { offset = one.offset - two.offset
+    , line = one.line - two.line
+    }
+
+
+textSize : List TextDescription -> { offset : Int, line : Int }
+textSize els =
+    case els of
+        [] ->
+            { offset = 0, line = 0 }
+
+        start :: remain ->
+            case List.head (List.reverse remain) of
+                Nothing ->
+                    sizeFromRange (textDescriptionRange start)
+
+                Just last ->
+                    minusSize
+                        (sizeFromRange (textDescriptionRange start))
+                        (sizeFromRange (textDescriptionRange last))
+
+
+getSize : Description -> { offset : Int, line : Int }
+getSize description =
+    case description of
+        DescribeBlock details ->
+            sizeFromRange (getFoundSize details.found)
+
+        Record details ->
+            sizeFromRange (getFoundSize details.found)
+
+        OneOf details ->
+            sizeFromRange (getFoundSize details.child)
+
+        ManyOf details ->
+            sizeFromRange details.range
+
+        StartsWith details ->
+            sizeFromRange details.range
+
+        DescribeTree details ->
+            sizeFromRange details.range
+
+        DescribeBoolean details ->
+            sizeFromRange (getFoundSize details.found)
+
+        DescribeInteger details ->
+            sizeFromRange (getFoundSize details.found)
+
+        DescribeFloat details ->
+            sizeFromRange (getFoundSize details.found)
+
+        DescribeText details ->
+            sizeFromRange details.range
+
+        DescribeString _ range _ ->
+            sizeFromRange range
+
+        DescribeMultiline _ range _ ->
+            sizeFromRange range
+
+        DescribeNothing id ->
+            { offset = 0
+            , line = 0
+            }
+
+
+sizeFromRange range =
+    { offset = range.end.offset - range.start.offset
+    , line = range.end.line - range.start.line
+    }
+
+
 {-| -}
 type Proved
     = Proved Id (List (Found Description))
+
+
+textDescriptionRange : TextDescription -> Range
+textDescriptionRange textDesc =
+    case textDesc of
+        Styled rng _ ->
+            rng
+
+        InlineAnnotation details ->
+            details.range
+
+        InlineToken details ->
+            details.range
+
+        InlineVerbatim details ->
+            details.range
+
+        UnexpectedInline details ->
+            details.range
 
 
 {-| -}
@@ -454,6 +563,27 @@ type
 
 
 {-| -}
+mapFound : (a -> b) -> Found a -> Found b
+mapFound fn found =
+    case found of
+        Found range item ->
+            Found range (fn item)
+
+        Unexpected unexp ->
+            Unexpected unexp
+
+
+getFoundSize : Found a -> Range
+getFoundSize found =
+    case found of
+        Found range _ ->
+            range
+
+        Unexpected unexp ->
+            unexp.range
+
+
+{-| -}
 uncertain : Error.UnexpectedDetails -> Outcome Error.AstError (Uncertain data) data
 uncertain err =
     Almost (Uncertain ( err, [] ))
@@ -597,7 +727,11 @@ inlineExample inline =
                 "[some styled text]{" ++ name ++ "}"
 
             else
-                "[some styled text]{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
+                "[some styled text]{"
+                    ++ name
+                    ++ "|"
+                    ++ inlineAttrExamples attrs
+                    ++ "}"
 
         ExpectToken name attrs ->
             if List.isEmpty attrs then
@@ -611,7 +745,11 @@ inlineExample inline =
                 "`some styled text`"
 
             else
-                "`some styled text`{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
+                "`some styled text`{"
+                    ++ name
+                    ++ "|"
+                    ++ inlineAttrExamples attrs
+                    ++ "}"
 
 
 match description exp =
@@ -824,54 +962,11 @@ startingPoint =
     }
 
 
-
--- push maybePush found =
---     case maybePush of
---         Nothing ->
---             found
---         Just to ->
---             case found of
---                 Found range item ->
---                     Found (pushRange to range) (pushDescription to item)
---                 Unexpected unexpected ->
---                     Unexpected { unexpected | range = pushRange to unexpected.range }
--- pushDescription to desc =
---     case desc of
---         DescribeString id str ->
---             DescribeString (pushId to id) str
---         _ ->
---             desc
--- pushId to (Id range) =
---     Id (pushRange to range)
--- pushRange to range =
---     { start = addPositions to range.start
---     , end = addPositions to range.end
---     }
--- addPositions to pos =
---     { offset = pos.offset + to.offset
---     , line = pos.line + to.line
---     , column = pos.column + to.column
---     }
--- pushFromRange { start, end } =
---     { offset = end.offset - start.offset
---     , line = end.line - start.line
---     , column = end.column - start.column
---     }
-
-
 minusPosition end start =
     { offset = end.offset - start.offset
     , line = end.line - start.line
     , column = end.column - start.column
     }
-
-
-
--- sizeToRange start delta =
---     { start = start
---     , end =
---         addPositions start delta
---     }
 
 
 {-| -}
@@ -957,6 +1052,39 @@ isPrimitive description =
 
         DescribeNothing _ ->
             False
+
+
+
+-- {-|-}
+-- descriptionSize description =
+--     case description of
+--         DescribeBlock _ ->
+--             False
+--         Record _ ->
+--             False
+--         OneOf _ ->
+--             False
+--         ManyOf _ ->
+--             False
+--         StartsWith _ ->
+--             False
+--         DescribeTree details ->
+--             False
+--         -- Primitives
+--         DescribeBoolean found ->
+--             True
+--         DescribeInteger found ->
+--             True
+--         DescribeFloat found ->
+--             True
+--         DescribeText _ ->
+--             True
+--         DescribeString _ _ _ ->
+--             True
+--         DescribeMultiline _ _ _ ->
+--             True
+--         DescribeNothing _ ->
+--             False
 
 
 {-| -}
@@ -1051,10 +1179,6 @@ getContainingDescriptions description offset =
 
 
 getWithinNested offset (Nested nest) =
-    -- case nest.content of
-    --     ( desc, items ) ->
-    --         getContainingDescriptions desc offset
-    --             ++
     List.concatMap
         (\item ->
             getContainingDescriptions item offset
@@ -1089,19 +1213,20 @@ descriptionToString desc =
         |> .printed
 
 
-getSize desc =
-    writeDescription desc
-        { indent = 0
-        , position = { line = 1, column = 1, offset = 0 }
-        , printed = ""
-        }
-        |> .position
-        |> (\pos ->
-                { column = pos.column - 1
-                , line = pos.line - 1
-                , offset = pos.offset
-                }
-           )
+
+-- getSize desc =
+--     writeDescription desc
+--         { indent = 0
+--         , position = { line = 1, column = 1, offset = 0 }
+--         , printed = ""
+--         }
+--         |> .position
+--         |> (\pos ->
+--                 { column = pos.column - 1
+--                 , line = pos.line - 1
+--                 , offset = pos.offset
+--                 }
+--            )
 
 
 type alias PrintCursor =
@@ -1113,17 +1238,21 @@ type alias PrintCursor =
 
 write : String -> PrintCursor -> PrintCursor
 write str cursor =
-    { cursor
-        | printed = cursor.printed ++ str
-        , position =
-            (\pos ->
-                { pos
-                    | offset = pos.offset + String.length str
-                    , column = pos.column + String.length str
-                }
-            )
-                cursor.position
-    }
+    if str == "" then
+        cursor
+
+    else
+        { cursor
+            | printed = cursor.printed ++ str
+            , position =
+                (\pos ->
+                    { pos
+                        | offset = pos.offset + String.length str
+                        , column = pos.column + String.length str
+                    }
+                )
+                    cursor.position
+        }
 
 
 writeNewline : PrintCursor -> PrintCursor
@@ -1472,9 +1601,9 @@ startingCharacters one two =
             else
                 ""
     in
-    strikeClosing
+    boldClosing
         ++ italicClosing
-        ++ boldClosing
+        ++ strikeClosing
         ++ strikeOpening
         ++ italicOpening
         ++ boldOpening
@@ -1516,37 +1645,46 @@ writeField ( name, foundVal ) cursor =
 
 
 createInline :
-    List InlineExpectation
-    -> List TextDescription
-createInline current =
-    List.map inlineExpectationToDesc current
+    Position
+    -> List InlineExpectation
+    -> ( Position, List TextDescription )
+createInline start current =
+    List.foldl inlineExpectationToDesc ( start, [] ) current
+        |> Tuple.mapSecond List.reverse
 
 
-inlineExpectationToDesc exp =
+inlineExpectationToDesc exp ( prevPos, els ) =
     -- TODO: add ranges
     case exp of
         ExpectText txt ->
-            Styled emptyRange txt
+            ( prevPos, Styled emptyRange txt :: els )
 
         ExpectAnnotation name attrs txts ->
-            InlineAnnotation
+            ( prevPos
+            , InlineAnnotation
                 { name = name
                 , range = emptyRange
                 , text = txts
                 , attributes = List.map expectationToAttr attrs
                 }
+                :: els
+            )
 
         -- tokens have no placeholder
         ExpectToken name attrs ->
-            InlineToken
+            ( prevPos
+            , InlineToken
                 { name = name
                 , range = emptyRange
                 , attributes = List.map expectationToAttr attrs
                 }
+                :: els
+            )
 
         -- name, attrs, placeholder content
         ExpectVerbatim name attrs content ->
-            InlineVerbatim
+            ( prevPos
+            , InlineVerbatim
                 { name =
                     if name == "" && attrs == [] then
                         Nothing
@@ -1557,6 +1695,8 @@ inlineExpectationToDesc exp =
                 , text = Text emptyStyles content
                 , attributes = List.map expectationToAttr attrs
                 }
+                :: els
+            )
 
 
 {-|
@@ -1678,7 +1818,10 @@ create current =
                     create
                         { indent = current.indent + 1
                         , base = current.base
-                        , expectation = Maybe.withDefault ExpectNothing (List.head choices)
+                        , expectation =
+                            Maybe.withDefault
+                                ExpectNothing
+                                (List.head choices)
                         , seed = newSeed
                         }
             in
@@ -1722,6 +1865,7 @@ create current =
                             in
                             ( new.seed
                             , new.pos
+                                |> moveNewline
                                 |> moveNewline
                                 |> moveColumn (current.indent * 4)
                             , Found
@@ -1904,28 +2048,34 @@ create current =
             , seed = newSeed
             }
 
-        _ ->
+        ExpectTextBlock nodes ->
             let
-                end =
-                    moveColumn (String.length "True") current.base
-
-                range =
-                    { start = current.base
-                    , end = end
-                    }
+                ( end, newText ) =
+                    createInline current.base nodes
 
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
             { pos = end
             , desc =
-                DescribeBoolean
+                DescribeText
                     { id = newId
-                    , found =
-                        Found
-                            range
-                            True
+                    , range =
+                        { start = current.base
+                        , end = end
+                        }
+                    , text = newText
                     }
+            , seed = newSeed
+            }
+
+        ExpectNothing ->
+            let
+                ( newId, newSeed ) =
+                    Id.step current.seed
+            in
+            { pos = current.base
+            , desc = DescribeNothing newId
             , seed = newSeed
             }
 

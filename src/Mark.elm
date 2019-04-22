@@ -605,17 +605,6 @@ onError newValue myBlock =
                 }
 
 
-{-| -}
-mapFound : (a -> b) -> Found a -> Found b
-mapFound fn found =
-    case found of
-        Found range item ->
-            Found range (fn item)
-
-        Unexpected unexp ->
-            Unexpected unexp
-
-
 skipSeed parser seed =
     ( seed, parser )
 
@@ -1684,7 +1673,7 @@ type alias Styles =
 
 {-|
 
-    Mark.text (\styles string -> Html.span [] [ Html.text string ])
+    Mark.text (\( styles, string ) -> Html.span [] [ Html.text string ])
 
 **NOTE** includes `Mark.commonReplacements` by default.
 
@@ -1698,35 +1687,6 @@ text view =
         , inlines = []
         , replacements = commonReplacements
         }
-
-
-
--- Value
---     { expect = ExpectTextBlock []
---     , converter =
---         renderText
---             { view = view
---             , inlines = []
---             , replacements = commonReplacements
---             }
---     , parser =
---         \seed ->
---             -- TODO:  probably need a seed for text editing.
---             ( seed
---             , Parse.getPosition
---                 |> Parser.andThen
---                     (\pos ->
---                         Parse.styledText
---                             { inlines = []
---                             , replacements = commonReplacements
---                             }
---                             seed
---                             pos
---                             emptyStyles
---                             []
---                     )
---             )
---     }
 
 
 {-| Handling formatted text is a little more involved than may be initially apparent.

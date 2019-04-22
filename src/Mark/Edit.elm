@@ -55,14 +55,6 @@ type alias Id =
     Id.Id
 
 
-
--- {-| -}
--- type alias UnexpectedDetails =
---     { range : Range
---     , problem : Error.Error
---     }
-
-
 {-| -}
 type alias Position =
     { offset : Int
@@ -161,7 +153,7 @@ prepareResults doc original ( edited, newDescription ) =
         NoEditMade ->
             Err [ Error.idNotFound ]
 
-        YesEditMade ->
+        YesEditMade _ ->
             let
                 newParsed =
                     Parsed { original | found = newDescription }
@@ -189,24 +181,63 @@ replaceOption id new desc =
     case desc of
         OneOf one ->
             -- When we're replacing the OneOf, we actually want to replace it's contents.
+            let
+                newSize =
+                    getSize new
+
+                existingSize =
+                    sizeFromRange (getFoundRange one.child)
+            in
             case one.child of
                 Found range val ->
-                    Just (OneOf { one | child = Found range new })
+                    Just
+                        ( minusSize newSize existingSize
+                            |> sizeToPush
+                        , OneOf { one | child = Found range new }
+                        )
 
                 Unexpected unexpected ->
-                    Just (OneOf { one | child = Found unexpected.range new })
+                    Just
+                        ( minusSize newSize existingSize
+                            |> sizeToPush
+                        , OneOf { one | child = Found unexpected.range new }
+                        )
 
         _ ->
-            Just new
+            let
+                newSize =
+                    getSize new
+
+                existingSize =
+                    getSize desc
+            in
+            Just
+                ( minusSize newSize existingSize
+                    |> sizeToPush
+                , new
+                )
+
+
+sizeToPush size =
+    if size.offset == 0 && size.line == 0 then
+        Nothing
+
+    else
+        Just size
 
 
 makeDeleteBlock id index indentation pos desc =
     case desc of
         ManyOf many ->
+            let
+                cleaned =
+                    removeByIndex index many.children
+            in
             Just
-                (ManyOf
+                ( cleaned.push
+                , ManyOf
                     { many
-                        | children = removeByIndex index many.children
+                        | children = List.reverse cleaned.items
                     }
                 )
 
@@ -239,17 +270,23 @@ update doc edit (Parsed original) =
                         \indentation pos desc ->
                             case desc of
                                 ManyOf many ->
-                                    Just <|
-                                        ManyOf
+                                    let
+                                        ( pushed, newChildren ) =
+                                            makeInsertAt
+                                                original.currentSeed
+                                                index
+                                                indentation
+                                                many
+                                                expectation
+                                    in
+                                    Just
+                                        ( pushed
+                                        , ManyOf
                                             { many
                                                 | children =
-                                                    makeInsertAt
-                                                        original.currentSeed
-                                                        index
-                                                        indentation
-                                                        many
-                                                        expectation
+                                                    newChildren
                                             }
+                                        )
 
                                 _ ->
                                     -- inserts only work for
@@ -277,7 +314,8 @@ update doc edit (Parsed original) =
                                                 |> List.foldl mergeStyles []
                                     in
                                     Just
-                                        (DescribeText
+                                        ( Just (pushNewTexts details.text newTexts)
+                                        , DescribeText
                                             { details | text = newTexts }
                                         )
 
@@ -296,28 +334,30 @@ update doc edit (Parsed original) =
                                                 |> List.foldl
                                                     (doTextEdit selection
                                                         (\els ->
-                                                            case wrapper of
-                                                                Annotation name attrs ->
-                                                                    [ InlineAnnotation
-                                                                        { name = name
-                                                                        , attributes = List.map expectationToAttr attrs
+                                                            let
+                                                                textStart =
+                                                                    getTextStart els
+                                                                        |> Maybe.withDefault pos
 
-                                                                        -- TODO: this isn't right, need real range
-                                                                        , range = emptyRange
-                                                                        , text = List.concatMap onlyText els
-                                                                        }
-                                                                    ]
+                                                                wrapped =
+                                                                    case wrapper of
+                                                                        Annotation name attrs ->
+                                                                            ExpectAnnotation name attrs (List.concatMap onlyText els)
 
-                                                                Verbatim name attrs ->
-                                                                    [ InlineVerbatim
-                                                                        { name = Just name
-                                                                        , attributes = List.map Desc.expectationToAttr attrs
+                                                                        Verbatim name attrs ->
+                                                                            ExpectVerbatim name
+                                                                                attrs
+                                                                                (List.concatMap onlyText els
+                                                                                    |> List.map textString
+                                                                                    |> String.join ""
+                                                                                )
 
-                                                                        -- TODO: this isn't right, need real range
-                                                                        , range = emptyRange
-                                                                        , text = Text emptyStyles ""
-                                                                        }
-                                                                    ]
+                                                                ( end, newText ) =
+                                                                    createInline
+                                                                        textStart
+                                                                        [ wrapped ]
+                                                            in
+                                                            newText
                                                         )
                                                     )
                                                     emptySelectionEdit
@@ -325,7 +365,8 @@ update doc edit (Parsed original) =
                                                 |> List.foldl mergeStyles []
                                     in
                                     Just
-                                        (DescribeText
+                                        ( Just (pushNewTexts details.text newTexts)
+                                        , DescribeText
                                             { details | text = newTexts }
                                         )
 
@@ -339,18 +380,24 @@ update doc edit (Parsed original) =
                             case desc of
                                 DescribeText details ->
                                     let
+                                        makeNewText selectedEls =
+                                            newTextEls
+                                                |> createInline (Maybe.withDefault pos (getTextStart selectedEls))
+                                                |> Tuple.second
+
                                         newTexts =
                                             details.text
                                                 |> List.foldl
                                                     (doTextEdit selection
-                                                        (always (createInline newTextEls))
+                                                        makeNewText
                                                     )
                                                     emptySelectionEdit
                                                 |> .elements
                                                 |> List.foldl mergeStyles []
                                     in
                                     Just
-                                        (DescribeText
+                                        ( Just (pushNewTexts details.text newTexts)
+                                        , DescribeText
                                             { details | text = newTexts }
                                         )
 
@@ -364,6 +411,25 @@ update doc edit (Parsed original) =
             , indentation = 0
             }
         |> prepareResults doc original
+
+
+pushNewTexts existing new =
+    minusSize
+        (textSize new)
+        (textSize existing)
+
+
+getTextStart els =
+    case els of
+        [] ->
+            Nothing
+
+        starter :: _ ->
+            Just (.start (textDescriptionRange starter))
+
+
+textString (Text _ str) =
+    str
 
 
 {-| -}
@@ -571,13 +637,20 @@ type alias EditCursor =
     -- An edit takes the indentation level
     -- , the last reference position
     -- and the current description
-    { makeEdit : Int -> Position -> Description -> Maybe Description
+    { makeEdit : Int -> Position -> Description -> Maybe ( Push, Description )
     , indentation : Int
     }
 
 
+type alias Push =
+    Maybe
+        { offset : Int
+        , line : Int
+        }
+
+
 type EditMade
-    = YesEditMade
+    = YesEditMade Push
     | NoEditMade
 
 
@@ -591,8 +664,8 @@ makeFoundEdit cursor foundDesc =
                     makeEdit cursor desc
                         |> Tuple.mapSecond (Found range)
 
-                Just newDesc ->
-                    ( YesEditMade, Found range newDesc )
+                Just ( maybePush, newDesc ) ->
+                    ( YesEditMade maybePush, Found range newDesc )
 
         Unexpected unexpected ->
             ( NoEditMade, foundDesc )
@@ -608,9 +681,9 @@ makeEdit cursor desc =
     case desc of
         DescribeBlock details ->
             case cursor.makeEdit cursor.indentation (foundStart details.found) desc of
-                Just newDesc ->
+                Just ( maybePush, newDesc ) ->
                     -- replace current description
-                    ( YesEditMade, newDesc )
+                    ( YesEditMade maybePush, newDesc )
 
                 Nothing ->
                     -- dive further
@@ -620,8 +693,8 @@ makeEdit cursor desc =
                                     NoEditMade ->
                                         ( NoEditMade, desc )
 
-                                    YesEditMade ->
-                                        ( YesEditMade
+                                    YesEditMade maybePush ->
+                                        ( YesEditMade maybePush
                                         , DescribeBlock
                                             { details
                                                 | found = newFound
@@ -631,8 +704,9 @@ makeEdit cursor desc =
 
         Record details ->
             case cursor.makeEdit (cursor.indentation + 1) (foundStart details.found) desc of
-                Just newDesc ->
-                    ( YesEditMade, newDesc )
+                Just ( maybePush, newDesc ) ->
+                    -- replace current description
+                    ( YesEditMade maybePush, newDesc )
 
                 Nothing ->
                     case details.found of
@@ -642,16 +716,21 @@ makeEdit cursor desc =
                                     List.foldl
                                         (\(( fieldName, foundField ) as field) ( editMade, pastFields ) ->
                                             case editMade of
-                                                YesEditMade ->
-                                                    ( editMade, field :: pastFields )
+                                                YesEditMade _ ->
+                                                    -- TODO:: apply push to remaining fields
+                                                    ( editMade
+                                                    , field :: pastFields
+                                                    )
 
                                                 NoEditMade ->
                                                     case makeFoundEdit (increaseIndent (increaseIndent cursor)) foundField of
                                                         ( NoEditMade, _ ) ->
                                                             ( NoEditMade, field :: pastFields )
 
-                                                        ( YesEditMade, newField ) ->
-                                                            ( YesEditMade, ( fieldName, newField ) :: pastFields )
+                                                        ( YesEditMade maybePush, newField ) ->
+                                                            ( YesEditMade maybePush
+                                                            , ( fieldName, newField ) :: pastFields
+                                                            )
                                         )
                                         ( NoEditMade, [] )
                                         fields
@@ -660,8 +739,8 @@ makeEdit cursor desc =
                                 NoEditMade ->
                                     ( NoEditMade, desc )
 
-                                YesEditMade ->
-                                    ( YesEditMade
+                                YesEditMade maybePush ->
+                                    ( YesEditMade maybePush
                                     , Record
                                         { details
                                             | found =
@@ -674,9 +753,11 @@ makeEdit cursor desc =
 
         OneOf details ->
             case cursor.makeEdit cursor.indentation (foundStart details.child) desc of
-                Just newDesc ->
+                Just ( maybePush, newDesc ) ->
                     -- replace current description
-                    ( YesEditMade, newDesc )
+                    ( YesEditMade maybePush
+                    , newDesc
+                    )
 
                 Nothing ->
                     -- dive further
@@ -686,8 +767,9 @@ makeEdit cursor desc =
                                     NoEditMade ->
                                         ( NoEditMade, desc )
 
-                                    YesEditMade ->
-                                        ( YesEditMade
+                                    YesEditMade maybePush ->
+                                        -- TODO: Lenghten Container!
+                                        ( YesEditMade maybePush
                                         , OneOf
                                             { details
                                                 | child = newFound
@@ -697,9 +779,9 @@ makeEdit cursor desc =
 
         ManyOf many ->
             case cursor.makeEdit cursor.indentation many.range.start desc of
-                Just newDesc ->
+                Just ( maybePush, newDesc ) ->
                     -- replace current description
-                    ( YesEditMade, newDesc )
+                    ( YesEditMade maybePush, newDesc )
 
                 Nothing ->
                     -- dive further
@@ -708,16 +790,21 @@ makeEdit cursor desc =
                             List.foldl
                                 (\foundChild ( editMade, pastChildren ) ->
                                     case editMade of
-                                        YesEditMade ->
-                                            ( editMade, foundChild :: pastChildren )
+                                        -- TODO shift children
+                                        YesEditMade maybePush ->
+                                            ( editMade
+                                            , foundChild :: pastChildren
+                                            )
 
                                         NoEditMade ->
                                             case makeFoundEdit (increaseIndent (increaseIndent cursor)) foundChild of
                                                 ( NoEditMade, _ ) ->
                                                     ( NoEditMade, foundChild :: pastChildren )
 
-                                                ( YesEditMade, newChild ) ->
-                                                    ( YesEditMade, newChild :: pastChildren )
+                                                ( YesEditMade maybePush, newChild ) ->
+                                                    ( YesEditMade maybePush
+                                                    , newChild :: pastChildren
+                                                    )
                                 )
                                 ( NoEditMade, [] )
                                 many.children
@@ -726,8 +813,9 @@ makeEdit cursor desc =
                         NoEditMade ->
                             ( NoEditMade, desc )
 
-                        YesEditMade ->
-                            ( YesEditMade
+                        YesEditMade maybePush ->
+                            -- TODO: Lengthen container
+                            ( childrenEdited
                             , ManyOf
                                 { many
                                     | children =
@@ -750,8 +838,8 @@ makeEdit cursor desc =
                         NoEditMade ->
                             ( NoEditMade, desc )
 
-                        YesEditMade ->
-                            ( YesEditMade
+                        YesEditMade maybePush ->
+                            ( YesEditMade maybePush
                             , StartsWith
                                 { range = details.range
                                 , id = details.id
@@ -764,8 +852,8 @@ makeEdit cursor desc =
                                 }
                             )
 
-                YesEditMade ->
-                    ( YesEditMade
+                YesEditMade maybePush ->
+                    ( YesEditMade maybePush
                     , StartsWith
                         { range = details.range
                         , id = details.id
@@ -780,7 +868,7 @@ makeEdit cursor desc =
 
         DescribeTree details ->
             -- TODO
-            ( NoEditMade, desc )
+            Debug.todo "edit tree"
 
         -- Primitives
         DescribeBoolean details ->
@@ -816,8 +904,9 @@ foundStart found =
 
 replacePrimitive cursor startingPos desc =
     case cursor.makeEdit cursor.indentation startingPos desc of
-        Just newDesc ->
-            ( YesEditMade, newDesc )
+        Just ( maybePush, newDesc ) ->
+            -- replace current description
+            ( YesEditMade maybePush, newDesc )
 
         Nothing ->
             ( NoEditMade, desc )
@@ -937,17 +1026,24 @@ moveNewline pos =
 
 removeByIndex index list =
     List.foldl
-        (\item ( i, found ) ->
-            if i == index then
-                ( i + 1, found )
+        (\item cursor ->
+            if cursor.index == index then
+                { index = cursor.index + 1
+                , items = cursor.items
+                , push = Just (sizeFromRange (getFoundRange item))
+                }
 
             else
-                ( i + 1, item :: found )
+                { index = cursor.index + 1
+                , items = item :: cursor.items
+                , push = cursor.push
+                }
         )
-        ( 0, [] )
+        { index = 0
+        , items = []
+        , push = Nothing
+        }
         list
-        |> Tuple.second
-        |> List.reverse
 
 
 {-| -}
@@ -966,28 +1062,139 @@ push maybePush found =
             found
 
         Just to ->
-            case found of
-                Found range item ->
-                    Found (pushRange to range) (pushDescription to item)
+            pushFound to found
 
-                Unexpected unexpected ->
-                    Unexpected { unexpected | range = pushRange to unexpected.range }
+
+pushFound to found =
+    case found of
+        Found range item ->
+            Found (pushRange to range) (pushDescription to item)
+
+        Unexpected unexpected ->
+            Unexpected { unexpected | range = pushRange to unexpected.range }
+
+
+pushFoundRange to found =
+    case found of
+        Found range item ->
+            Found (pushRange to range) item
+
+        Unexpected unexpected ->
+            Unexpected { unexpected | range = pushRange to unexpected.range }
 
 
 pushDescription to desc =
     case desc of
-        _ ->
+        DescribeNothing _ ->
             desc
 
+        DescribeBlock details ->
+            DescribeBlock
+                { id = details.id
+                , name = details.name
+                , found = pushFound to details.found
+                , expected = details.expected
+                }
 
+        Record details ->
+            Record
+                { id = details.id
+                , name = details.name
+                , found =
+                    details.found
+                        |> pushFoundRange to
+                        |> mapFound
+                            (List.map
+                                (\( field, foundField ) ->
+                                    ( field, pushFound to foundField )
+                                )
+                            )
+                , expected = details.expected
+                }
 
--- pushId to (Id range) =
---     Id (pushRange to range)
+        OneOf one ->
+            OneOf
+                { id = one.id
+                , choices = one.choices
+                , child = pushFound to one.child
+                }
+
+        ManyOf many ->
+            ManyOf
+                { id = many.id
+                , range = pushRange to many.range
+                , choices = many.choices
+                , children = List.map (pushFound to) many.children
+                }
+
+        StartsWith details ->
+            StartsWith
+                { range = pushRange to details.range
+                , id = details.id
+                , first =
+                    { found = pushDescription to details.first.found
+                    , expected = details.first.expected
+                    }
+                , second =
+                    { found = pushDescription to details.second.found
+                    , expected = details.second.expected
+                    }
+                }
+
+        DescribeBoolean details ->
+            DescribeBoolean
+                { details
+                    | found = pushFoundRange to details.found
+                }
+
+        DescribeInteger details ->
+            DescribeInteger
+                { details
+                    | found = pushFoundRange to details.found
+                }
+
+        DescribeFloat details ->
+            DescribeFloat
+                { details
+                    | found = pushFoundRange to details.found
+                }
+
+        DescribeText txt ->
+            DescribeText
+                { txt
+                    | range = pushRange to txt.range
+                }
+
+        DescribeString id range str ->
+            DescribeString id (pushRange to range) str
+
+        DescribeMultiline id range str ->
+            DescribeMultiline
+                id
+                (pushRange to range)
+                str
+
+        DescribeTree myTree ->
+            DescribeTree
+                { myTree
+                    | range = pushRange to myTree.range
+                    , children =
+                        List.map
+                            (Desc.mapNested (pushDescription to))
+                            myTree.children
+                }
 
 
 pushRange to range =
-    { start = addPositions to range.start
-    , end = addPositions to range.end
+    { start = pushPosition to range.start
+    , end = pushPosition to range.end
+    }
+
+
+pushPosition to pos =
+    { offset = pos.offset + to.offset
+    , line = pos.line + to.line
+    , column = pos.column
     }
 
 
@@ -995,6 +1202,13 @@ addPositions to pos =
     { offset = pos.offset + to.offset
     , line = pos.line + to.line
     , column = pos.column + to.column
+    }
+
+
+addNewline pos =
+    { offset = pos.offset + 1
+    , line = pos.line + 1
+    , column = 0
     }
 
 
@@ -1019,94 +1233,38 @@ sizeToRange start delta =
     }
 
 
-{-| TODO: return coordinate adjustment
--}
-makeInsertAt seed index indentation many expectation =
-    List.foldl
-        (\item found ->
-            if found.index == index then
-                let
-                    newStart =
-                        if index == 0 then
-                            { offset = found.position.offset
-                            , line = found.position.line
-                            , column = (indentation * 4) + 1
-                            }
-
-                        else
-                            { offset = found.position.offset + 2
-                            , line = found.position.line + 2
-                            , column = (indentation * 4) + 1
-                            }
-
-                    -- ( createdEnd, new ) =
-                    created =
-                        create
-                            { indent = indentation
-                            , base = newStart
-                            , expectation = expectation
-                            , seed = seed
-                            }
-
-                    newDescSize =
-                        minusPosition created.pos found.position
-
-                    newFound =
-                        Found
-                            { start = newStart
-                            , end = created.pos
-                            }
-                            created.desc
-
-                    pushAmount =
-                        Just <|
-                            if index == 0 then
-                                { offset = newDescSize.offset + 2
-                                , line = newDescSize.line + 2
-                                , column = 0
-                                }
-
-                            else
-                                { offset = newDescSize.offset
-                                , line = newDescSize.line
-                                , column = 0
-                                }
-
-                    pushed =
-                        push pushAmount item
-                in
-                { index = found.index + 1
-                , inserted = True
-                , list =
-                    pushed
-                        :: newFound
-                        :: found.list
-                , push = pushAmount
-                , position = .end (getFoundRange pushed)
-                }
-
-            else
-                let
-                    pushed =
-                        push found.push item
-                in
-                { index = found.index + 1
-                , inserted = found.inserted
-                , list = pushed :: found.list
-                , push = found.push
-                , position = .end (getFoundRange pushed)
-                }
-        )
-        { index = 0
-        , position = many.range.start
-        , inserted = False
-        , list = []
-        , push = Nothing
+makeInsertAt :
+    Id.Seed
+    -> Int
+    -> Int
+    ->
+        { children : List (Found Description)
+        , choices : List Expectation
+        , id : Id
+        , range : Range
         }
-        many.children
+    -> Expectation
+    -> ( Push, List (Found Description) )
+makeInsertAt seed index indentation many expectation =
+    many.children
+        |> List.foldl (insertHelper seed index indentation expectation)
+            { index = 0
+            , position = many.range.start
+            , inserted = False
+            , list = []
+            , push = Nothing
+            }
         |> (\found ->
                 if found.inserted then
-                    found.list
+                    ( Maybe.map
+                        (\p ->
+                            { offset = p.offset
+                            , line = p.line
+                            }
+                        )
+                        found.push
+                    , List.reverse found.list
+                    )
 
                 else
                     let
@@ -1124,14 +1282,89 @@ makeInsertAt seed index indentation many expectation =
                                 , seed = seed
                                 }
                     in
-                    Found
-                        { start = newStart
-                        , end = created.pos
-                        }
-                        created.desc
-                        :: found.list
+                    ( Just
+                        (sizeFromRange
+                            { start = found.position
+                            , end = created.pos
+                            }
+                        )
+                    , List.reverse
+                        (Found
+                            { start = newStart
+                            , end = created.pos
+                            }
+                            created.desc
+                            :: found.list
+                        )
+                    )
            )
-        |> List.reverse
+
+
+insertHelper seed index indentation expectation item found =
+    if found.index == index then
+        let
+            newStart =
+                if index == 0 then
+                    { offset = found.position.offset
+                    , line = found.position.line
+                    , column = (indentation * 4) + 1
+                    }
+
+                else
+                    { offset = found.position.offset + 2
+                    , line = found.position.line + 2
+                    , column = (indentation * 4) + 1
+                    }
+
+            created =
+                create
+                    { indent = indentation
+                    , base = newStart
+                    , expectation = expectation
+                    , seed = seed
+                    }
+
+            newFound =
+                Found
+                    { start = newStart
+                    , end = created.pos
+                    }
+                    created.desc
+
+            newDescSize =
+                minusPosition created.pos newStart
+                    -- A block doesn't account for it's own newline,
+                    -- so we have to add one here.
+                    |> addNewline
+
+            pushAmount =
+                Just <|
+                    addNewline newDescSize
+
+            pushed =
+                push pushAmount item
+        in
+        { index = found.index + 1
+        , inserted = True
+        , list =
+            pushed
+                :: newFound
+                :: found.list
+        , push = pushAmount
+        , position = .end (getFoundRange pushed)
+        }
+
+    else
+        let
+            pushed =
+                push found.push item
+        in
+        { index = found.index + 1
+        , inserted = found.inserted
+        , list = pushed :: found.list
+        , push = found.push
+        , position = .end (getFoundRange pushed)
+        }
 
 
 getFoundRange found =
@@ -2636,7 +2869,7 @@ doTextEdit { anchor, focus } editFn current cursor =
                             splitAt (start - cursor.offset) current
 
                         ( selected, after ) =
-                            splitAt (end - cursor.offset) afterLarge
+                            splitAt (end - start) afterLarge
                     in
                     { offset = cursor.offset + len
                     , elements =
@@ -2673,7 +2906,12 @@ doTextEdit { anchor, focus } editFn current cursor =
                         before :: selection
                 in
                 { offset = cursor.offset + len
-                , elements = after :: editFn fullSelection ++ cursor.elements
+                , elements =
+                    if cursor.offset + len == end then
+                        editFn fullSelection ++ cursor.elements
+
+                    else
+                        after :: editFn fullSelection ++ cursor.elements
                 , selection = Nothing
                 }
 
