@@ -30,6 +30,7 @@ import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Format as Format
 import Mark.Internal.Id as Id exposing (..)
+import Mark.Internal.Index as Index
 import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
 import Mark.New
@@ -643,10 +644,13 @@ type alias EditCursor =
 
 
 type alias Push =
-    Maybe
-        { offset : Int
-        , line : Int
-        }
+    Maybe Size
+
+
+type alias Size =
+    { offset : Int
+    , line : Int
+    }
 
 
 type EditMade
@@ -716,10 +720,17 @@ makeEdit cursor desc =
                                     List.foldl
                                         (\(( fieldName, foundField ) as field) ( editMade, pastFields ) ->
                                             case editMade of
-                                                YesEditMade _ ->
-                                                    -- TODO:: apply push to remaining fields
+                                                YesEditMade maybePush ->
                                                     ( editMade
-                                                    , field :: pastFields
+                                                    , ( fieldName
+                                                      , case maybePush of
+                                                            Nothing ->
+                                                                foundField
+
+                                                            Just to ->
+                                                                pushFound to foundField
+                                                      )
+                                                        :: pastFields
                                                     )
 
                                                 NoEditMade ->
@@ -744,7 +755,8 @@ makeEdit cursor desc =
                                     , Record
                                         { details
                                             | found =
-                                                Found rng (List.reverse updatedFields)
+                                                Found (expandRange maybePush rng)
+                                                    (List.reverse updatedFields)
                                         }
                                     )
 
@@ -768,11 +780,10 @@ makeEdit cursor desc =
                                         ( NoEditMade, desc )
 
                                     YesEditMade maybePush ->
-                                        -- TODO: Lenghten Container!
                                         ( YesEditMade maybePush
                                         , OneOf
                                             { details
-                                                | child = newFound
+                                                | child = expandFound maybePush newFound
                                             }
                                         )
                            )
@@ -787,39 +798,25 @@ makeEdit cursor desc =
                     -- dive further
                     let
                         ( childrenEdited, updatedChildren ) =
-                            List.foldl
-                                (\foundChild ( editMade, pastChildren ) ->
-                                    case editMade of
-                                        -- TODO shift children
-                                        YesEditMade maybePush ->
-                                            ( editMade
-                                            , foundChild :: pastChildren
-                                            )
-
-                                        NoEditMade ->
-                                            case makeFoundEdit (increaseIndent (increaseIndent cursor)) foundChild of
-                                                ( NoEditMade, _ ) ->
-                                                    ( NoEditMade, foundChild :: pastChildren )
-
-                                                ( YesEditMade maybePush, newChild ) ->
-                                                    ( YesEditMade maybePush
-                                                    , newChild :: pastChildren
-                                                    )
-                                )
-                                ( NoEditMade, [] )
-                                many.children
+                            editMany makeFoundEdit push cursor many.children
                     in
                     case childrenEdited of
                         NoEditMade ->
                             ( NoEditMade, desc )
 
                         YesEditMade maybePush ->
-                            -- TODO: Lengthen container
                             ( childrenEdited
                             , ManyOf
                                 { many
                                     | children =
                                         updatedChildren
+                                    , range =
+                                        case maybePush of
+                                            Nothing ->
+                                                many.range
+
+                                            Just p ->
+                                                pushRange p many.range
                                 }
                             )
 
@@ -867,8 +864,28 @@ makeEdit cursor desc =
                     )
 
         DescribeTree details ->
-            -- TODO
-            Debug.todo "edit tree"
+            let
+                ( treeEdited, newChildren ) =
+                    editListNested cursor details.children
+            in
+            case treeEdited of
+                NoEditMade ->
+                    ( treeEdited, desc )
+
+                YesEditMade maybePush ->
+                    ( treeEdited
+                    , DescribeTree
+                        { details
+                            | children = newChildren
+                            , range =
+                                case maybePush of
+                                    Nothing ->
+                                        details.range
+
+                                    Just p ->
+                                        pushRange p details.range
+                        }
+                    )
 
         -- Primitives
         DescribeBoolean details ->
@@ -891,6 +908,64 @@ makeEdit cursor desc =
 
         DescribeNothing _ ->
             ( NoEditMade, desc )
+
+
+editNested cursor (Nested nestedDetails) =
+    -- let
+    --     ( contentEdited, newContent ) =
+    --         editMany makeFoundEdit push cursor nestedDetails.content
+    -- in
+    editListNested cursor nestedDetails.children
+
+
+editListNested cursor lsNested =
+    lsNested
+        |> List.foldl
+            (\foundChild ( editMade, pastChildren ) ->
+                case editMade of
+                    -- TODO shift children
+                    YesEditMade maybePush ->
+                        ( editMade
+                        , pushNested maybePush foundChild :: pastChildren
+                        )
+
+                    NoEditMade ->
+                        -- TODO: Implement
+                        ( NoEditMade, foundChild :: pastChildren )
+             -- case editNested (increaseIndent cursor) foundChild of
+             --     ( NoEditMade, _ ) ->
+             --         ( NoEditMade, foundChild :: pastChildren )
+             --     ( YesEditMade maybePush, newChild ) ->
+             --         ( YesEditMade maybePush
+             --         , newChild :: pastChildren
+             --         )
+            )
+            ( NoEditMade, [] )
+        |> Tuple.mapSecond List.reverse
+
+
+editMany fn pusher cursor manyItems =
+    manyItems
+        |> List.foldl
+            (\node ( editMade, pastChildren ) ->
+                case editMade of
+                    YesEditMade maybePush ->
+                        ( editMade
+                        , pusher maybePush node :: pastChildren
+                        )
+
+                    NoEditMade ->
+                        case fn (increaseIndent (increaseIndent cursor)) node of
+                            ( NoEditMade, _ ) ->
+                                ( NoEditMade, node :: pastChildren )
+
+                            ( YesEditMade maybePush, newChild ) ->
+                                ( YesEditMade maybePush
+                                , newChild :: pastChildren
+                                )
+            )
+            ( NoEditMade, [] )
+        |> Tuple.mapSecond List.reverse
 
 
 foundStart found =
@@ -1056,6 +1131,48 @@ startDocRange =
     }
 
 
+expandFound : Push -> Found a -> Found a
+expandFound maybePush found =
+    case found of
+        Found rng a ->
+            Found
+                (expandRange maybePush rng)
+                a
+
+        Unexpected unexp ->
+            Unexpected
+                { unexp | range = expandRange maybePush unexp.range }
+
+
+{-| -}
+expandRange : Push -> Range -> Range
+expandRange maybePush range =
+    case maybePush of
+        Nothing ->
+            range
+
+        Just to ->
+            { range
+                | end =
+                    { offset = range.end.offset + to.offset
+                    , line = range.end.line + to.line
+                    , column = range.end.column
+                    }
+            }
+
+
+pushNested : Push -> Nested Description -> Nested Description
+pushNested maybePush ((Nested nestedDetails) as nestedDesc) =
+    case maybePush of
+        Nothing ->
+            nestedDesc
+
+        Just to ->
+            -- TODO: need to push and account for new index
+            nestedDesc
+
+
+push : Push -> Found Description -> Found Description
 push maybePush found =
     case maybePush of
         Nothing ->
@@ -1065,6 +1182,7 @@ push maybePush found =
             pushFound to found
 
 
+pushFound : Size -> Found Description -> Found Description
 pushFound to found =
     case found of
         Found range item ->
@@ -1208,7 +1326,6 @@ addPositions to pos =
 addNewline pos =
     { offset = pos.offset + 1
     , line = pos.line + 1
-    , column = 0
     }
 
 
@@ -1338,8 +1455,7 @@ insertHelper seed index indentation expectation item found =
                     |> addNewline
 
             pushAmount =
-                Just <|
-                    addNewline newDescSize
+                Just (addNewline newDescSize)
 
             pushed =
                 push pushAmount item
@@ -2238,7 +2354,8 @@ tree name view contentBlock =
                 case description of
                     DescribeTree details ->
                         details.children
-                            |> reduceRender (renderTreeNodeSmall contentBlock)
+                            |> reduceRender Index.zero (renderTreeNodeSmall contentBlock)
+                            |> Tuple.second
                             |> mapSuccessAndRecovered
                                 (view
                                     { id = details.id
@@ -2308,15 +2425,20 @@ iconParser =
 {-| -}
 renderTreeNodeSmall :
     Block item
+    -> Index.Index
     -> Nested Description
     -> Outcome.Outcome Error.AstError (Uncertain (Tree item)) (Tree item)
-renderTreeNodeSmall contentBlock (Nested cursor) =
+renderTreeNodeSmall contentBlock index (Nested cursor) =
     let
-        renderedChildren =
-            reduceRender (renderTreeNodeSmall contentBlock) cursor.children
+        ( newIndex, renderedChildren ) =
+            reduceRender index (renderTreeNodeSmall contentBlock) cursor.children
 
-        renderedContent =
-            reduceRender (renderBlock contentBlock) cursor.content
+        ( _, renderedContent ) =
+            reduceRender newIndex
+                (\i content ->
+                    renderBlock contentBlock content
+                )
+                cursor.content
     in
     mergeWith
         (\content children ->
@@ -2328,7 +2450,7 @@ renderTreeNodeSmall contentBlock (Nested cursor) =
 
                         Desc.AutoNumber ->
                             Number
-                , index = cursor.index
+                , index = Index.toList index
                 , content = content
                 , children = children
                 }
@@ -2338,36 +2460,38 @@ renderTreeNodeSmall contentBlock (Nested cursor) =
 
 
 reduceRender :
-    (thing -> Outcome.Outcome Error.AstError (Uncertain other) other)
+    Index.Index
+    -> (Index.Index -> thing -> Outcome.Outcome Error.AstError (Uncertain other) other)
     -> List thing
-    -> Outcome.Outcome Error.AstError (Uncertain (List other)) (List other)
-reduceRender fn list =
+    -> ( Index.Index, Outcome.Outcome Error.AstError (Uncertain (List other)) (List other) )
+reduceRender index fn list =
     list
         |> List.foldl
-            (\x gathered ->
-                case gathered of
-                    Outcome.Success remain ->
-                        case fn x of
-                            Outcome.Success newThing ->
-                                Outcome.Success (newThing :: remain)
+            (\x ( i, gathered ) ->
+                Tuple.pair (Index.increment i) <|
+                    case gathered of
+                        Outcome.Success remain ->
+                            case fn i x of
+                                Outcome.Success newThing ->
+                                    Outcome.Success (newThing :: remain)
 
-                            Outcome.Almost (Uncertain err) ->
-                                Outcome.Almost (Uncertain err)
+                                Outcome.Almost (Uncertain err) ->
+                                    Outcome.Almost (Uncertain err)
 
-                            Outcome.Almost (Recovered err data) ->
-                                Outcome.Almost
-                                    (Recovered err
-                                        (data :: remain)
-                                    )
+                                Outcome.Almost (Recovered err data) ->
+                                    Outcome.Almost
+                                        (Recovered err
+                                            (data :: remain)
+                                        )
 
-                            Outcome.Failure f ->
-                                Outcome.Failure f
+                                Outcome.Failure f ->
+                                    Outcome.Failure f
 
-                    almostOrfailure ->
-                        almostOrfailure
+                        almostOrfailure ->
+                            almostOrfailure
             )
-            (Outcome.Success [])
-        |> Outcome.mapSuccess List.reverse
+            ( index, Outcome.Success [] )
+        |> Tuple.mapSecond (Outcome.mapSuccess List.reverse)
 
 
 errorToList ( x, xs ) =
@@ -2497,8 +2621,14 @@ text options =
         , converter = renderText options
         , parser =
             \seed ->
-                -- TODO:  probably need a seed for text editing.
-                ( seed
+                let
+                    ( _, newSeed ) =
+                        Id.step seed
+
+                    ( _, returnSeed ) =
+                        Id.step newSeed
+                in
+                ( returnSeed
                 , Parse.getPosition
                     |> Parser.andThen
                         (\pos ->
@@ -2506,7 +2636,7 @@ text options =
                                 { inlines = inlineExpectations
                                 , replacements = options.replacements
                                 }
-                                seed
+                                newSeed
                                 pos
                                 emptyStyles
                                 []

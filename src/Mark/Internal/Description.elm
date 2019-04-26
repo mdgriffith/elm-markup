@@ -100,8 +100,7 @@ type Icon
 {-| -}
 type Nested item
     = Nested
-        { index : List Int
-        , icon : Icon
+        { icon : Icon
         , content : List item
         , children :
             List (Nested item)
@@ -111,8 +110,7 @@ type Nested item
 mapNested : (a -> b) -> Nested a -> Nested b
 mapNested fn (Nested nest) =
     Nested
-        { index = nest.index
-        , icon = nest.icon
+        { icon = nest.icon
         , content = List.map fn nest.content
         , children =
             List.map (mapNested fn) nest.children
@@ -955,6 +953,14 @@ moveNewline pos =
     }
 
 
+moveNewlines : Int -> Position -> Position
+moveNewlines i pos =
+    { offset = pos.offset + i
+    , column = 1
+    , line = pos.line + i
+    }
+
+
 startingPoint =
     { offset = 0
     , line = 1
@@ -1649,54 +1655,176 @@ createInline :
     -> List InlineExpectation
     -> ( Position, List TextDescription )
 createInline start current =
-    List.foldl inlineExpectationToDesc ( start, [] ) current
-        |> Tuple.mapSecond List.reverse
+    List.foldl inlineExpectationToDesc
+        { position = start
+        , text = []
+        , styling = emptyStyles
+        }
+        current
+        |> (\cursor ->
+                ( moveColumn
+                    (numberStyleChanges emptyStyles cursor.styling)
+                    cursor.position
+                , List.reverse cursor.text
+                )
+           )
 
 
-inlineExpectationToDesc exp ( prevPos, els ) =
-    -- TODO: add ranges
+numberStyleChanges one two =
+    let
+        boldNum =
+            if one.bold /= two.bold then
+                1
+
+            else
+                0
+
+        italicNum =
+            if one.italic /= two.italic then
+                1
+
+            else
+                0
+
+        strikeNum =
+            if one.strike /= two.strike then
+                1
+
+            else
+                0
+    in
+    boldNum + italicNum + strikeNum
+
+
+moveText (Text styling str) existingStyling cursor =
+    let
+        numberLines =
+            List.length (String.lines str) - 1
+    in
+    cursor
+        |> moveColumn
+            ((String.length str
+                + numberStyleChanges styling existingStyling
+             )
+                - numberLines
+            )
+        |> moveNewlines numberLines
+
+
+inlineExpectationToDesc exp cursor =
     case exp of
-        ExpectText txt ->
-            ( prevPos, Styled emptyRange txt :: els )
+        ExpectText ((Text newStyling str) as txt) ->
+            let
+                end =
+                    moveText txt cursor.styling cursor.position
+            in
+            { position = end
+            , text =
+                Styled
+                    { start = cursor.position
+                    , end = end
+                    }
+                    txt
+                    :: cursor.text
+            , styling = newStyling
+            }
 
         ExpectAnnotation name attrs txts ->
-            ( prevPos
-            , InlineAnnotation
-                { name = name
-                , range = emptyRange
-                , text = txts
-                , attributes = List.map expectationToAttr attrs
-                }
-                :: els
-            )
+            let
+                end =
+                    cursor.position
+                        |> moveColumn (String.length name + 5)
+                        |> moveColumn (attributesLength attrs)
+            in
+            { position = end
+            , styling = cursor.styling
+            , text =
+                InlineAnnotation
+                    { name = name
+                    , range =
+                        { start = cursor.position
+                        , end = end
+                        }
+                    , text = txts
+                    , attributes = List.map expectationToAttr attrs
+                    }
+                    :: cursor.text
+            }
 
-        -- tokens have no placeholder
         ExpectToken name attrs ->
-            ( prevPos
-            , InlineToken
-                { name = name
-                , range = emptyRange
-                , attributes = List.map expectationToAttr attrs
-                }
-                :: els
-            )
+            let
+                end =
+                    cursor.position
+                        -- add 5 which accounts for
+                        -- two brackets, a bar, and two spaces
+                        |> moveColumn (String.length name + 5)
+                        |> moveColumn (attributesLength attrs)
+            in
+            { position = end
+            , styling = cursor.styling
+            , text =
+                InlineToken
+                    { name = name
+                    , range =
+                        { start = cursor.position
+                        , end = end
+                        }
+                    , attributes = List.map expectationToAttr attrs
+                    }
+                    :: cursor.text
+            }
 
         -- name, attrs, placeholder content
         ExpectVerbatim name attrs content ->
-            ( prevPos
-            , InlineVerbatim
-                { name =
-                    if name == "" && attrs == [] then
-                        Nothing
+            let
+                end =
+                    cursor.position
+                        |> moveColumn (String.length name + 5)
+                        |> moveColumn (attributesLength attrs)
+            in
+            { position =
+                end
+            , styling = cursor.styling
+            , text =
+                InlineVerbatim
+                    { name =
+                        if name == "" && attrs == [] then
+                            Nothing
 
-                    else
-                        Just name
-                , range = emptyRange
-                , text = Text emptyStyles content
-                , attributes = List.map expectationToAttr attrs
-                }
-                :: els
-            )
+                        else
+                            Just name
+                    , range =
+                        { start = cursor.position
+                        , end = end
+                        }
+                    , text = Text emptyStyles content
+                    , attributes = List.map expectationToAttr attrs
+                    }
+                    :: cursor.text
+            }
+
+
+attributesLength : List AttrExpectation -> Int
+attributesLength attrs =
+    let
+        sumLength attr count =
+            case attr of
+                ExpectAttrString name val ->
+                    --       2 for a space and a comma
+                    count + String.length name + String.length val + 2
+
+                ExpectAttrFloat name ( flStr, _ ) ->
+                    count + String.length name + String.length flStr + 2
+
+                ExpectAttrInt name i ->
+                    count + String.length name + String.length (String.fromInt i) + 2
+    in
+    case attrs of
+        [] ->
+            0
+
+        _ ->
+            List.foldl sumLength 0 attrs - 2
 
 
 {-|
@@ -1813,7 +1941,7 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
 
-                -- TODO: handle case of empty OneOf
+                -- QUESTION: what about an empty OneOf
                 new =
                     create
                         { indent = current.indent + 1
@@ -2033,8 +2161,24 @@ create current =
                 end =
                     moveColumn (String.length str) current.base
 
-                -- TODO: This position is not correct!
-                -- Account for newlines
+                walk line ( isStart, at ) =
+                    at
+                        |> (if isStart then
+                                identity
+
+                            else
+                                moveColumn ((current.indent + 1) * 4)
+                           )
+                        |> moveColumn (String.length line)
+                        |> moveNewline
+                        |> Tuple.pair False
+
+                lineDiff =
+                    str
+                        |> String.lines
+                        |> List.foldl walk ( True, current.base )
+                        |> Tuple.second
+
                 pos =
                     { start = current.base
                     , end = end

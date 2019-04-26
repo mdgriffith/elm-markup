@@ -2158,11 +2158,10 @@ if ident decreases
 addItem : Int -> Icon -> List Description -> TreeBuilder -> TreeBuilder
 addItem indentation icon content (TreeBuilder builder) =
     let
-        newItem : Int -> Nested Description
-        newItem index =
+        newItem : Nested Description
+        newItem =
             Nested
-                { index = [ index ]
-                , icon = icon
+                { icon = icon
                 , children = []
                 , content = content
                 }
@@ -2172,7 +2171,7 @@ addItem indentation icon content (TreeBuilder builder) =
             TreeBuilder
                 { previousIndent = indentation
                 , levels =
-                    [ newItem 1 ]
+                    [ newItem ]
                 }
 
         lvl :: remaining ->
@@ -2181,7 +2180,7 @@ addItem indentation icon content (TreeBuilder builder) =
                 TreeBuilder
                     { previousIndent = indentation
                     , levels =
-                        newItem (List.length remaining + 2) :: lvl :: remaining
+                        newItem :: lvl :: remaining
                     }
 
             else
@@ -2192,26 +2191,24 @@ addItem indentation icon content (TreeBuilder builder) =
                     , levels =
                         addToLevel
                             ((abs indentation // 4) - 1)
-                            (newItem (List.length remaining + 1))
+                            newItem
                             lvl
                             :: remaining
                     }
 
 
-indentIndex (Nested nested) =
-    Nested
-        { nested
-            | index = 1 :: nested.index
-        }
 
-
-indexTo i (Nested nested) =
-    case nested.index of
-        [] ->
-            Nested { nested | index = [ i ] }
-
-        top :: tail ->
-            Nested { nested | index = i :: tail }
+-- indentIndex (Nested nested) =
+--     Nested
+--         { nested
+--             | index = 1 :: nested.index
+--         }
+-- indexTo i (Nested nested) =
+--     case nested.index of
+--         [] ->
+--             Nested { nested | index = [ i ] }
+--         top :: tail ->
+--             Nested { nested | index = i :: tail }
 
 
 addToLevel index brandNewItem (Nested parent) =
@@ -2219,9 +2216,7 @@ addToLevel index brandNewItem (Nested parent) =
         Nested
             { parent
                 | children =
-                    indexTo
-                        (List.length parent.children + 1)
-                        (indentIndex brandNewItem)
+                    brandNewItem
                         :: parent.children
             }
 
@@ -2231,16 +2226,10 @@ addToLevel index brandNewItem (Nested parent) =
                 Nested parent
 
             top :: remain ->
-                let
-                    withNewIndex =
-                        brandNewItem
-                            |> indentIndex
-                            |> indexTo (List.length parent.children)
-                in
                 Nested
                     { parent
                         | children =
-                            addToLevel (index - 1) withNewIndex top
+                            addToLevel (index - 1) brandNewItem top
                                 :: remain
                     }
 
@@ -2340,8 +2329,7 @@ renderLevels levels =
 
 reverseTree cursor (Nested nest) =
     Nested
-        { index = nest.index
-        , icon = nest.icon
+        { icon = nest.icon
         , content = List.reverse nest.content
         , children =
             List.foldl rev ( dive cursor, [] ) nest.children
