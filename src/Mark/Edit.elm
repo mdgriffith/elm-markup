@@ -911,34 +911,46 @@ makeEdit cursor desc =
 
 
 editNested cursor (Nested nestedDetails) =
-    -- let
-    --     ( contentEdited, newContent ) =
-    --         editMany makeFoundEdit push cursor nestedDetails.content
-    -- in
+    let
+        ( contentEdited, newContent ) =
+            editMany makeEdit
+                (\maybePush desc ->
+                    case maybePush of
+                        Nothing ->
+                            desc
+
+                        Just p ->
+                            pushDescription p desc
+                )
+                cursor
+                nestedDetails.content
+    in
     editListNested cursor nestedDetails.children
 
 
 editListNested cursor lsNested =
+    let
+        indentedCursor =
+            increaseIndent cursor
+    in
     lsNested
         |> List.foldl
             (\foundChild ( editMade, pastChildren ) ->
                 case editMade of
-                    -- TODO shift children
                     YesEditMade maybePush ->
                         ( editMade
                         , pushNested maybePush foundChild :: pastChildren
                         )
 
                     NoEditMade ->
-                        -- TODO: Implement
-                        ( NoEditMade, foundChild :: pastChildren )
-             -- case editNested (increaseIndent cursor) foundChild of
-             --     ( NoEditMade, _ ) ->
-             --         ( NoEditMade, foundChild :: pastChildren )
-             --     ( YesEditMade maybePush, newChild ) ->
-             --         ( YesEditMade maybePush
-             --         , newChild :: pastChildren
-             --         )
+                        case editNested indentedCursor foundChild of
+                            ( NoEditMade, _ ) ->
+                                ( NoEditMade, foundChild :: pastChildren )
+
+                            ( YesEditMade maybePush, newChild ) ->
+                                ( YesEditMade maybePush
+                                , newChild :: pastChildren
+                                )
             )
             ( NoEditMade, [] )
         |> Tuple.mapSecond List.reverse
