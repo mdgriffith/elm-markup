@@ -257,40 +257,41 @@ threeHellos =
 
 edits =
     describe "Edit"
-        [ test "Indented - Insert at 2" <|
-            \_ ->
-                let
-                    new =
-                        Mark.Edit.update
-                            manyHelloDoc
-                            (Mark.Edit.insertAt
-                                (Id.Id [ 0 ])
-                                2
-                                (Mark.New.string "world")
-                            )
-                            (Description.Parsed
-                                { errors = []
-                                , initialSeed = Id.initialSeed
-                                , currentSeed = Id.initialSeed
-                                , found =
-                                    Description.Found
-                                        { start = Description.startingPoint
-                                        , end =
-                                            { column = 1, line = 50, offset = 200 }
-                                        }
-                                        (manyIndentedHellos ())
-                                , expected =
-                                    Description.ExpectBlock "Indented" <|
-                                        Description.ExpectManyOf
-                                            [ Description.ExpectString "hello"
-                                            , Description.ExpectString "hello"
-                                            , Description.ExpectString "hello"
-                                            ]
-                                }
-                            )
-                in
-                Expect.equal (Result.map Description.toString new)
-                    (Ok """|> Indented
+        [ describe "Inserts + Deletes"
+            [ test "Indented - Insert at 2" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyHelloDoc
+                                (Mark.Edit.insertAt
+                                    (Id.Id [ 0 ])
+                                    2
+                                    (Mark.New.string "world")
+                                )
+                                (Description.Parsed
+                                    { errors = []
+                                    , initialSeed = Id.initialSeed
+                                    , currentSeed = Id.initialSeed
+                                    , found =
+                                        Description.Found
+                                            { start = Description.startingPoint
+                                            , end =
+                                                { column = 1, line = 50, offset = 200 }
+                                            }
+                                            (manyIndentedHellos ())
+                                    , expected =
+                                        Description.ExpectBlock "Indented" <|
+                                            Description.ExpectManyOf
+                                                [ Description.ExpectString "hello"
+                                                , Description.ExpectString "hello"
+                                                , Description.ExpectString "hello"
+                                                ]
+                                    }
+                                )
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok """|> Indented
     hello
 
     hello
@@ -298,66 +299,100 @@ edits =
     world
 
     hello""")
-        , test "Insert at 2" <|
-            \_ ->
-                let
-                    new =
-                        Mark.Edit.update
-                            manyTextDocNoBlock
-                            (Mark.Edit.insertAt
-                                (Id.Id [ 0 ])
-                                2
-                                (Mark.New.string "world")
-                            )
-                            threeHellos
-                in
-                Expect.equal (Result.map Description.toString new)
-                    (Ok "hello\n\nhello\n\nworld\n\nhello")
-        , test "Insert at 1" <|
-            \_ ->
-                let
-                    new =
-                        Mark.Edit.update
-                            manyTextDocNoBlock
-                            (Mark.Edit.insertAt
-                                (Id.Id [ 0 ])
-                                1
-                                (Mark.New.string "world")
-                            )
-                            threeHellos
-                in
-                Expect.equal (Result.map Description.toString new)
-                    (Ok "hello\n\nworld\n\nhello\n\nhello")
-        , test "Insert at 0" <|
-            \_ ->
-                let
-                    new =
-                        Mark.Edit.update
-                            manyTextDocNoBlock
-                            (Mark.Edit.insertAt
-                                (Id.Id [ 0 ])
-                                0
-                                (Mark.New.string "world")
-                            )
-                            threeHellos
-                in
-                Expect.equal (Result.map Description.toString new)
-                    (Ok "world\n\nhello\n\nhello\n\nhello")
-        , test "Insert at 3" <|
-            \_ ->
-                let
-                    new =
-                        Mark.Edit.update
-                            manyTextDocNoBlock
-                            (Mark.Edit.insertAt
-                                (Id.Id [ 0 ])
-                                3
-                                (Mark.New.string "world")
-                            )
-                            threeHellos
-                in
-                Expect.equal (Result.map Description.toString new)
-                    (Ok "hello\n\nhello\n\nhello\n\nworld")
+            , test "Insert at 2" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyTextDocNoBlock
+                                (Mark.Edit.insertAt
+                                    (Id.Id [ 0 ])
+                                    2
+                                    (Mark.New.string "world")
+                                )
+                                threeHellos
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "hello\n\nhello\n\nworld\n\nhello")
+            , test "Insert at 1" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyTextDocNoBlock
+                                (Mark.Edit.insertAt
+                                    (Id.Id [ 0 ])
+                                    1
+                                    (Mark.New.string "world")
+                                )
+                                threeHellos
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "hello\n\nworld\n\nhello\n\nhello")
+            , test "Insert at 0" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyTextDocNoBlock
+                                (Mark.Edit.insertAt
+                                    (Id.Id [ 0 ])
+                                    0
+                                    (Mark.New.string "world")
+                                )
+                                threeHellos
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "world\n\nhello\n\nhello\n\nhello")
+            , test "Insert at 3" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyTextDocNoBlock
+                                (Mark.Edit.insertAt
+                                    (Id.Id [ 0 ])
+                                    3
+                                    (Mark.New.string "world")
+                                )
+                                threeHellos
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "hello\n\nhello\n\nhello\n\nworld")
+            , test "Delete at 0" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyTextDocNoBlock
+                                (Mark.Edit.delete (Id.Id [ 0 ]) 0)
+                                threeHellos
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "hello\n\nhello")
+            , test "Delete at 1" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyTextDocNoBlock
+                                (Mark.Edit.delete (Id.Id [ 0 ]) 1)
+                                threeHellos
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "hello\n\nhello")
+            , test "Delete at 2" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyTextDocNoBlock
+                                (Mark.Edit.delete (Id.Id [ 0 ]) 2)
+                                threeHellos
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "hello\n\nhello")
+            ]
         , describe "Text Edits"
             [ test "Add Bold" <|
                 \_ ->
@@ -371,7 +406,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 0 ])
+                                            (Id.Id [ 1 ])
                                             { anchor = 3, focus = 8 }
                                             Mark.New.bold
                                         )
@@ -394,7 +429,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 0 ])
+                                            (Id.Id [ 1 ])
                                             { anchor = 3, focus = 8 }
                                             { bold = False
                                             , italic = False
@@ -420,7 +455,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 0 ])
+                                            (Id.Id [ 1 ])
                                             { anchor = 3, focus = 8 }
                                             { bold = True
                                             , italic = True

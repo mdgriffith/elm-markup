@@ -1744,6 +1744,7 @@ type alias Replacement =
 -}
 
 
+{-| -}
 type alias Inline data =
     Desc.Inline data
 

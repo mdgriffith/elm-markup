@@ -3,7 +3,7 @@ module Mark.Edit exposing
     , text, Replacement, Inline
     , Tree(..), Icon(..), tree
     , update, Error, Edit, replace, delete, insertAt
-    , restyle, addStyle
+    , restyle, addStyles, removeStyles
     )
 
 {-|
@@ -22,7 +22,7 @@ module Mark.Edit exposing
 
 @docs update, Error, Edit, replace, delete, insertAt
 
-@docs restyle, addStyle, removeStyle
+@docs restyle, addStyles, removeStyles
 
 -}
 
@@ -144,8 +144,8 @@ removeStyles id selection styles =
 
 
 {-| -}
-addStyle : Id -> Selection -> Styles -> Edit
-addStyle id selection styles =
+addStyles : Id -> Selection -> Styles -> Edit
+addStyles id selection styles =
     StyleText id selection (AddStyle styles)
 
 
@@ -1112,25 +1112,78 @@ moveNewline pos =
 
 
 removeByIndex index list =
+    {- We want to remove an item and push subsequent items based on
+
+    -}
     List.foldl
         (\item cursor ->
             if cursor.index == index then
+                let
+                    range =
+                        getFoundRange item
+
+                    pushSize =
+                        range
+                            |> sizeFromRange
+                            -- we want to remove this, so invert the size.
+                            |> invertSize
+                            |> Just
+                in
                 { index = cursor.index + 1
                 , items = cursor.items
-                , push = Just (sizeFromRange (getFoundRange item))
+
+                -- we also want to eliminate all space till the next item,
+                -- so we record the end of this item, and wait
+                -- till we see the start of the next to add it to the push
+                , recordPushGapTillNextItem =
+                    Just range.end
+                , push =
+                    pushSize
                 }
 
             else
+                let
+                    pushAmount =
+                        case cursor.recordPushGapTillNextItem of
+                            Nothing ->
+                                cursor.push
+
+                            Just previousEnd ->
+                                let
+                                    range =
+                                        getFoundRange item
+                                in
+                                { start = previousEnd, end = range.start }
+                                    |> sizeFromRange
+                                    |> invertSize
+                                    |> (\additionalSize ->
+                                            Maybe.map (addSizes additionalSize) cursor.push
+                                       )
+                in
                 { index = cursor.index + 1
-                , items = item :: cursor.items
-                , push = cursor.push
+                , items = push pushAmount item :: cursor.items
+                , recordPushGapTillNextItem = Nothing
+                , push = pushAmount
                 }
         )
         { index = 0
         , items = []
+        , recordPushGapTillNextItem = Nothing
         , push = Nothing
         }
         list
+
+
+addSizes one two =
+    { line = one.line + two.line
+    , offset = one.offset + two.offset
+    }
+
+
+invertSize size =
+    { line = -1 * size.line
+    , offset = -1 * size.offset
+    }
 
 
 {-| -}
