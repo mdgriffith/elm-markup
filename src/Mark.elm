@@ -5,11 +5,11 @@ module Mark exposing
     , document
     , Block, map, verify, onError
     , string, int, float, bool, multiline
-    , block, oneOf, manyOf, startWith
-    , tree
-    , record, field, close
     , Styles, text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
+    , block, oneOf, manyOf, startWith
+    , record, field, close
+    , tree
     , Error, errorToString, errorToHtml, Theme(..)
     , ErrorDetails, errorDetails, Range, Position
     )
@@ -49,14 +49,16 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 @docs string, int, float, bool, multiline
 
 
+## Text
+
+@docs Styles, text, textWith, replacement, balanced, Replacement
+
+@docs Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
+
+
 ## Higher Level
 
 @docs block, oneOf, manyOf, startWith
-
-
-## Trees
-
-@docs tree
 
 
 ## Records
@@ -64,11 +66,9 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 @docs record, field, close
 
 
-## Handling Text and Inline
+## Trees
 
-@docs Styles, text, textWith, replacement, balanced, Replacement
-
-@docs Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
+@docs tree
 
 
 ## Displaying Errors
@@ -1371,11 +1371,11 @@ getInlineExpectation (Inline details) =
 multiline : Block String
 multiline =
     Value
-        { expect = ExpectMultiline "REPLACE"
+        { expect = ExpectString "REPLACE"
         , converter =
             \desc ->
                 case desc of
-                    DescribeMultiline id range str ->
+                    DescribeString id range str ->
                         Outcome.Success (String.trim str)
 
                     _ ->
@@ -1389,7 +1389,7 @@ multiline =
                 ( newSeed
                 , Parser.map
                     (\( pos, str ) ->
-                        DescribeMultiline id pos str
+                        DescribeString id pos str
                     )
                     (Parse.withRange
                         (Parse.withIndent

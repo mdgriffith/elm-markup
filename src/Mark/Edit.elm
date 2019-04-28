@@ -2419,7 +2419,9 @@ tree name view contentBlock =
                 case description of
                     DescribeTree details ->
                         details.children
-                            |> reduceRender Index.zero (renderTreeNodeSmall contentBlock)
+                            |> reduceRender Index.zero
+                                (getNestedIcon)
+                                (renderTreeNodeSmall contentBlock)
                             |> Tuple.second
                             |> mapSuccessAndRecovered
                                 (view
@@ -2476,31 +2478,29 @@ tree name view contentBlock =
         }
 
 
-iconParser =
-    Parser.oneOf
-        [ Parser.succeed Desc.Bullet
-            |. Parser.chompIf (\c -> c == '-') (Error.Expecting "-")
-            |. Parser.chompWhile (\c -> c == '-' || c == ' ')
-        , Parser.succeed Desc.AutoNumber
-            |. Parser.chompIf (\c -> c == '#') (Error.Expecting "#")
-            |. Parser.chompWhile (\c -> c == '.' || c == ' ')
-        ]
+getNestedIcon (Nested cursor) =
+    cursor.icon
 
 
 {-| -}
 renderTreeNodeSmall :
     Block item
+    -> Desc.Icon
     -> Index.Index
     -> Nested Description
     -> Outcome.Outcome Error.AstError (Uncertain (Tree item)) (Tree item)
-renderTreeNodeSmall contentBlock index (Nested cursor) =
+renderTreeNodeSmall contentBlock icon index (Nested cursor) =
     let
         ( newIndex, renderedChildren ) =
-            reduceRender index (renderTreeNodeSmall contentBlock) cursor.children
+            reduceRender (Index.indent index)
+                getNestedIcon
+                (renderTreeNodeSmall contentBlock)
+                cursor.children
 
         ( _, renderedContent ) =
-            reduceRender newIndex
-                (\i content ->
+            reduceRender (Index.dedent newIndex)
+                (always Desc.Bullet)
+                (\icon_ i content ->
                     renderBlock contentBlock content
                 )
                 cursor.content
@@ -2509,11 +2509,11 @@ renderTreeNodeSmall contentBlock index (Nested cursor) =
         (\content children ->
             Tree
                 { icon =
-                    case cursor.icon of
+                    case icon of
                         Desc.Bullet ->
                             Bullet
 
-                        Desc.AutoNumber ->
+                        Desc.AutoNumber _ ->
                             Number
                 , index = Index.toList index
                 , content = content
@@ -2526,37 +2526,53 @@ renderTreeNodeSmall contentBlock index (Nested cursor) =
 
 reduceRender :
     Index.Index
-    -> (Index.Index -> thing -> Outcome.Outcome Error.AstError (Uncertain other) other)
+    -> (thing -> Desc.Icon)
+    -> (Desc.Icon -> Index.Index -> thing -> Outcome.Outcome Error.AstError (Uncertain other) other)
     -> List thing
     -> ( Index.Index, Outcome.Outcome Error.AstError (Uncertain (List other)) (List other) )
-reduceRender index fn list =
+reduceRender index getIcon fn list =
     list
         |> List.foldl
-            (\x ( i, gathered ) ->
-                Tuple.pair (Index.increment i) <|
-                    case gathered of
-                        Outcome.Success remain ->
-                            case fn i x of
-                                Outcome.Success newThing ->
-                                    Outcome.Success (newThing :: remain)
+            (\item ( i, existingIcon, gathered ) ->
+                let
+                    icon =
+                        if Index.top i == 0 then
+                            getIcon item
 
-                                Outcome.Almost (Uncertain err) ->
-                                    Outcome.Almost (Uncertain err)
+                        else
+                            existingIcon
 
-                                Outcome.Almost (Recovered err data) ->
-                                    Outcome.Almost
-                                        (Recovered err
-                                            (data :: remain)
-                                        )
+                    newItem =
+                        case gathered of
+                            Outcome.Success remain ->
+                                case fn icon i item of
+                                    Outcome.Success newThing ->
+                                        Outcome.Success (newThing :: remain)
 
-                                Outcome.Failure f ->
-                                    Outcome.Failure f
+                                    Outcome.Almost (Uncertain err) ->
+                                        Outcome.Almost (Uncertain err)
 
-                        almostOrfailure ->
-                            almostOrfailure
+                                    Outcome.Almost (Recovered err data) ->
+                                        Outcome.Almost
+                                            (Recovered err
+                                                (data :: remain)
+                                            )
+
+                                    Outcome.Failure f ->
+                                        Outcome.Failure f
+
+                            almostOrfailure ->
+                                almostOrfailure
+                in
+                ( Index.increment i
+                , icon
+                , newItem
+                )
             )
-            ( index, Outcome.Success [] )
-        |> Tuple.mapSecond (Outcome.mapSuccess List.reverse)
+            ( index, Desc.Bullet, Outcome.Success [] )
+        |> (\( i, _, outcome ) ->
+                ( i, Outcome.mapSuccess List.reverse outcome )
+           )
 
 
 errorToList ( x, xs ) =

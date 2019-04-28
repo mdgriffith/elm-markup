@@ -204,6 +204,13 @@ manyIndentedHellosId =
     Id.Id [ 0 ]
 
 
+stringText =
+    Mark.text
+        (\styles str ->
+            str
+        )
+
+
 manyHelloDoc =
     Mark.document
         identity
@@ -228,11 +235,7 @@ manyTextDocNoBlock =
 styledText =
     Mark.document
         identity
-        (Mark.text
-            (\styles str ->
-                str
-            )
-        )
+        stringText
 
 
 threeHellos =

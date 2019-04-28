@@ -246,8 +246,7 @@ sectionDoc =
                     [ Mark.block "Embedded"
                         (always "embedded")
                         text
-                    , text
-                        |> Mark.map (always "text")
+                    , Mark.map (always "text") text
                     ]
                 )
             ]
@@ -283,6 +282,10 @@ type Ordered
     = Ordered (List Int) (List Ordered)
 
 
+type Icons
+    = Icons Mark.Edit.Icon (List Icons)
+
+
 renderContent stack i (Mark.Edit.Tree node) =
     case node.children of
         [] ->
@@ -299,6 +302,25 @@ renderIndex stack i (Mark.Edit.Tree node) =
 
         _ ->
             Indexed i (List.indexedMap (renderIndex (i :: stack)) node.children)
+
+
+renderIcon stack i (Mark.Edit.Tree node) =
+    case node.children of
+        [] ->
+            Icons node.icon []
+
+        _ ->
+            Icons node.icon (List.indexedMap (renderIcon (i :: stack)) node.children)
+
+
+iconListDoc : Mark.Document (List Icons)
+iconListDoc =
+    Mark.document
+        (List.indexedMap (renderIcon []))
+        (Mark.tree "WithIcons"
+            identity
+            Mark.string
+        )
 
 
 simpleNestedOrderedDoc =
@@ -630,6 +652,40 @@ Then some text.
                                 , Ordered [ 7, 8 ] []
                                 ]
                             , Ordered [ 9 ] []
+                            ]
+                        )
+            , test "Icons set by first element" <|
+                \_ ->
+                    let
+                        iconSetting =
+                            """
+|> WithIcons
+    1. *
+        - *
+        - *
+        - *
+        - *
+            1. *
+            -- *
+    - *
+        - *
+    - *
+"""
+                    in
+                    Expect.equal
+                        (toResult iconListDoc iconSetting)
+                        (Ok
+                            [ Icons Mark.Edit.Number
+                                [ Icons Mark.Edit.Bullet []
+                                , Icons Mark.Edit.Bullet []
+                                , Icons Mark.Edit.Bullet []
+                                , Icons Mark.Edit.Bullet
+                                    [ Icons Mark.Edit.Number []
+                                    , Icons Mark.Edit.Number []
+                                    ]
+                                ]
+                            , Icons Mark.Edit.Number [ Icons Mark.Edit.Bullet [] ]
+                            , Icons Mark.Edit.Number []
                             ]
                         )
             , test "Nested list parsing" <|

@@ -131,7 +131,7 @@ convertToTreeExpectation (Tree details) =
                     Desc.Bullet
 
                 Number ->
-                    Desc.AutoNumber
+                    Desc.AutoNumber 1
         , content = details.content
         , children =
             List.map convertToTreeExpectation details.children

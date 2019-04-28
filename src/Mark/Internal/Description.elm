@@ -94,7 +94,7 @@ type alias Range =
 {-| -}
 type Icon
     = Bullet
-    | AutoNumber
+    | AutoNumber Int
 
 
 {-| -}
@@ -1340,9 +1340,9 @@ writeIcon icon cursor =
             cursor
                 |> write "-"
 
-        AutoNumber ->
+        AutoNumber i ->
             cursor
-                |> write "#."
+                |> write (String.fromInt i ++ ".")
 
 
 {-| -}

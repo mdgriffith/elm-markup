@@ -1984,10 +1984,10 @@ expectIndentation base previous =
 iconParser =
     Parser.oneOf
         [ Parser.succeed Bullet
-            |. Parser.chompIf (\c -> c == '-') (Expecting "-")
+            |. Parser.chompIf (\c -> c == '-') (Error.Expecting "-")
             |. Parser.chompWhile (\c -> c == '-' || c == ' ')
-        , Parser.succeed AutoNumber
-            |. Parser.chompIf (\c -> c == '#') (Expecting "#")
+        , Parser.succeed (AutoNumber 1)
+            |. Parser.token (Parser.Token "1" Newline)
             |. Parser.chompWhile (\c -> c == '.' || c == ' ')
         ]
 

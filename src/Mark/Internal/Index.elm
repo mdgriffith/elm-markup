@@ -1,16 +1,24 @@
 module Mark.Internal.Index exposing
     ( Index(..)
+    , dedent
     , increment
     , indent
     , toList
+    , top
     , zero
     )
 
 {-| -}
 
 
+{-| -}
 type Index
     = Index Int (List Int)
+
+
+top : Index -> Int
+top (Index i _) =
+    i
 
 
 zero : Index
@@ -21,6 +29,16 @@ zero =
 increment : Index -> Index
 increment (Index i base) =
     Index (i + 1) base
+
+
+dedent : Index -> Index
+dedent (Index i base) =
+    case base of
+        [] ->
+            zero
+
+        topI :: newBase ->
+            Index topI newBase
 
 
 indent : Index -> Index
