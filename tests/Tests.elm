@@ -114,10 +114,11 @@ withMetaData =
     Mark.document
         identity
         (Mark.startWith Tuple.pair
-            (Mark.record2 "Meta"
+            (Mark.record "Meta"
                 (\one two -> { one = one, two = two })
-                (Mark.field "one" Mark.string)
-                (Mark.field "two" Mark.string)
+                |> Mark.field "one" Mark.string
+                |> Mark.field "two" Mark.string
+                |> Mark.close
             )
             (Mark.manyOf
                 [ text
@@ -144,33 +145,36 @@ textDoc =
 recordDoc =
     Mark.document
         identity
-        (Mark.record3 "Test"
+        (Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            (Mark.field "one" Mark.string)
-            (Mark.field "two" Mark.string)
-            (Mark.field "three" Mark.string)
+            |> Mark.field "one" Mark.string
+            |> Mark.field "two" Mark.string
+            |> Mark.field "three" Mark.string
+            |> Mark.close
         )
 
 
 recordManyTextDoc =
     Mark.document
         identity
-        (Mark.record3 "Test"
+        (Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            (Mark.field "one" Mark.string)
-            (Mark.field "two" Mark.string)
-            (Mark.field "three" (Mark.manyOf [ text ]))
+            |> Mark.field "one" Mark.string
+            |> Mark.field "two" Mark.string
+            |> Mark.field "three" (Mark.manyOf [ text ])
+            |> Mark.close
         )
 
 
 floatDoc =
     Mark.document
         identity
-        (Mark.record3 "Test"
+        (Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            (Mark.field "one" Mark.float)
-            (Mark.field "two" Mark.float)
-            (Mark.field "three" Mark.float)
+            |> Mark.field "one" Mark.float
+            |> Mark.field "two" Mark.float
+            |> Mark.field "three" Mark.float
+            |> Mark.close
         )
 
 
@@ -216,11 +220,12 @@ codeAndTextDoc =
 intDoc =
     Mark.document
         identity
-        (Mark.record3 "Test"
+        (Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            (Mark.field "one" Mark.int)
-            (Mark.field "two" Mark.int)
-            (Mark.field "three" Mark.int)
+            |> Mark.field "one" Mark.int
+            |> Mark.field "two" Mark.int
+            |> Mark.field "three" Mark.int
+            |> Mark.close
         )
 
 
@@ -229,11 +234,12 @@ sectionDoc =
         identity
         (Mark.manyOf
             [ Mark.map (always "text") text
-            , Mark.record3 "Test"
+            , Mark.record "Test"
                 (\one two three -> "record:one,two,three")
-                (Mark.field "one" Mark.string)
-                (Mark.field "two" Mark.string)
-                (Mark.field "three" Mark.string)
+                |> Mark.field "one" Mark.string
+                |> Mark.field "two" Mark.string
+                |> Mark.field "three" Mark.string
+                |> Mark.close
             , Mark.block "Section"
                 (\x -> "section:" ++ String.join "," x)
                 (Mark.manyOf
@@ -372,11 +378,12 @@ sectionWithRecordDoc =
         (Mark.manyOf
             [ text
                 |> Mark.map (always "text")
-            , Mark.record3 "Test"
+            , Mark.record "Test"
                 (\one two three -> "record:one,two,three")
-                (Mark.field "one" Mark.string)
-                (Mark.field "two" Mark.string)
-                (Mark.field "three" Mark.string)
+                |> Mark.field "one" Mark.string
+                |> Mark.field "two" Mark.string
+                |> Mark.field "three" Mark.string
+                |> Mark.close
             , Mark.block "Section"
                 (\x -> "embedded:" ++ String.join "," x)
                 (Mark.manyOf
@@ -580,8 +587,9 @@ suite =
     Here is my third.
     Here is my fourth.
         And my indented line.
+
 """)
-                        (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.\n")
+                        (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.")
             , test "Parse code block and then normal text" <|
                 \_ ->
                     Expect.equal
@@ -593,7 +601,7 @@ suite =
         And my indented line.
 Then some text.
 """)
-                        (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.\n:text")
+                        (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.:text")
             ]
         , describe "Nested"
             [ test "Simple list parsing.  No Nesting." <|
@@ -704,7 +712,7 @@ Then some text.
 """
                     in
                     Expect.equal (toResult singleOneOf doc1)
-                        (Ok "Here's my extra line\n")
+                        (Ok "Here's my extra line")
             , test "Mulitline Text" <|
                 \_ ->
                     let
@@ -714,7 +722,7 @@ Then some text.
 """
                     in
                     Expect.equal (toResult codeDoc doc1)
-                        (Ok "Here's my extra line\n")
+                        (Ok "Here's my extra line")
             , test "Incorrect Indentation" <|
                 \_ ->
                     let

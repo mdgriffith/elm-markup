@@ -7,7 +7,7 @@ module Mark exposing
     , string, int, float, bool, multiline
     , block, oneOf, manyOf, startWith
     , tree
-    , field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
+    , record, field, close
     , Styles, text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
     , Error, errorToString, errorToHtml, Theme(..)
@@ -61,7 +61,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Records
 
-@docs field, Field, record2, record3, record4, record5, record6, record7, record8, record9, record10
+@docs record, field, close
 
 
 ## Handling Text and Inline
@@ -229,7 +229,7 @@ type Outcome failure almost success
 
 
 {-| -}
-uncertain : Error.UnexpectedDetails -> Outcome.Outcome AstError (Uncertain data) data
+uncertain : Error.UnexpectedDetails -> Outcome.Outcome AstError (Uncertain data) data2
 uncertain err =
     Outcome.Almost (Uncertain ( err, [] ))
 
@@ -919,7 +919,7 @@ manyOf blocks =
 
 {-| It can be useful to parse a tree structure. For example, here's a nested list.
 
-    | List
+    |> List
         - item one
         - item two
             - nested item two
@@ -957,79 +957,51 @@ type alias Index =
     List Int
 
 
+{-| -}
+type Record data
+    = ProtoRecord
+        { name : String
+        , expectations : List ( String, Expectation )
+        , fieldConverter :
+            Description
+            -> Outcome.Outcome AstError (Uncertain (FieldConverter data)) (FieldConverter data)
+        , fields : List FieldParser
+        }
 
--- {-| -}
--- foldNestedList : (Index -> a -> b -> b) -> b -> List (Nested a) -> b
--- foldNestedList fn accum nodes =
---     List.foldl
---         (\child ( i, gathered ) ->
---             ( i + 1, foldNestedHelper [ i ] fn gathered child )
---         )
---         ( 1, accum )
---         nodes
---         |> Tuple.second
--- {-| -}
--- foldNested : (Index -> a -> b -> b) -> b -> Nested a -> b
--- foldNested fn accum node =
---     foldNestedHelper [ 1 ] fn accum node
--- foldNestedHelper : Index -> (Index -> a -> b -> b) -> b -> Nested a -> b
--- foldNestedHelper index fn accum (Nested node) =
---     let
---         newIndex =
---             1 :: index
---         advanced =
---             fn newIndex node.content accum
---     in
---     List.foldl
---         (\child ( i, gathered ) ->
---             ( i + 1, foldNestedHelper (i :: newIndex) fn gathered child )
---         )
---         ( 1, advanced )
---         node.children
---         |> Tuple.second
+
+type alias FieldConverter data =
+    ( Range, List ( String, Found Description ), data )
+
+
+type alias FieldParser =
+    Id.Seed
+    -> ( Id.Seed, ( String, Parser Context Problem ( String, Found Description ) ) )
 
 
 {-| -}
-record2 :
-    String
-    ->
-        (one
-         -> two
-         -> data
-        )
-    -> Field one
-    -> Field two
-    -> Block data
-record2 name view field1 field2 =
+close : Record a -> Block a
+close (ProtoRecord details) =
     let
         expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                ]
+            ExpectRecord details.name
+                details.expectations
     in
-    Block name
+    Block details.name
         { expect = expectations
         , converter =
             \desc ->
-                case desc of
-                    Record details ->
-                        if details.name == name then
-                            case details.found of
-                                Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> renderRecordResult pos
+                case details.fieldConverter desc of
+                    Outcome.Success ( pos, fieldDescriptions, rendered ) ->
+                        Outcome.Success rendered
 
-                                Unexpected unexpected ->
-                                    uncertain unexpected
+                    Outcome.Failure fail ->
+                        Outcome.Failure fail
 
-                        else
-                            Outcome.Failure NoMatch
+                    Outcome.Almost (Uncertain e) ->
+                        Outcome.Almost (Uncertain e)
 
-                    _ ->
-                        Outcome.Failure NoMatch
+                    Outcome.Almost (Recovered e ( pos, fieldDescriptions, rendered )) ->
+                        Outcome.Almost (Recovered e rendered)
         , parser =
             \seed ->
                 let
@@ -1037,14 +1009,11 @@ record2 name view field1 field2 =
                         Id.step seed
 
                     ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            ]
+                        Id.thread parentSeed (List.reverse details.fields)
                 in
                 ( newSeed
                 , parseRecord parentId
-                    name
+                    details.name
                     expectations
                     fields
                 )
@@ -1052,36 +1021,19 @@ record2 name view field1 field2 =
 
 
 {-| -}
-record3 :
-    String
-    -> (one -> two -> three -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Block data
-record3 name view field1 field2 field3 =
-    let
-        expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                , fieldExpectation field3
-                ]
-    in
-    Block name
-        { expect = expectations
-        , converter =
+record : String -> data -> Record data
+record name view =
+    ProtoRecord
+        { name = name
+        , expectations = []
+        , fieldConverter =
             \desc ->
                 case desc of
                     Record details ->
                         if details.name == name then
                             case details.found of
                                 Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> renderRecordResult pos
+                                    Outcome.Success ( pos, fieldDescriptions, view )
 
                                 Unexpected unexpected ->
                                     uncertain unexpected
@@ -1091,571 +1043,68 @@ record3 name view field1 field2 field3 =
 
                     _ ->
                         Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( parentId, parentSeed ) =
-                        Id.step seed
-
-                    ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            , fieldParser field3
-                            ]
-                in
-                ( newSeed
-                , parseRecord parentId
-                    name
-                    expectations
-                    fields
-                )
+        , fields = []
         }
 
 
 {-| -}
-record4 :
-    String
-    -> (one -> two -> three -> four -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Block data
-record4 name view field1 field2 field3 field4 =
+field : String -> Block value -> Record (value -> result) -> Record result
+field name value (ProtoRecord details) =
     let
-        expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                , fieldExpectation field3
-                , fieldExpectation field4
-                ]
+        newField =
+            Field name value
     in
-    Block name
-        { expect = expectations
-        , converter =
+    ProtoRecord
+        { name = details.name
+        , expectations = fieldExpectation newField :: details.expectations
+        , fieldConverter =
             \desc ->
-                case desc of
-                    Record details ->
-                        if details.name == name then
-                            case details.found of
-                                Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
-                                        |> renderRecordResult pos
+                case details.fieldConverter desc of
+                    Outcome.Success ( pos, fieldDescriptions, rendered ) ->
+                        case getField newField fieldDescriptions of
+                            Ok (Found rng myField) ->
+                                Outcome.Success
+                                    ( pos
+                                    , fieldDescriptions
+                                    , rendered myField
+                                    )
 
-                                Unexpected unexpected ->
-                                    uncertain unexpected
+                            Ok (Unexpected deets) ->
+                                uncertain deets
 
-                        else
-                            Outcome.Failure NoMatch
+                            Err prob ->
+                                uncertain
+                                    { problem = prob
+                                    , range = pos
+                                    }
 
-                    _ ->
-                        Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( parentId, parentSeed ) =
-                        Id.step seed
+                    Outcome.Failure fail ->
+                        Outcome.Failure fail
 
-                    ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            , fieldParser field3
-                            , fieldParser field4
-                            ]
-                in
-                ( newSeed
-                , parseRecord parentId
-                    name
-                    expectations
-                    fields
-                )
-        }
+                    Outcome.Almost (Uncertain e) ->
+                        Outcome.Almost (Uncertain e)
 
+                    Outcome.Almost (Recovered e ( pos, fieldDescriptions, rendered )) ->
+                        case getField newField fieldDescriptions of
+                            Ok (Found rng myField) ->
+                                Outcome.Almost
+                                    (Recovered e
+                                        ( pos
+                                        , fieldDescriptions
+                                        , rendered myField
+                                        )
+                                    )
 
-{-| -}
-record5 :
-    String
-    -> (one -> two -> three -> four -> five -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Block data
-record5 name view field1 field2 field3 field4 field5 =
-    let
-        expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                , fieldExpectation field3
-                , fieldExpectation field4
-                , fieldExpectation field5
-                ]
-    in
-    Block name
-        { expect = expectations
-        , converter =
-            \desc ->
-                case desc of
-                    Record details ->
-                        if details.name == name then
-                            case details.found of
-                                Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
-                                        |> renderRecordResult pos
+                            Ok (Unexpected deets) ->
+                                uncertain deets
 
-                                Unexpected unexpected ->
-                                    uncertain unexpected
-
-                        else
-                            Outcome.Failure NoMatch
-
-                    _ ->
-                        Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( parentId, parentSeed ) =
-                        Id.step seed
-
-                    ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            , fieldParser field3
-                            , fieldParser field4
-                            , fieldParser field5
-                            ]
-                in
-                ( newSeed
-                , parseRecord parentId
-                    name
-                    expectations
-                    fields
-                )
-        }
-
-
-{-| -}
-record6 :
-    String
-    -> (one -> two -> three -> four -> five -> six -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Block data
-record6 name view field1 field2 field3 field4 field5 field6 =
-    let
-        expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                , fieldExpectation field3
-                , fieldExpectation field4
-                , fieldExpectation field5
-                , fieldExpectation field6
-                ]
-    in
-    Block name
-        { expect = expectations
-        , converter =
-            \desc ->
-                case desc of
-                    Record details ->
-                        if details.name == name then
-                            case details.found of
-                                Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
-                                        |> renderRecordResult pos
-
-                                Unexpected unexpected ->
-                                    uncertain unexpected
-
-                        else
-                            Outcome.Failure NoMatch
-
-                    _ ->
-                        Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( parentId, parentSeed ) =
-                        Id.step seed
-
-                    ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            , fieldParser field3
-                            , fieldParser field4
-                            , fieldParser field5
-                            , fieldParser field6
-                            ]
-                in
-                ( newSeed
-                , parseRecord parentId
-                    name
-                    expectations
-                    fields
-                )
-        }
-
-
-{-| -}
-record7 :
-    String
-    -> (one -> two -> three -> four -> five -> six -> seven -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Field seven
-    -> Block data
-record7 name view field1 field2 field3 field4 field5 field6 field7 =
-    let
-        expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                , fieldExpectation field3
-                , fieldExpectation field4
-                , fieldExpectation field5
-                , fieldExpectation field6
-                , fieldExpectation field7
-                ]
-    in
-    Block name
-        { expect = expectations
-        , converter =
-            \desc ->
-                case desc of
-                    Record details ->
-                        if details.name == name then
-                            case details.found of
-                                Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field7 fieldDescriptions)
-                                        |> renderRecordResult pos
-
-                                Unexpected unexpected ->
-                                    uncertain unexpected
-
-                        else
-                            Outcome.Failure NoMatch
-
-                    _ ->
-                        Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( parentId, parentSeed ) =
-                        Id.step seed
-
-                    ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            , fieldParser field3
-                            , fieldParser field4
-                            , fieldParser field5
-                            , fieldParser field6
-                            , fieldParser field7
-                            ]
-                in
-                ( newSeed
-                , parseRecord parentId
-                    name
-                    expectations
-                    fields
-                )
-        }
-
-
-{-| -}
-record8 :
-    String
-    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Field seven
-    -> Field eight
-    -> Block data
-record8 name view field1 field2 field3 field4 field5 field6 field7 field8 =
-    let
-        expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                , fieldExpectation field3
-                , fieldExpectation field4
-                , fieldExpectation field5
-                , fieldExpectation field6
-                , fieldExpectation field7
-                , fieldExpectation field8
-                ]
-    in
-    Block name
-        { expect = expectations
-        , converter =
-            \desc ->
-                case desc of
-                    Record details ->
-                        if details.name == name then
-                            case details.found of
-                                Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field7 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field8 fieldDescriptions)
-                                        |> renderRecordResult pos
-
-                                Unexpected unexpected ->
-                                    uncertain unexpected
-
-                        else
-                            Outcome.Failure NoMatch
-
-                    _ ->
-                        Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( parentId, parentSeed ) =
-                        Id.step seed
-
-                    ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            , fieldParser field3
-                            , fieldParser field4
-                            , fieldParser field5
-                            , fieldParser field6
-                            , fieldParser field7
-                            , fieldParser field8
-                            ]
-                in
-                ( newSeed
-                , parseRecord parentId
-                    name
-                    expectations
-                    fields
-                )
-        }
-
-
-{-| -}
-record9 :
-    String
-    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Field seven
-    -> Field eight
-    -> Field nine
-    -> Block data
-record9 name view field1 field2 field3 field4 field5 field6 field7 field8 field9 =
-    let
-        expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                , fieldExpectation field3
-                , fieldExpectation field4
-                , fieldExpectation field5
-                , fieldExpectation field6
-                , fieldExpectation field7
-                , fieldExpectation field8
-                , fieldExpectation field9
-                ]
-    in
-    Block name
-        { expect = expectations
-        , converter =
-            \desc ->
-                case desc of
-                    Record details ->
-                        if details.name == name then
-                            case details.found of
-                                Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field7 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field8 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field9 fieldDescriptions)
-                                        |> renderRecordResult pos
-
-                                Unexpected unexpected ->
-                                    uncertain unexpected
-
-                        else
-                            Outcome.Failure NoMatch
-
-                    _ ->
-                        Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( parentId, parentSeed ) =
-                        Id.step seed
-
-                    ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            , fieldParser field3
-                            , fieldParser field4
-                            , fieldParser field5
-                            , fieldParser field6
-                            , fieldParser field7
-                            , fieldParser field8
-                            , fieldParser field9
-                            ]
-                in
-                ( newSeed
-                , parseRecord parentId
-                    name
-                    expectations
-                    fields
-                )
-        }
-
-
-{-| -}
-record10 :
-    String
-    -> (one -> two -> three -> four -> five -> six -> seven -> eight -> nine -> ten -> data)
-    -> Field one
-    -> Field two
-    -> Field three
-    -> Field four
-    -> Field five
-    -> Field six
-    -> Field seven
-    -> Field eight
-    -> Field nine
-    -> Field ten
-    -> Block data
-record10 name view field1 field2 field3 field4 field5 field6 field7 field8 field9 field10 =
-    let
-        expectations =
-            ExpectRecord name
-                [ fieldExpectation field1
-                , fieldExpectation field2
-                , fieldExpectation field3
-                , fieldExpectation field4
-                , fieldExpectation field5
-                , fieldExpectation field6
-                , fieldExpectation field7
-                , fieldExpectation field8
-                , fieldExpectation field9
-                , fieldExpectation field10
-                ]
-    in
-    Block name
-        { expect = expectations
-        , converter =
-            \desc ->
-                case desc of
-                    Record details ->
-                        if details.name == name then
-                            case details.found of
-                                Found pos fieldDescriptions ->
-                                    Ok (Ok view)
-                                        |> Result.map2 applyField (getField field1 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field2 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field3 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field4 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field5 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field6 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field7 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field8 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field9 fieldDescriptions)
-                                        |> Result.map2 applyField (getField field10 fieldDescriptions)
-                                        |> renderRecordResult pos
-
-                                Unexpected unexpected ->
-                                    uncertain unexpected
-
-                        else
-                            Outcome.Failure NoMatch
-
-                    _ ->
-                        Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( parentId, parentSeed ) =
-                        Id.step seed
-
-                    ( newSeed, fields ) =
-                        Id.thread parentSeed
-                            [ fieldParser field1
-                            , fieldParser field2
-                            , fieldParser field3
-                            , fieldParser field4
-                            , fieldParser field5
-                            , fieldParser field6
-                            , fieldParser field7
-                            , fieldParser field8
-                            , fieldParser field9
-                            , fieldParser field10
-                            ]
-                in
-                ( newSeed
-                , parseRecord parentId
-                    name
-                    expectations
-                    fields
-                )
+                            Err prob ->
+                                uncertain
+                                    { problem = prob
+                                    , range = pos
+                                    }
+        , fields =
+            fieldParser newField :: details.fields
         }
 
 
@@ -1927,7 +1376,7 @@ multiline =
             \desc ->
                 case desc of
                     DescribeMultiline id range str ->
-                        Outcome.Success str
+                        Outcome.Success (String.trim str)
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -2148,8 +1597,8 @@ type Field value
 
 
 {-| -}
-field : String -> Block value -> Field value
-field name child =
+fieldOld : String -> Block value -> Field value
+fieldOld name child =
     Field name child
 
 
