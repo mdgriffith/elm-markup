@@ -1,4 +1,4 @@
-## Building New Blocks
+# Building New Blocks
 
 One of the challenges in making a compiled markup language is that I want their to be some ability to construct new, valid blocks programattically and insert them into a document.
 
