@@ -455,21 +455,13 @@ document view child =
 {-| Change the result of a block by applying a function to it.
 -}
 map : (a -> b) -> Block a -> Block b
-map fn child =
-    case child of
-        Block name details ->
-            Block name
-                { converter = mapSuccessAndRecovered fn << details.converter
-                , parser = details.parser
-                , expect = details.expect
-                }
-
-        Value details ->
-            Value
-                { converter = mapSuccessAndRecovered fn << details.converter
-                , parser = details.parser
-                , expect = details.expect
-                }
+map fn (Block details) =
+    Block
+        { kind = details.kind
+        , converter = mapSuccessAndRecovered fn << details.converter
+        , parser = details.parser
+        , expect = details.expect
+        }
 
 
 {-| -}
@@ -481,128 +473,69 @@ type alias CustomError =
 
 {-| -}
 verify : (a -> Result CustomError b) -> Block a -> Block b
-verify fn myBlock =
-    case myBlock of
-        Block name details ->
-            Block name
-                { expect = details.expect
-                , parser = details.parser
-                , converter =
-                    \desc ->
-                        case details.converter desc of
-                            Outcome.Success a ->
-                                case fn a of
-                                    Ok new ->
-                                        Outcome.Success new
+verify fn (Block details) =
+    Block
+        { kind = details.kind
+        , expect = details.expect
+        , parser = details.parser
+        , converter =
+            \desc ->
+                case details.converter desc of
+                    Outcome.Success a ->
+                        case fn a of
+                            Ok new ->
+                                Outcome.Success new
 
-                                    Err newErr ->
-                                        uncertain
-                                            { problem = Error.Custom newErr
+                            Err newErr ->
+                                uncertain
+                                    { problem = Error.Custom newErr
 
-                                            -- TODO: Does this mean we need to thread source snippets everywhere to get them here?
-                                            , range = startDocRange
-                                            }
+                                    -- TODO: Does this mean we need to thread source snippets everywhere to get them here?
+                                    , range = startDocRange
+                                    }
 
-                            Outcome.Almost (Recovered err a) ->
-                                case fn a of
-                                    Ok new ->
-                                        Outcome.Almost (Recovered err new)
+                    Outcome.Almost (Recovered err a) ->
+                        case fn a of
+                            Ok new ->
+                                Outcome.Almost (Recovered err new)
 
-                                    Err newErr ->
-                                        uncertain
-                                            { problem = Error.Custom newErr
-                                            , range = startDocRange
-                                            }
+                            Err newErr ->
+                                uncertain
+                                    { problem = Error.Custom newErr
+                                    , range = startDocRange
+                                    }
 
-                            Outcome.Almost (Uncertain x) ->
-                                Outcome.Almost (Uncertain x)
+                    Outcome.Almost (Uncertain x) ->
+                        Outcome.Almost (Uncertain x)
 
-                            Outcome.Failure f ->
-                                Outcome.Failure f
-                }
-
-        Value details ->
-            Value
-                { expect = details.expect
-                , parser = details.parser
-                , converter =
-                    \desc ->
-                        case details.converter desc of
-                            Outcome.Success a ->
-                                case fn a of
-                                    Ok new ->
-                                        Outcome.Success new
-
-                                    Err newErr ->
-                                        uncertain
-                                            { problem = Error.Custom newErr
-                                            , range = startDocRange
-                                            }
-
-                            Outcome.Almost (Recovered err a) ->
-                                case fn a of
-                                    Ok new ->
-                                        Outcome.Almost (Recovered err new)
-
-                                    Err newErr ->
-                                        uncertain
-                                            { problem = Error.Custom newErr
-                                            , range = startDocRange
-                                            }
-
-                            Outcome.Almost (Uncertain x) ->
-                                Outcome.Almost (Uncertain x)
-
-                            Outcome.Failure f ->
-                                Outcome.Failure f
-                }
+                    Outcome.Failure f ->
+                        Outcome.Failure f
+        }
 
 
 {-| -}
 onError : a -> Block a -> Block a
-onError newValue myBlock =
-    case myBlock of
-        Block name details ->
-            Block name
-                { expect = details.expect
-                , parser = details.parser
-                , converter =
-                    \desc ->
-                        case details.converter desc of
-                            Outcome.Success a ->
-                                Outcome.Success a
+onError newValue (Block details) =
+    Block
+        { kind = details.kind
+        , expect = details.expect
+        , parser = details.parser
+        , converter =
+            \desc ->
+                case details.converter desc of
+                    Outcome.Success a ->
+                        Outcome.Success a
 
-                            Outcome.Almost (Recovered err a) ->
-                                Outcome.Almost (Recovered err a)
+                    Outcome.Almost (Recovered err a) ->
+                        Outcome.Almost (Recovered err a)
 
-                            Outcome.Almost (Uncertain x) ->
-                                Outcome.Almost
-                                    (Recovered x newValue)
+                    Outcome.Almost (Uncertain x) ->
+                        Outcome.Almost
+                            (Recovered x newValue)
 
-                            Outcome.Failure f ->
-                                Outcome.Failure f
-                }
-
-        Value details ->
-            Value
-                { expect = details.expect
-                , parser = details.parser
-                , converter =
-                    \desc ->
-                        case details.converter desc of
-                            Outcome.Success a ->
-                                Outcome.Success a
-
-                            Outcome.Almost (Recovered err a) ->
-                                Outcome.Almost (Recovered err a)
-
-                            Outcome.Almost (Uncertain x) ->
-                                Outcome.Almost
-                                    (Recovered x newValue)
-
-                            Outcome.Failure f ->
-                                Outcome.Failure f
-                }
+                    Outcome.Failure f ->
+                        Outcome.Failure f
+        }
 
 
 skipSeed parser seed =
@@ -612,8 +545,9 @@ skipSeed parser seed =
 {-| -}
 block : String -> (child -> result) -> Block child -> Block result
 block name view child =
-    Block name
-        { expect = ExpectBlock name (getBlockExpectation child)
+    Block
+        { kind = Named name
+        , expect = ExpectBlock name (getBlockExpectation child)
         , converter =
             \desc ->
                 case desc of
@@ -733,8 +667,9 @@ startWith :
     -> Block rest
     -> Block result
 startWith fn startBlock endBlock =
-    Value
-        { expect = ExpectStartsWith (getBlockExpectation startBlock) (getBlockExpectation endBlock)
+    Block
+        { kind = Value
+        , expect = ExpectStartsWith (getBlockExpectation startBlock) (getBlockExpectation endBlock)
         , converter =
             \desc ->
                 case desc of
@@ -812,8 +747,9 @@ oneOf blocks =
         expectations =
             List.map getBlockExpectation blocks
     in
-    Value
-        { expect = ExpectOneOf expectations
+    Block
+        { kind = Value
+        , expect = ExpectOneOf expectations
         , converter =
             \desc ->
                 case desc of
@@ -840,8 +776,9 @@ manyOf blocks =
         expectations =
             List.map getBlockExpectation blocks
     in
-    Value
-        { expect = ExpectManyOf expectations
+    Block
+        { kind = Value
+        , expect = ExpectManyOf expectations
         , converter =
             \desc ->
                 let
@@ -986,8 +923,9 @@ close (ProtoRecord details) =
             ExpectRecord details.name
                 details.expectations
     in
-    Block details.name
-        { expect = expectations
+    Block
+        { kind = Named details.name
+        , expect = expectations
         , converter =
             \desc ->
                 case details.fieldConverter desc of
@@ -1370,8 +1308,9 @@ getInlineExpectation (Inline details) =
 {-| -}
 multiline : Block String
 multiline =
-    Value
-        { expect = ExpectString "REPLACE"
+    Block
+        { kind = Value
+        , expect = ExpectString "REPLACE"
         , converter =
             \desc ->
                 case desc of
@@ -1405,8 +1344,9 @@ multiline =
 {-| -}
 string : Block String
 string =
-    Value
-        { expect = ExpectString "-- Replace Me --"
+    Block
+        { kind = Value
+        , expect = ExpectString "-- Replace Me --"
         , converter =
             \desc ->
                 case desc of
@@ -1453,8 +1393,9 @@ foundToResult found err =
 -}
 bool : Block Bool
 bool =
-    Value
-        { expect = ExpectBoolean False
+    Block
+        { kind = Value
+        , expect = ExpectBoolean False
         , converter =
             \desc ->
                 case desc of
@@ -1515,8 +1456,9 @@ foundToOutcome found =
 -}
 int : Block Int
 int =
-    Value
-        { converter =
+    Block
+        { kind = Value
+        , converter =
             \desc ->
                 case desc of
                     DescribeInteger details ->
@@ -1547,8 +1489,9 @@ int =
 {-| -}
 float : Block Float
 float =
-    Value
-        { converter =
+    Block
+        { kind = Value
+        , converter =
             \desc ->
                 case desc of
                     DescribeFloat details ->

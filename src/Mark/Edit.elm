@@ -1876,8 +1876,9 @@ getWithinNested offset (Nested nest) =
 -}
 int : ({ id : Id, range : Range } -> Int -> a) -> Block a
 int view =
-    Value
-        { converter =
+    Block
+        { kind = Value
+        , converter =
             \desc ->
                 case desc of
                     DescribeInteger details ->
@@ -1919,8 +1920,9 @@ int view =
 {-| -}
 float : ({ id : Id, range : Range } -> ( String, Float ) -> a) -> Block a
 float view =
-    Value
-        { converter =
+    Block
+        { kind = Value
+        , converter =
             \desc ->
                 case desc of
                     DescribeFloat details ->
@@ -1962,8 +1964,9 @@ float view =
 {-| -}
 string : ({ id : Id, range : Range } -> String -> a) -> Block a
 string view =
-    Value
-        { expect = ExpectString "-- Replace Me --"
+    Block
+        { kind = Value
+        , expect = ExpectString "-- Replace Me --"
         , converter =
             \desc ->
                 case desc of
@@ -2006,8 +2009,9 @@ string view =
 {-| -}
 multiline : ({ id : Id, range : Range } -> String -> a) -> Block a
 multiline view =
-    Value
-        { expect = ExpectMultiline "REPLACE"
+    Block
+        { kind = Value
+        , expect = ExpectMultiline "REPLACE"
         , converter =
             \desc ->
                 case desc of
@@ -2049,8 +2053,9 @@ multiline view =
 -}
 bool : ({ id : Id, range : Range } -> Bool -> a) -> Block a
 bool view =
-    Value
-        { expect = ExpectBoolean False
+    Block
+        { kind = Value
+        , expect = ExpectBoolean False
         , converter =
             \desc ->
                 case desc of
@@ -2137,8 +2142,9 @@ oneOf view blocks =
         expectations =
             List.map getBlockExpectation blocks
     in
-    Value
-        { expect = ExpectOneOf expectations
+    Block
+        { kind = Value
+        , expect = ExpectOneOf expectations
         , converter =
             \desc ->
                 case desc of
@@ -2274,8 +2280,9 @@ manyOf view blocks =
         expectations =
             List.map getBlockExpectation blocks
     in
-    Value
-        { expect = ExpectManyOf expectations
+    Block
+        { kind = Value
+        , expect = ExpectManyOf expectations
         , converter =
             \desc ->
                 let
@@ -2412,15 +2419,16 @@ tree name view contentBlock =
         expectation =
             ExpectTree (getBlockExpectation contentBlock) []
     in
-    Block name
-        { expect = expectation
+    Block
+        { kind = Named name
+        , expect = expectation
         , converter =
             \description ->
                 case description of
                     DescribeTree details ->
                         details.children
                             |> reduceRender Index.zero
-                                (getNestedIcon)
+                                getNestedIcon
                                 (renderTreeNodeSmall contentBlock)
                             |> Tuple.second
                             |> mapSuccessAndRecovered
@@ -2581,55 +2589,31 @@ errorToList ( x, xs ) =
 
 {-| -}
 onError : (List { range : Range } -> a) -> Block a -> Block a
-onError recover myBlock =
-    case myBlock of
-        Block name details ->
-            Block name
-                { expect = details.expect
-                , parser = details.parser
-                , converter =
-                    \desc ->
-                        case details.converter desc of
-                            Outcome.Success a ->
-                                Outcome.Success a
+onError recover (Block details) =
+    Block
+        { kind = details.kind
+        , expect = details.expect
+        , parser = details.parser
+        , converter =
+            \desc ->
+                case details.converter desc of
+                    Outcome.Success a ->
+                        Outcome.Success a
 
-                            Outcome.Almost (Recovered err a) ->
-                                Outcome.Almost (Recovered err a)
+                    Outcome.Almost (Recovered err a) ->
+                        Outcome.Almost (Recovered err a)
 
-                            Outcome.Almost (Uncertain errs) ->
-                                Outcome.Almost
-                                    (Recovered errs
-                                        (recover
-                                            (List.map (\e -> { range = e.range }) (errorToList errs))
-                                        )
-                                    )
+                    Outcome.Almost (Uncertain errs) ->
+                        Outcome.Almost
+                            (Recovered errs
+                                (recover
+                                    (List.map (\e -> { range = e.range }) (errorToList errs))
+                                )
+                            )
 
-                            Outcome.Failure f ->
-                                Outcome.Failure f
-                }
-
-        Value details ->
-            Value
-                { expect = details.expect
-                , parser = details.parser
-                , converter =
-                    \desc ->
-                        case details.converter desc of
-                            Outcome.Success a ->
-                                Outcome.Success a
-
-                            Outcome.Almost (Recovered err a) ->
-                                Outcome.Almost (Recovered err a)
-
-                            Outcome.Almost (Uncertain errs) ->
-                                Outcome.Almost
-                                    (Recovered errs
-                                        (recover (List.map (\e -> { range = e.range }) (errorToList errs)))
-                                    )
-
-                            Outcome.Failure f ->
-                                Outcome.Failure f
-                }
+                    Outcome.Failure f ->
+                        Outcome.Failure f
+        }
 
 
 
@@ -2697,8 +2681,9 @@ text options =
         inlineExpectations =
             List.map getInlineExpectation options.inlines
     in
-    Value
-        { expect = ExpectTextBlock inlineExpectations
+    Block
+        { kind = Value
+        , expect = ExpectTextBlock inlineExpectations
         , converter = renderText options
         , parser =
             \seed ->

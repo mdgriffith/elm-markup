@@ -8,7 +8,7 @@ module Mark.Internal.Description exposing
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
-    , Block(..), Document(..), Inline(..)
+    , Block(..), BlockKind(..), Document(..), Inline(..)
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     )
@@ -33,7 +33,7 @@ module Mark.Internal.Description exposing
 
 @docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
 
-@docs Block, Document, Inline
+@docs Block, BlockKind, Document, Inline
 
 @docs boldStyle, italicStyle, strikeStyle
 
@@ -164,16 +164,16 @@ A value is just a raw parser.
 -}
 type Block data
     = Block
-        String
-        { converter : Description -> Outcome Error.AstError (Uncertain data) data
+        { kind : BlockKind
+        , converter : Description -> Outcome Error.AstError (Uncertain data) data
         , expect : Expectation
         , parser : Id.Seed -> ( Id.Seed, Parser Error.Context Error.Problem Description )
         }
-    | Value
-        { converter : Description -> Outcome Error.AstError (Uncertain data) data
-        , expect : Expectation
-        , parser : Id.Seed -> ( Id.Seed, Parser Error.Context Error.Problem Description )
-        }
+
+
+type BlockKind
+    = Value
+    | Named String
 
 
 {-| -}
@@ -609,39 +609,33 @@ mapSuccessAndRecovered fn outcome =
 renderBlock : Block data -> Description -> Outcome Error.AstError (Uncertain data) data
 renderBlock fromBlock =
     case fromBlock of
-        Block name { converter } ->
-            converter
-
-        Value { converter } ->
+        Block { converter } ->
             converter
 
 
 getBlockExpectation fromBlock =
     case fromBlock of
-        Block name { expect } ->
-            expect
-
-        Value { expect } ->
+        Block { expect } ->
             expect
 
 
 blockName : Block data -> Maybe String
-blockName fromBlock =
-    case fromBlock of
-        Block name _ ->
+blockName (Block details) =
+    case details.kind of
+        Named name ->
             Just name
 
-        Value _ ->
+        Value ->
             Nothing
 
 
 getParser : Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
-getParser seed fromBlock =
-    case fromBlock of
-        Block name { parser } ->
+getParser seed (Block details) =
+    case details.kind of
+        Named name ->
             let
                 ( newSeed, blockParser ) =
-                    parser seed
+                    details.parser seed
             in
             ( newSeed
             , Parser.succeed identity
@@ -650,23 +644,17 @@ getParser seed fromBlock =
                 |= blockParser
             )
 
-        Value { parser } ->
-            parser seed
+        Value ->
+            details.parser seed
 
 
-getParserNoBar seed fromBlock =
-    case fromBlock of
-        Block name { parser } ->
-            let
-                ( newSeed, blockParser ) =
-                    parser seed
-            in
-            ( newSeed
-            , blockParser
-            )
+getParserNoBar seed (Block details) =
+    case details.kind of
+        Named name ->
+            details.parser seed
 
-        Value { parser } ->
-            parser seed
+        Value ->
+            details.parser seed
 
 
 emptyStyles =
@@ -2507,10 +2495,10 @@ humanReadableExpectations expect =
             ""
 
         ExpectBlock name exp ->
-            "| " ++ name
+            "|> " ++ name
 
         ExpectRecord name fields ->
-            "| " ++ name
+            "|> " ++ name
 
         ExpectOneOf expectations ->
             "One of: " ++ String.join ", " (List.map humanReadableExpectations expectations)

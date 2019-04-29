@@ -269,12 +269,7 @@ oneOf blocks expectations seed =
         gatherParsers myBlock details =
             let
                 ( currentSeed, parser ) =
-                    case myBlock of
-                        Block name blk ->
-                            blk.parser details.seed
-
-                        Value val ->
-                            val.parser details.seed
+                    getParserNoBar details.seed myBlock
             in
             case blockName myBlock of
                 Just name ->
@@ -349,12 +344,12 @@ unexpectedInOneOf expectations =
         )
 
 
-getFailableBlock seed fromBlock =
-    case fromBlock of
-        Block name { parser } ->
+getFailableBlock seed (Block details) =
+    case details.kind of
+        Named name ->
             let
                 ( newSeed, blockParser ) =
-                    parser seed
+                    details.parser seed
             in
             ( newSeed
             , failableBlocks
@@ -365,8 +360,8 @@ getFailableBlock seed fromBlock =
                 }
             )
 
-        Value { parser } ->
-            Tuple.mapSecond (Parser.map Ok) (parser seed)
+        Value ->
+            Tuple.mapSecond (Parser.map Ok) (details.parser seed)
 
 
 {-| This parser will either:
