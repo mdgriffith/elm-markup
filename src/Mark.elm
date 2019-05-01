@@ -2,12 +2,12 @@ module Mark exposing
     ( Document
     , Outcome(..), Partial
     , compile, parse, Parsed, toString, render
-    , document
+    , document, documentWith
     , Block, map, verify, onError
     , string, int, float, bool, multiline
     , Styles, text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
-    , block, oneOf, manyOf, startWith
+    , block, oneOf, manyOf
     , record, field, close
     , tree
     , Error, errorToString, errorToHtml, Theme(..)
@@ -39,7 +39,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Building Documents
 
-@docs document
+@docs document, documentWith
 
 @docs Block, map, verify, onError
 
@@ -58,7 +58,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Higher Level
 
-@docs block, oneOf, manyOf, startWith
+@docs block, oneOf, manyOf
 
 
 ## Records
@@ -450,6 +450,24 @@ document view child =
                 |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
                 |. Parser.end End
         }
+
+
+{-| -}
+documentWith :
+    (metadata -> body -> document)
+    ->
+        { metadata : Block metadata
+        , body : Block body
+        }
+    -> Document document
+documentWith renderer { metadata, body } =
+    document
+        identity
+        (startWith
+            renderer
+            metadata
+            body
+        )
 
 
 {-| Change the result of a block by applying a function to it.

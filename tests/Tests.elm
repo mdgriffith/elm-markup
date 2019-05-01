@@ -111,20 +111,19 @@ inlineOrder =
 
 
 withMetaData =
-    Mark.document
-        identity
-        (Mark.startWith Tuple.pair
-            (Mark.record "Meta"
+    Mark.documentWith
+        Tuple.pair
+        { metadata =
+            Mark.record "Meta"
                 (\one two -> { one = one, two = two })
                 |> Mark.field "one" Mark.string
                 |> Mark.field "two" Mark.string
                 |> Mark.close
-            )
-            (Mark.manyOf
+        , body =
+            Mark.manyOf
                 [ text
                 ]
-            )
-        )
+        }
 
 
 topLevelText =
@@ -199,22 +198,20 @@ singleOneOf =
 
 
 codeAndTextDoc =
-    Mark.document
-        identity
-        (Mark.startWith
-            (\mono extra ->
-                mono ++ ":" ++ String.join "," extra
-            )
-            (Mark.block "Monospace"
+    Mark.documentWith
+        (\mono extra ->
+            mono ++ ":" ++ String.join "," extra
+        )
+        { metadata =
+            Mark.block "Monospace"
                 identity
                 Mark.multiline
-            )
-            (Mark.manyOf
+        , body =
+            Mark.manyOf
                 [ text
                     |> Mark.map (always "text")
                 ]
-            )
-        )
+        }
 
 
 intDoc =
