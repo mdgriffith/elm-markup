@@ -4,7 +4,7 @@ module Mark exposing
     , compile, parse, Parsed, toString, render
     , document, documentWith
     , Block, map, verify, onError
-    , string, int, float, bool, multiline
+    , string, int, float, bool
     , Styles, text, textWith, replacement, balanced, Replacement
     , Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
     , block, oneOf, manyOf
@@ -46,7 +46,7 @@ A solution to this is to parse a `Document` once to an intermediate data structu
 
 ## Primitives
 
-@docs string, int, float, bool, multiline
+@docs string, int, float, bool
 
 
 ## Text
@@ -1324,8 +1324,8 @@ getInlineExpectation (Inline details) =
 
 
 {-| -}
-multiline : Block String
-multiline =
+string : Block String
+string =
     Block
         { kind = Value
         , expect = ExpectString "REPLACE"
@@ -1359,43 +1359,43 @@ multiline =
         }
 
 
-{-| -}
-string : Block String
-string =
-    Block
-        { kind = Value
-        , expect = ExpectString "-- Replace Me --"
-        , converter =
-            \desc ->
-                case desc of
-                    DescribeString id range str ->
-                        Outcome.Success str
 
-                    _ ->
-                        Outcome.Failure NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( id, newSeed ) =
-                        Id.step seed
-                in
-                ( newSeed
-                , Parser.succeed
-                    (\start val end ->
-                        DescribeString id
-                            { start = start
-                            , end = end
-                            }
-                            val
-                    )
-                    |= Parse.getPosition
-                    |= Parser.getChompedString
-                        (Parser.chompWhile
-                            (\c -> c /= '\n')
-                        )
-                    |= Parse.getPosition
-                )
-        }
+-- {-| -}
+-- string : Block String
+-- string =
+--     Block
+--         { kind = Value
+--         , expect = ExpectString "-- Replace Me --"
+--         , converter =
+--             \desc ->
+--                 case desc of
+--                     DescribeString id range str ->
+--                         Outcome.Success str
+--                     _ ->
+--                         Outcome.Failure NoMatch
+--         , parser =
+--             \seed ->
+--                 let
+--                     ( id, newSeed ) =
+--                         Id.step seed
+--                 in
+--                 ( newSeed
+--                 , Parser.succeed
+--                     (\start val end ->
+--                         DescribeString id
+--                             { start = start
+--                             , end = end
+--                             }
+--                             val
+--                     )
+--                     |= Parse.getPosition
+--                     |= Parser.getChompedString
+--                         (Parser.chompWhile
+--                             (\c -> c /= '\n')
+--                         )
+--                     |= Parse.getPosition
+--                 )
+--         }
 
 
 foundToResult found err =
@@ -1830,7 +1830,7 @@ parseFields recordName fieldNames fields =
                         |= Parser.oneOf
                             [ Parser.succeed identity
                                 |. Parser.token
-                                    (Parser.Token ("\n" ++ String.repeat indentation " ")
+                                    (Parser.Token (String.repeat indentation " ")
                                         (ExpectingIndentation indentation)
                                     )
                                 |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))

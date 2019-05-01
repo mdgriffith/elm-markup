@@ -182,7 +182,7 @@ codeDoc =
         identity
         (Mark.block "Monospace"
             identity
-            Mark.multiline
+            Mark.string
         )
 
 
@@ -192,7 +192,7 @@ singleOneOf =
         (Mark.oneOf
             [ Mark.block "Monospace"
                 identity
-                Mark.multiline
+                Mark.string
             ]
         )
 
@@ -205,11 +205,10 @@ codeAndTextDoc =
         { metadata =
             Mark.block "Monospace"
                 identity
-                Mark.multiline
+                Mark.string
         , body =
             Mark.manyOf
-                [ text
-                    |> Mark.map (always "text")
+                [ Mark.map (always "text") text
                 ]
         }
 
@@ -257,7 +256,7 @@ nested =
         (Mark.tree
             "Nested"
             identity
-            (Mark.map (always True) Mark.string)
+            (Mark.map (always True) Mark.int)
         )
 
 
@@ -316,7 +315,7 @@ iconListDoc =
         (List.indexedMap (renderIcon []))
         (Mark.tree "WithIcons"
             identity
-            Mark.string
+            Mark.int
         )
 
 
@@ -347,40 +346,40 @@ complexNestedOrderedDoc =
 
 simpleNestedDoc =
     """|> Nested
-    - *
-    - *
-    - *
+    - 1
+    - 1
+    - 1
 """
 
 
 complexNestedDoc =
     """|> Nested
-    - *
-        - *
-        - *
-        - *
-        - *
-            - *
-    - *
-        - *
-    - *
+    - 1
+        - 1
+        - 1
+        - 1
+        - 1
+            - 1
+    - 1
+        - 1
+    - 1
 """
 
 
 dedentingNestedDoc =
     """|> Nested
-    - *
-        - *
-        - *
-        - *
-        - *
-            - *
-        - *
-            - *
-        - *
-    - *
-        - *
-    - *
+    - 1
+        - 1
+        - 1
+        - 1
+        - 1
+            - 1
+        - 1
+            - 1
+        - 1
+    - 1
+        - 1
+    - 1
 """
 
 
@@ -657,16 +656,16 @@ Then some text.
                         iconSetting =
                             """
 |> WithIcons
-    1. *
-        - *
-        - *
-        - *
-        - *
-            1. *
-            -- *
-    - *
-        - *
-    - *
+    1. 1
+        - 1
+        - 1
+        - 1
+        - 1
+            1. 1
+            -- 1
+    - 1
+        - 1
+    - 1
 """
                     in
                     Expect.equal
