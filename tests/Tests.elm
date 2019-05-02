@@ -319,28 +319,38 @@ iconListDoc =
         )
 
 
+nestedString : Mark.Document (List Icons)
+nestedString =
+    Mark.document
+        (List.indexedMap (renderIcon []))
+        (Mark.tree "WithIcons"
+            identity
+            Mark.string
+        )
+
+
 simpleNestedOrderedDoc =
     """|> Nested
-    - 1
+    --- 1
         2
-    - 3
+    --- 3
         4
         5
-    - 6
+    --- 6
 """
 
 
 complexNestedOrderedDoc =
     """|> Nested
-    - 1
+    --- 1
         2
-    - 3
+    --- 3
         4
-        - 5
+        --- 5
             6
-        - 7
+        --- 7
             8
-    - 9
+    --- 9
 """
 
 
@@ -377,6 +387,22 @@ dedentingNestedDoc =
         - 1
             - 1
         - 1
+    - 1
+        - 1
+    - 1
+"""
+
+
+iconSetting =
+    """
+|> WithIcons
+    1. 1
+        - 1
+        - 1
+        - 1
+        - 1
+            1. 1
+            -- 1
     - 1
         - 1
     - 1
@@ -650,24 +676,20 @@ Then some text.
                             , Ordered [ 9 ] []
                             ]
                         )
+
+            -- TODO: THis should be true, but is probably pretty rare
+            -- , test "Complex list parsing, string and int are isomorphic" <|
+            --     \_ ->
+            --         Expect.equal
+            --             (toResult iconListDoc iconSetting)
+            --             (toResult nestedString iconSetting)
+            -- , test "Isomorphic int and string in simple case" <|
+            --     \_ ->
+            --         Expect.equal
+            --             (toResult iconListDoc iconSetting)
+            --             (toResult nestedString iconSetting)
             , test "Icons set by first element" <|
                 \_ ->
-                    let
-                        iconSetting =
-                            """
-|> WithIcons
-    1. 1
-        - 1
-        - 1
-        - 1
-        - 1
-            1. 1
-            -- 1
-    - 1
-        - 1
-    - 1
-"""
-                    in
                     Expect.equal
                         (toResult iconListDoc iconSetting)
                         (Ok

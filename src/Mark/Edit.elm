@@ -1,5 +1,5 @@
 module Mark.Edit exposing
-    ( bool, int, float, string, multiline, oneOf, manyOf
+    ( bool, int, float, string, oneOf, manyOf
     , text, Replacement, Inline
     , Tree(..), Icon(..), tree
     , update, Error, Edit, replace, delete, insertAt
@@ -11,7 +11,7 @@ module Mark.Edit exposing
 
 # Editable Blocks
 
-@docs bool, int, float, string, multiline, oneOf, manyOf
+@docs bool, int, float, string, oneOf, manyOf
 
 @docs text, Replacement, Inline
 
@@ -1961,12 +1961,57 @@ float view =
         }
 
 
+
+-- {-| -}
+-- string : ({ id : Id, range : Range } -> String -> a) -> Block a
+-- string view =
+--     Block
+--         { kind = Value
+--         , expect = ExpectString "-- Replace Me --"
+--         , converter =
+--             \desc ->
+--                 case desc of
+--                     DescribeString id range str ->
+--                         Outcome.Success
+--                             (view
+--                                 { id = id
+--                                 , range = range
+--                                 }
+--                                 str
+--                             )
+--                     _ ->
+--                         Outcome.Failure Error.NoMatch
+--         , parser =
+--             \seed ->
+--                 let
+--                     ( id, newSeed ) =
+--                         Id.step seed
+--                 in
+--                 ( newSeed
+--                 , Parser.succeed
+--                     (\start val end ->
+--                         DescribeString id
+--                             { start = start
+--                             , end = end
+--                             }
+--                             val
+--                     )
+--                     |= Parse.getPosition
+--                     |= Parser.getChompedString
+--                         (Parser.chompWhile
+--                             (\c -> c /= '\n')
+--                         )
+--                     |= Parse.getPosition
+--                 )
+--         }
+
+
 {-| -}
 string : ({ id : Id, range : Range } -> String -> a) -> Block a
 string view =
     Block
         { kind = Value
-        , expect = ExpectString "-- Replace Me --"
+        , expect = ExpectString "REPLACE"
         , converter =
             \desc ->
                 case desc of
@@ -1988,54 +2033,9 @@ string view =
                         Id.step seed
                 in
                 ( newSeed
-                , Parser.succeed
-                    (\start val end ->
-                        DescribeString id
-                            { start = start
-                            , end = end
-                            }
-                            val
-                    )
-                    |= Parse.getPosition
-                    |= Parser.getChompedString
-                        (Parser.chompWhile
-                            (\c -> c /= '\n')
-                        )
-                    |= Parse.getPosition
-                )
-        }
-
-
-{-| -}
-multiline : ({ id : Id, range : Range } -> String -> a) -> Block a
-multiline view =
-    Block
-        { kind = Value
-        , expect = ExpectMultiline "REPLACE"
-        , converter =
-            \desc ->
-                case desc of
-                    DescribeMultiline id range str ->
-                        Outcome.Success
-                            (view
-                                { id = id
-                                , range = range
-                                }
-                                str
-                            )
-
-                    _ ->
-                        Outcome.Failure Error.NoMatch
-        , parser =
-            \seed ->
-                let
-                    ( id, newSeed ) =
-                        Id.step seed
-                in
-                ( newSeed
                 , Parser.map
                     (\( pos, str ) ->
-                        DescribeMultiline id pos str
+                        DescribeString id pos str
                     )
                     (Parse.withRange
                         (Parser.getIndent
