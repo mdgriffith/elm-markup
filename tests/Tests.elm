@@ -1,7 +1,4 @@
-module Tests exposing (suite, textModification)
-
--- import Mark.Error
--- import Mark.Default
+module Tests exposing (suite)
 
 import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, int, list, string)
@@ -1137,36 +1134,4 @@ Finally, a sentence
                     Expect.equal (Mark.compile intDoc doc1)
                         (Mark.Success { one = 15, two = -1, three = 2 })
             ]
-        ]
-
-
-textModification =
-    describe "New Text"
-        [ test "insert token" <|
-            \_ ->
-                Expect.equal
-                    [ Mark.New.unstyled "Hel"
-                    , Mark.Internal.Description.ExpectToken "link" []
-                    , Mark.New.unstyled "lo World"
-                    ]
-                    (Mark.New.insertToken 3
-                        "link"
-                        []
-                        [ Mark.New.unstyled "Hello "
-                        , Mark.New.unstyled "World"
-                        ]
-                    )
-        , test "restyle unstyled text" <|
-            \_ ->
-                Expect.equal
-                    [ Mark.New.unstyled "Hel"
-                    , Mark.New.styled Mark.New.bold "lo Wo"
-                    , Mark.New.unstyled "rld"
-                    ]
-                    (Mark.New.restyle (Mark.New.select 3 8)
-                        Mark.New.bold
-                        [ Mark.New.unstyled "Hello "
-                        , Mark.New.unstyled "World"
-                        ]
-                    )
         ]

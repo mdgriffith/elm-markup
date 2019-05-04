@@ -1,28 +1,57 @@
 module Mark.Edit exposing
-    ( bool, int, float, string, oneOf, manyOf
+    ( update, Edit, Error
+    , Selection, Offset
+    , deleteText, insertText
+    , Styles, restyle, addStyles, removeStyles
+    , annotate, verbatim, verbatimWith
+    , replace, delete, insertAt
+    , Id
+    , bool, int, float, string, oneOf, manyOf
     , text, Replacement, Inline
     , Tree(..), Icon(..), tree
-    , update, Error, Edit, replace, delete, insertAt
-    , restyle, addStyles, removeStyles
     )
 
-{-|
+{-| This module allows you to make **edits** to `Parsed`, that intermediate data structure we talked about in [`Mark`](Mark).
+
+This means you can build an editor for your document.
+
+In order to make edits to your document you need an [`Id`](#Id) and an [`Edit`](#Edit).
+
+Once you have those you can [`update`](#update) your document, which can succeed or fail depending on if the eidt was valid.
 
 
-# Editable Blocks
+# Updating `Parsed`
+
+@docs update, Edit, Error
+
+
+# Text Edits
+
+@docs Selection, Offset
+
+@docs deleteText, insertText
+
+@docs Styles, restyle, addStyles, removeStyles
+
+@docs annotate, verbatim, verbatimWith
+
+
+# General Edits
+
+@docs replace, delete, insertAt
+
+
+# Blocks with IDs
+
+These blocks can be used just like the blocks in [`Mark`](Mark) except you also get an `Id`.
+
+@docs Id
 
 @docs bool, int, float, string, oneOf, manyOf
 
 @docs text, Replacement, Inline
 
 @docs Tree, Icon, tree
-
-
-# Making Edits
-
-@docs update, Error, Edit, replace, delete, insertAt
-
-@docs restyle, addStyles, removeStyles
 
 -}
 
@@ -96,6 +125,22 @@ type Annotation
 
 
 {-| -}
+deleteText : Id -> Int -> Int -> Edit
+deleteText id anchor focus =
+    ReplaceSelection id
+        { anchor = anchor
+        , focus = focus
+        }
+        []
+
+
+{-| -}
+insertText : Id -> Int -> List Mark.New.Text -> Edit
+insertText id at els =
+    ReplaceSelection id { anchor = at, focus = at } els
+
+
+{-| -}
 replace : Id -> Mark.New.Block -> Edit
 replace =
     Replace
@@ -120,14 +165,14 @@ annotate id selection name attrs =
 
 
 {-| -}
-makeVerbatim : Id -> Selection -> String -> Edit
-makeVerbatim id selection name =
+verbatim : Id -> Selection -> String -> Edit
+verbatim id selection name =
     Annotate id selection (Verbatim name [])
 
 
 {-| -}
-makeVerbatimWith : Id -> Selection -> String -> List Mark.New.Attribute -> Edit
-makeVerbatimWith id selection name attrs =
+verbatimWith : Id -> Selection -> String -> List Mark.New.Attribute -> Edit
+verbatimWith id selection name attrs =
     Annotate id selection (Verbatim name attrs)
 
 
@@ -1874,7 +1919,7 @@ getWithinNested offset (Nested nest) =
 
 {-| Parse an `Int` block.
 -}
-int : ({ id : Id, range : Range } -> Int -> a) -> Block a
+int : (Id -> Int -> a) -> Block a
 int view =
     Block
         { kind = Value
@@ -1885,12 +1930,7 @@ int view =
                         case details.found of
                             Found rng i ->
                                 Outcome.Success
-                                    (view
-                                        { id = details.id
-                                        , range = rng
-                                        }
-                                        i
-                                    )
+                                    (view details.id i)
 
                             Unexpected unexpected ->
                                 Outcome.Almost (Uncertain ( unexpected, [] ))
@@ -1918,7 +1958,7 @@ int view =
 
 
 {-| -}
-float : ({ id : Id, range : Range } -> ( String, Float ) -> a) -> Block a
+float : (Id -> ( String, Float ) -> a) -> Block a
 float view =
     Block
         { kind = Value
@@ -1929,12 +1969,7 @@ float view =
                         case details.found of
                             Found rng i ->
                                 Outcome.Success
-                                    (view
-                                        { id = details.id
-                                        , range = rng
-                                        }
-                                        i
-                                    )
+                                    (view details.id i)
 
                             Unexpected unexpected ->
                                 Outcome.Almost (Uncertain ( unexpected, [] ))
@@ -2007,7 +2042,7 @@ float view =
 
 
 {-| -}
-string : ({ id : Id, range : Range } -> String -> a) -> Block a
+string : (Id -> String -> a) -> Block a
 string view =
     Block
         { kind = Value
@@ -2017,12 +2052,7 @@ string view =
                 case desc of
                     DescribeString id range str ->
                         Outcome.Success
-                            (view
-                                { id = id
-                                , range = range
-                                }
-                                str
-                            )
+                            (view id str)
 
                     _ ->
                         Outcome.Failure Error.NoMatch
@@ -2051,7 +2081,7 @@ string view =
 
 {-| Parse either `True` or `False`.
 -}
-bool : ({ id : Id, range : Range } -> Bool -> a) -> Block a
+bool : (Id -> Bool -> a) -> Block a
 bool view =
     Block
         { kind = Value
@@ -2063,12 +2093,7 @@ bool view =
                         case details.found of
                             Found rng b ->
                                 Outcome.Success
-                                    (view
-                                        { id = details.id
-                                        , range = rng
-                                        }
-                                        b
-                                    )
+                                    (view details.id b)
 
                             Unexpected unexpected ->
                                 Outcome.Almost (Uncertain ( unexpected, [] ))
@@ -2115,13 +2140,7 @@ bool view =
 
 {-| -}
 oneOf :
-    ({ id : Id
-     , range : Range
-     , options : List Expectation
-     }
-     -> a
-     -> b
-    )
+    (Id -> a -> b)
     -> List (Block a)
     -> Block b
 oneOf view blocks =
@@ -2153,14 +2172,7 @@ oneOf view blocks =
                             Found rng found ->
                                 List.foldl (matchBlock found) (Outcome.Failure Error.NoMatch) blocks
                                     |> mapSuccessAndRecovered
-                                        (\x ->
-                                            view
-                                                { id = details.id
-                                                , options = details.choices
-                                                , range = rng
-                                                }
-                                                x
-                                        )
+                                        (view details.id)
 
                             Unexpected unexpected ->
                                 uncertain unexpected
@@ -2264,15 +2276,9 @@ unexpectedInOneOf expectations =
             )
 
 
-{-| Many blocks that are all at the same indentation level.
--}
+{-| -}
 manyOf :
-    ({ id : Id
-     , range : Range
-     }
-     -> List a
-     -> b
-    )
+    (Id -> List a -> b)
     -> List (Block a)
     -> Block b
 manyOf view blocks =
@@ -2318,10 +2324,7 @@ manyOf view blocks =
                         List.foldl (getRendered many.id many.choices) ( Outcome.Success [], 0 ) many.children
                             |> Tuple.first
                             |> mapSuccessAndRecovered
-                                (view
-                                    { id = many.id
-                                    , range = many.range
-                                    }
+                                (view many.id
                                     << List.reverse
                                 )
 
@@ -2381,34 +2384,11 @@ type Icon
     | Number
 
 
-{-| It can be useful to parse a tree structure. For example, here's a nested list.
-
-    | List
-        - item one
-        - item two
-            - nested item two
-
-            additional text for nested item two
-        - item three
-            - nested item three
-
-In order to parse the above, you could define a block as
-
-    Mark.nested "List"
-        ((Nested nested) ->
-        -- Do something with nested.content and nested.children
-        )
-        text
-
-**Note** the indentation is always a multiple of 4.
-
--}
+{-| -}
 tree :
     String
     ->
-        ({ id : Id
-         , range : Range
-         }
+        (Id
          -> List (Tree item)
          -> result
         )
@@ -2432,11 +2412,7 @@ tree name view contentBlock =
                                 (renderTreeNodeSmall contentBlock)
                             |> Tuple.second
                             |> mapSuccessAndRecovered
-                                (view
-                                    { id = details.id
-                                    , range = details.range
-                                    }
-                                )
+                                (view details.id)
 
                     _ ->
                         Outcome.Failure Error.NoMatch
@@ -2588,7 +2564,7 @@ errorToList ( x, xs ) =
 
 
 {-| -}
-onError : (List { range : Range } -> a) -> Block a -> Block a
+onError : a -> Block a -> Block a
 onError recover (Block details) =
     Block
         { kind = details.kind
@@ -2606,9 +2582,7 @@ onError recover (Block details) =
                     Outcome.Almost (Uncertain errs) ->
                         Outcome.Almost
                             (Recovered errs
-                                (recover
-                                    (List.map (\e -> { range = e.range }) (errorToList errs))
-                                )
+                                recover
                             )
 
                     Outcome.Failure f ->
@@ -2638,6 +2612,21 @@ type alias Styles =
     }
 
 
+
+-- {-|-}
+-- at : Int -> Selection
+-- at i =
+--     { anchor = 1
+--     , focus = i
+--     }
+-- {-|-}
+-- between : Int -> Int -> Selection
+-- between anchor focus =
+--     { anchor = anchor
+--     , focus = focus
+--     }
+
+
 {-| -}
 type alias Selection =
     { anchor : Offset
@@ -2650,23 +2639,14 @@ type alias Offset =
     Int
 
 
-{-| Handling formatted text is a little more involved than may be initially apparent.
+{-| This is the same as `Mark.textWith`, except for each text fragment we're receiving an [`Id`](#Id) which represents the current text block, and a [`Selection`](#Selection), which gives us the selection range of this current fragment.
 
-Text styling can be overlapped such as
-
-    /My italicized sentence can have *bold* words./
-
-In order to render this, the above sentence is chopped up into `Text` fragments that can have multiple styles active.
-
-  - `view` is the function to render an individual fragment.
-  - `inlines` are custom inline blocks.
-  - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
+You'll probably have to do some math, but this should enable you to calculate the selection you'd want for edits like [`restyle`](#restyle)
 
 -}
 text :
     { view :
         { id : Id
-        , range : Range
         , selection : Selection
         }
         -> Styles
@@ -2722,7 +2702,6 @@ type alias Cursor data =
 renderText :
     { view :
         { id : Id
-        , range : Range
         , selection : Selection
         }
         -> Styles
@@ -2752,7 +2731,6 @@ convertTextDescription :
     ->
         { view :
             { id : Id
-            , range : Range
             , selection : Selection
             }
             -> Styles
@@ -2771,7 +2749,6 @@ convertTextDescription id options comp cursor =
                 (Outcome.Success
                     (options.view
                         { id = id
-                        , range = range
                         , selection =
                             { anchor = 0
                             , focus = 0

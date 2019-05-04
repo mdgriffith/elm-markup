@@ -2,10 +2,9 @@ module Mark.New exposing
     ( Block, block, record
     , string, int, float, bool
     , many, tree, Tree(..), Icon(..)
-    , Text, text, unstyled, bold, italicized, strike, styled
+    , Text, text, unstyled, bold, italics, strike, styled
     , Attribute, annotation, token, verbatim, verbatimWith
     , attrString, attrFloat, attrInt
-    , addStyle, insertToken, removeStyle, restyle, select, unstyle
     )
 
 {-|
@@ -16,7 +15,7 @@ module Mark.New exposing
 
 @docs many, tree, Tree, Icon
 
-@docs Text, text, unstyled, bold, italicized, strike, styled
+@docs Text, text, unstyled, bold, italics, strike, styled
 
 @docs Attribute, annotation, token, verbatim, verbatimWith
 
@@ -218,21 +217,21 @@ styled styling str =
 
 
 {-| -}
-italicized : Styles
-italicized =
-    italicStyle
+italics : String -> Text
+italics str =
+    ExpectText (Text italicStyle str)
 
 
 {-| -}
-bold : Styles
-bold =
-    boldStyle
+bold : String -> Text
+bold str =
+    ExpectText (Text boldStyle str)
 
 
 {-| -}
-strike : Styles
-strike =
-    strikeStyle
+strike : String -> Text
+strike str =
+    ExpectText (Text strikeStyle str)
 
 
 {-| -}

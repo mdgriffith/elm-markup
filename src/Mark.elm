@@ -1,87 +1,91 @@
 module Mark exposing
     ( Document
-    , Outcome(..), Partial
-    , compile, parse, Parsed, toString, render
     , document, documentWith
-    , Block, map, verify, onError
+    , Block, block
     , string, int, float, bool
-    , Styles, text, textWith, replacement, balanced, Replacement
-    , Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
-    , block, oneOf, manyOf
+    , Styles, text
+    , textWith
+    , Replacement, commonReplacements, replacement, balanced
+    , Inline, annotation, verbatim, token
+    , attrString, attrFloat, attrInt
+    , oneOf, manyOf
     , record, field, close
     , tree
-    , Error, errorToString, errorToHtml, Theme(..)
-    , ErrorDetails, errorDetails, Range, Position
+    , Outcome(..), Partial
+    , compile, parse, Parsed, toString, render
+    , map, verify, onError
     )
 
-{-| `elm-markup` is about defining what you're expecting in a markup document.
-
-The `elm-markup` language relies heavily on indentation, which is always some multiple of 4 spaces.
-
-These are both useful for making live editors.
-
-The `Description` can be
-
-1.  Edited via the edits messages in `Mark.Description.Edit`.
-
-Parsing is an intensive process. In the best case the Parser has to go through each character in a string to see if it's valid.
-
-This can be an issue if you're trying to make an editor, because it could mean that every keystroke causes the whole document to be parsed!
-
-A solution to this is to parse a `Document` once to an intermediate data structure, in our case that's a `Description`.
+{-|
 
 @docs Document
+
+
+# Building Documents
+
+@docs document, documentWith
+
+@docs Block, block
+
+
+# Primitives
+
+@docs string, int, float, bool
+
+
+# Text
+
+@docs Styles, text
+
+@docs textWith
+
+
+# Text Replacements
+
+@docs Replacement, commonReplacements, replacement, balanced
+
+
+# Text Annotations
+
+Along with basic [`styling`](#text) and [`replacements`](#replacement), we also have a few ways to annotate text.
+
+@docs Inline, annotation, verbatim, token
+
+@docs attrString, attrFloat, attrInt
+
+
+# Higher Level
+
+@docs oneOf, manyOf
+
+
+# Records
+
+@docs record, field, close
+
+
+# Trees
+
+@docs tree
+
+
+# Rendering
 
 @docs Outcome, Partial
 
 @docs compile, parse, Parsed, toString, render
 
 
-## Building Documents
+# Constraining and Recovering Blocks
 
-@docs document, documentWith
-
-@docs Block, map, verify, onError
-
-
-## Primitives
-
-@docs string, int, float, bool
-
-
-## Text
-
-@docs Styles, text, textWith, replacement, balanced, Replacement
-
-@docs Inline, token, annotation, verbatim, attrString, attrFloat, attrInt
-
-
-## Higher Level
-
-@docs block, oneOf, manyOf
-
-
-## Records
-
-@docs record, field, close
-
-
-## Trees
-
-@docs tree
-
-
-## Displaying Errors
-
-@docs Error, errorToString, errorToHtml, Theme
-
-@docs ErrorDetails, errorDetails, Range, Position
+@docs map, verify, onError
 
 -}
 
 import Html
 import Html.Attributes
 import Mark.Edit
+import Mark.Error
 import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error exposing (AstError(..), Context(..), Problem(..))
 import Mark.Internal.Id as Id exposing (..)
@@ -373,7 +377,35 @@ type alias Range =
 {- BLOCKS -}
 
 
-{-| -}
+{-| Create a markup `Document`. You're first goal is to describe a document in terms of the blocks you're expecting.
+
+Here's an overly simple document that captures one block, a Title, and wraps it in some `Html`
+
+    document : Mark.Document (Html msg)
+    document =
+        Mark.document
+            (\title -> Html.main [] [ title ])
+            (Mark.block "Title"
+                (Html.h1 [])
+                Mark.string
+            )
+
+will parse the following markup:
+
+```markup
+|> Title
+    Here is my title!
+```
+
+and ultimately render it as
+
+```html
+<main>
+    <h1>Here is my title!</h1>
+</main>
+```
+
+-}
 document :
     (child -> result)
     -> Block child
@@ -452,7 +484,29 @@ document view child =
         }
 
 
-{-| -}
+{-| Capture some metadata at the start of your document, followed by the body.
+
+    Mark.documentWith
+        (\metadata body ->
+            { metadata = metadata
+            , body = body
+            }
+        )
+        { metadata =
+            Mark.record
+                (\author publishedAt ->
+                    { author = author
+                    , publishedAt = publishedAt
+                    }
+                )
+                |> Mark.field "author" Mark.string
+                |> Mark.field "publishedAt" Mark.string
+                |> Mark.close
+        , body =
+            --...
+        }
+
+-}
 documentWith :
     (metadata -> body -> document)
     ->
@@ -489,8 +543,51 @@ type alias CustomError =
     }
 
 
-{-| -}
-verify : (a -> Result CustomError b) -> Block a -> Block b
+{-| `Mark.verify` lets you put whatever constraints you want on a block.
+
+Let's say you don't just want a `Mark.string`, you actually want a date.
+
+So, you install the [`ISO8601`](https://package.elm-lang.org/packages/rtfeldman/elm-iso8601-date-strings/latest/) and you write something that looks like the follwing:
+
+    import Iso8601
+    import Mark.Error
+
+    date =
+        Mark.verify
+            (\str ->
+                str
+                    |> Iso8601.toTime
+                    |> Result.mapError
+                        (\_ -> illformatedDateMessage)
+            )
+            Mark.string
+
+    illformatedDateMessage =
+        Mark.Error.custom
+            { title = "Bad Date"
+            , message =
+                [ "I was trying to parse a date, but this format looks off.\n\n"
+                , "Dates should be in ISO 8601 format:\n\n"
+                , "YYYY-MM-DDTHH:mm:ss.SSSZ"
+                ]
+            }
+
+Now you can use `date` whever you actually want dates and the error message will be shown if something goes wrong.
+
+More importantly, you now know if a document parses successfully, that all your dates are correctly formatted.
+
+`Mark.verify` is a very nice way to extend your markup however you'd like.
+
+You could use it to
+
+  - add units to numbers
+  - parse a custom format, like [Latex mathematical equations](https://en.wikibooks.org/wiki/LaTeX/Mathematics#Operators)
+  - ensure that numbers are between a range, or are always positive.
+
+How exciting! Seriously, I think this is pretty cool.
+
+-}
+verify : (a -> Result Mark.Error.Custom b) -> Block a -> Block b
 verify fn (Block details) =
     Block
         { kind = details.kind
@@ -531,7 +628,22 @@ verify fn (Block details) =
         }
 
 
-{-| -}
+{-| Parsing any given `Block` can fail.
+
+However sometimes we don't want the _whole document_ to be unable to render just because there was a small error somewhere.
+
+So, we need some way to say "Hey, if you run into an issue, here's a placeholder value to use."
+
+And that's what `Mark.onError` does.
+
+    Mark.int
+        |> Mark.onError 5
+
+This means if we fail to parse an integer (let's say we added a decimal), that this block would still be renderable with a default value of `5`.
+
+**Note** If there _is_ an error that is fixed using `onError`, we'll get a [`Partial`](#Partial) when we render the document. This will let us see the _full rendered document_, but also see the _error_ that actually occurred.
+
+-}
 onError : a -> Block a -> Block a
 onError newValue (Block details) =
     Block
@@ -560,7 +672,22 @@ skipSeed parser seed =
     ( seed, parser )
 
 
-{-| -}
+{-| A named block.
+
+    Mark.block "MyBlock"
+        Html.text
+        Mark.string
+
+Will parse the following and render it using `Html.text`
+
+```markup
+|> MyBlock
+    Here is an unformatted string!
+```
+
+**Note** block names should be capitalized. In the future this may be enforced.
+
+-}
 block : String -> (child -> result) -> Block child -> Block result
 block name view child =
     Block
@@ -976,7 +1103,33 @@ close (ProtoRecord details) =
         }
 
 
-{-| -}
+{-| Parse a record with any number of fields.
+
+    Mark.record "Image"
+        (\src description ->
+            Html.img
+                [ Html.Attributes.src src
+                , Html.Attributes.alt description
+                ]
+                []
+        )
+        |> Mark.field "src" Mark.string
+        |> Mark.field "description" Mark.string
+        |> Mark.close
+
+would parse the following markup:
+
+```markup
+|> Image
+    src = http://placekitten/200/500
+    description = What a cutie.
+```
+
+Fields can be in any order in the markup. Also, by convention field names should be `camelCase`. This might be enforced in the future.
+
+**Note** If you're curious, here are some [design notes as to why the library uses the builder pattern and `Mark.close` to close records.](https://github.com/mdgriffith/elm-markup/blob/master/experiements/FIELDS.md)
+
+-}
 record : String -> data -> Record data
 record name view =
     ProtoRecord
@@ -1076,16 +1229,36 @@ type alias Styles =
     }
 
 
-{-|
+{-| One of the first things that's interesting about a markup language is how to handle _styled text_.
 
-    Mark.text (\( styles, string ) -> Html.span [] [ Html.text string ])
+In `elm-markup` there are only a limited number of special characters for formatting text.
 
-**NOTE** includes `Mark.commonReplacements` by default.
+  - `/italic/` results in _italics_
+  - `*bold*` results in **bold**
+  - and `~strike~` results in ~~strike~~
+
+Here's an example of how to convert markup text into `Html` using `Mark.text`:
+
+    Mark.text
+        (\styles string ->
+            Html.span
+                [ Html.Attributes.classList
+                    [ ( "bold", styles.bold )
+                    , ( "italic", styles.italic )
+                    , ( "strike", styles.strike )
+                    ]
+                ]
+                [ Html.text string ]
+        )
+
+Though you might be thinking that `bold`, `italic`, and `strike` are not nearly enough!
+
+And you're right, this is just to get you started. Your next stop is [`Mark.textWith`](#textWith), which is more involved to use but can represent everything you're used to having in a markup language.
 
 -}
 text :
-    (Styles -> String -> rendered)
-    -> Block (List rendered)
+    (Styles -> String -> text)
+    -> Block (List text)
 text view =
     textWith
         { view = view
@@ -1096,21 +1269,17 @@ text view =
 
 {-| Handling formatted text is a little more involved than may be initially apparent.
 
-Text styling can be overlapped such as
+But `textWith` is where a lot of things come together. Let's check out what these fields actually mean.
 
-    /My italicized sentence can have *bold* words./
-
-In order to render this, the above sentence is chopped up into `Text` fragments that can have multiple styles active.
-
-  - `view` is the function to render an individual fragment.
-  - `inlines` are custom inline blocks.
+  - `view` is the function to render an individual fragment of text. This is mostly what [`Mark.text`](#text) does, so it should seem familiar.
   - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
+  - `inlines` are custom inline blocks. You can use these to render things like links or render emojis :D.
 
 -}
 textWith :
     { view : Styles -> String -> rendered
-    , inlines : List (Inline rendered)
     , replacements : List Replacement
+    , inlines : List (Inline rendered)
     }
     -> Block (List rendered)
 textWith options =
@@ -1154,7 +1323,20 @@ type alias Inline data =
     Desc.Inline data
 
 
-{-| -}
+{-| Lastly, a `token` is like an annotation but has no text that it's attached to, it will just insert a certain value.
+
+Maybe the easiest usecase to think of would be to insert an emoji or an icon:
+
+```markup
+My markup with a {smilie}.
+```
+
+Could be created via
+
+    emoji =
+        Mark.token "smilie" (Html.text 😄)
+
+-}
 token : String -> result -> Inline result
 token name result =
     Inline
@@ -1167,7 +1349,32 @@ token name result =
         }
 
 
-{-| -}
+{-| An annotation is some **text**, a **name**, and zero or more **attributes**.
+
+Here's what it looks like in markup.
+
+```markup
+[ My / styled / text ] { name | attr1 = 5, attr5 = yes }
+```
+
+So, we can make a `link` that looks like this in markup:
+
+```markup
+Here is my [*cool* sentence]{link| url = website.com }.
+```
+
+and rendered in elm-land via:
+
+    link =
+        Mark.annotation "link"
+            (\styles url ->
+                Html.a
+                    [ Html.Attributes.href url ]
+                    (List.map renderStyles styles)
+            )
+            |> Mark.withString "url"
+
+-}
 annotation : String -> (List ( Styles, String ) -> result) -> Inline result
 annotation name result =
     Inline
@@ -1184,7 +1391,23 @@ textToTuple (Desc.Text style str) =
     ( style, str )
 
 
-{-| -}
+{-| A `verbatim` annotation is denoted by backticks(\`) and allows you to capture a literal string.
+
+Just like `token` and `annotation`, a `verbatim` can have a name and attributes attached to it as well via:
+
+```markup
+Here's an inline function: `\you -> Awesome`{elm}.
+```
+
+**Note** A verbatim can be written without a name or attributes. So, the following is potentially valid:
+
+```markup
+Let's take a look at `http://elm-lang.com`.
+```
+
+It will match the first `verbatim` definition listed in `textWith` that has no attributes.
+
+-}
 verbatim : String -> (String -> result) -> Inline result
 verbatim name result =
     Inline
@@ -1323,7 +1546,34 @@ getInlineExpectation (Inline details) =
 {- PRIMITIVE BLOCKS -}
 
 
-{-| -}
+{-| This will capture a multiline string.
+
+For example:
+
+    Mark.block "Poem"
+        (\str -> str)
+        Mark.string
+
+will capture
+
+```markup
+|> Poem
+    Whose woods these are I think I know.
+    His house is in the village though;
+    He will not see me stopping here
+    To watch his woods fill up with snow.
+```
+
+Where `str` in the above function will be
+
+    """Whose woods these are I think I know.
+    His house is in the village though;
+    He will not see me stopping here
+    To watch his woods fill up with snow."""
+
+**Note** If you're looking for styled text, you probably want [`Mark.text`](#text) or [`Mark.textWith`](#textWith) instead.
+
+-}
 string : Block String
 string =
     Block
@@ -1407,7 +1657,7 @@ foundToResult found err =
             Err err
 
 
-{-| Parse either `True` or `False`.
+{-| Capture either `True` or `False`.
 -}
 bool : Block Bool
 bool =
@@ -1470,8 +1720,7 @@ foundToOutcome found =
             Outcome.Almost (Uncertain ( unexpected, [] ))
 
 
-{-| Parse an `Int` block.
--}
+{-| -}
 int : Block Int
 int =
     Block
@@ -2022,52 +2271,17 @@ matchField targetName targetBlock ( name, foundDescription ) existing =
                 existing
 
 
-
--- {-|
---     1.
---         1.1
---     2.
---     Steps =
---     []
---     [ Level [ Item 1. [] ]
---     ]
---     [ Level [ Item 1.1 ]
---     , Level [ Item 1. [] ]
---     ]
---     -- collapse into lower level
---     [ Level [ Item 1. [ Item 1.1 ] ]
---     ]
---     -- add new item
---     [ Level [ Item 2, Item 1. [ Item 1.1 ] ]
---     ]
--- -}
--- collapseLevel : Int -> List (Nested Description) -> List (Nested Description)
--- collapseLevel num levels =
---     if num == 0 then
---         levels
---     else
---         case levels of
---             [] ->
---                 levels
---             topLevel :: lowerItem :: remaining ->
---                 collapseLevel (num - 1) <|
---                     addToChildren lowerItem topLevel
---                         :: remaining
---             _ ->
---                 levels
-
-
 {-| This is a set of common character replacements with some typographical niceties.
 
   - `...` is converted to the ellipses unicode character(`…`).
   - `"` Straight double quotes are [replaced with curly quotes](https://practicaltypography.com/straight-and-curly-quotes.html) (`“`, `”`)
   - `'` Single Quotes are replaced with apostrophes(`’`).
-  - `--` is replaced with an en-dash(`–`).
-  - `---` is replaced with an em-dash(`—`).
+  - `--` is replaced with an [en-dash(`–`)](https://practicaltypography.com/hyphens-and-dashes.html).
+  - `---` is replaced with an [em-dash(`—`)](https://practicaltypography.com/hyphens-and-dashes.html).
   - `<>` also known as "glue", will create a non-breaking space (`&nbsp;`). This is not for manually increasing space (sequential `<>` tokens will only render as one `&nbsp;`), but to signify that the space between two words shouldn't break when wrapping. Like glueing two words together!
   - `//` will change to `/`. Normally `/` starts italic formatting. To escape this, we'd normally do `\/`, though that looks pretty funky. `//` just feels better!
 
-**NOTE** this is included by default in `Mark.text`
+**Note** this is included by default in `Mark.text`
 
 -}
 commonReplacements : List Replacement
@@ -2087,7 +2301,7 @@ commonReplacements =
 
 {-| Replace a string with another string. This can be useful to have shortcuts to unicode characters.
 
-For example, in `Mark.Default`, this is used to replace `...` with the unicode ellipses character: `…`.
+For example, we could use this to replace `...` with the unicode ellipses character: `…`.
 
 -}
 replacement : String -> String -> Replacement
@@ -2095,7 +2309,7 @@ replacement =
     Parse.Replacement
 
 
-{-| A balanced replacement. This is used in `Mark.Default` to do auto-curly quotes.
+{-| A balanced replacement. This is used for replacing parentheses or to do auto-curly quotes.
 
     Mark.balanced
         { start = ( "\"", "“" )
@@ -2110,145 +2324,3 @@ balanced :
     -> Replacement
 balanced =
     Parse.Balanced
-
-
-
-{- TEXT HELPERS -}
-
-
-{-| -}
-errorToString : Error -> String
-errorToString error =
-    case error of
-        Error.Rendered details ->
-            formatErrorString
-                { title = details.title
-                , message = details.message
-                }
-
-        Error.Global global ->
-            formatErrorString
-                { title = global.title
-                , message = global.message
-                }
-
-
-{-| -}
-type alias ErrorDetails =
-    { title : String
-    , message : String
-    , region : Maybe Range
-    }
-
-
-{-| -}
-errorDetails : Error -> ErrorDetails
-errorDetails error =
-    case error of
-        Error.Rendered details ->
-            { title = details.title
-            , message = String.join "" (List.map .text details.message)
-            , region = Just details.region
-            }
-
-        Error.Global global ->
-            { title = global.title
-            , message = String.join "" (List.map .text global.message)
-            , region = Nothing
-            }
-
-
-formatErrorString error =
-    String.toUpper error.title
-        ++ "\n\n"
-        ++ String.join "" (List.map .text error.message)
-
-
-{-| -}
-type Theme
-    = Dark
-    | Light
-
-
-{-| -}
-errorToHtml : Theme -> Error -> List (Html.Html msg)
-errorToHtml theme error =
-    case error of
-        Error.Rendered details ->
-            formatErrorHtml theme
-                { title = details.title
-                , message = details.message
-                }
-
-        Error.Global global ->
-            formatErrorHtml theme
-                { title = global.title
-                , message = global.message
-                }
-
-
-formatErrorHtml theme error =
-    Html.span [ Html.Attributes.style "color" (foregroundClr theme) ]
-        [ Html.text
-            (String.toUpper error.title
-                ++ "\n\n"
-            )
-        ]
-        :: List.map (renderMessageHtml theme) error.message
-
-
-foregroundClr theme =
-    case theme of
-        Dark ->
-            "#eeeeec"
-
-        Light ->
-            "rgba(16,16,16, 0.9)"
-
-
-renderMessageHtml theme message =
-    Html.span
-        (List.filterMap identity
-            [ if message.bold then
-                Just (Html.Attributes.style "font-weight" "bold")
-
-              else
-                Nothing
-            , if message.underline then
-                Just (Html.Attributes.style "text-decoration" "underline")
-
-              else
-                Nothing
-            , case message.color of
-                Nothing ->
-                    Just <| Html.Attributes.style "color" (foregroundClr theme)
-
-                Just "red" ->
-                    Just <| Html.Attributes.style "color" (redClr theme)
-
-                Just "yellow" ->
-                    Just <| Html.Attributes.style "color" (yellowClr theme)
-
-                _ ->
-                    Nothing
-            ]
-        )
-        [ Html.text message.text ]
-
-
-redClr theme =
-    case theme of
-        Dark ->
-            "#ef2929"
-
-        Light ->
-            "#cc0000"
-
-
-yellowClr theme =
-    case theme of
-        Dark ->
-            "#edd400"
-
-        Light ->
-            "#c4a000"

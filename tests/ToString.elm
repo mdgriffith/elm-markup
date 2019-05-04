@@ -12,6 +12,13 @@ import Mark.New
 import Test exposing (..)
 
 
+bold =
+    { italic = False
+    , bold = True
+    , strike = False
+    }
+
+
 create exp =
     .desc <|
         Description.create
@@ -411,7 +418,7 @@ edits =
                                         (Mark.Edit.restyle
                                             (Id.Id [ 1 ])
                                             { anchor = 3, focus = 8 }
-                                            Mark.New.bold
+                                            bold
                                         )
                                         parsed
 
