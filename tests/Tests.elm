@@ -8,6 +8,7 @@ import Mark.Internal.Description
 import Mark.Internal.Error as Error
 import Mark.Internal.Outcome
 import Mark.New
+import Mark.Record as Record
 import Test exposing (..)
 
 
@@ -111,11 +112,11 @@ withMetaData =
     Mark.documentWith
         Tuple.pair
         { metadata =
-            Mark.record "Meta"
+            Record.record "Meta"
                 (\one two -> { one = one, two = two })
-                |> Mark.field "one" Mark.string
-                |> Mark.field "two" Mark.string
-                |> Mark.close
+                |> Record.field "one" Mark.string
+                |> Record.field "two" Mark.string
+                |> Record.toBlock
         , body =
             Mark.manyOf
                 [ text
@@ -141,36 +142,36 @@ textDoc =
 recordDoc =
     Mark.document
         identity
-        (Mark.record "Test"
+        (Record.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            |> Mark.field "one" Mark.string
-            |> Mark.field "two" Mark.string
-            |> Mark.field "three" Mark.string
-            |> Mark.close
+            |> Record.field "one" Mark.string
+            |> Record.field "two" Mark.string
+            |> Record.field "three" Mark.string
+            |> Record.toBlock
         )
 
 
 recordManyTextDoc =
     Mark.document
         identity
-        (Mark.record "Test"
+        (Record.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            |> Mark.field "one" Mark.string
-            |> Mark.field "two" Mark.string
-            |> Mark.field "three" (Mark.manyOf [ text ])
-            |> Mark.close
+            |> Record.field "one" Mark.string
+            |> Record.field "two" Mark.string
+            |> Record.field "three" (Mark.manyOf [ text ])
+            |> Record.toBlock
         )
 
 
 floatDoc =
     Mark.document
         identity
-        (Mark.record "Test"
+        (Record.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            |> Mark.field "one" Mark.float
-            |> Mark.field "two" Mark.float
-            |> Mark.field "three" Mark.float
-            |> Mark.close
+            |> Record.field "one" Mark.float
+            |> Record.field "two" Mark.float
+            |> Record.field "three" Mark.float
+            |> Record.toBlock
         )
 
 
@@ -213,12 +214,12 @@ codeAndTextDoc =
 intDoc =
     Mark.document
         identity
-        (Mark.record "Test"
+        (Record.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            |> Mark.field "one" Mark.int
-            |> Mark.field "two" Mark.int
-            |> Mark.field "three" Mark.int
-            |> Mark.close
+            |> Record.field "one" Mark.int
+            |> Record.field "two" Mark.int
+            |> Record.field "three" Mark.int
+            |> Record.toBlock
         )
 
 
@@ -227,12 +228,12 @@ sectionDoc =
         identity
         (Mark.manyOf
             [ Mark.map (always "text") text
-            , Mark.record "Test"
+            , Record.record "Test"
                 (\one two three -> "record:one,two,three")
-                |> Mark.field "one" Mark.string
-                |> Mark.field "two" Mark.string
-                |> Mark.field "three" Mark.string
-                |> Mark.close
+                |> Record.field "one" Mark.string
+                |> Record.field "two" Mark.string
+                |> Record.field "three" Mark.string
+                |> Record.toBlock
             , Mark.block "Section"
                 (\x -> "section:" ++ String.join "," x)
                 (Mark.manyOf
@@ -419,12 +420,12 @@ sectionWithRecordDoc =
         (Mark.manyOf
             [ text
                 |> Mark.map (always "text")
-            , Mark.record "Test"
+            , Record.record "Test"
                 (\one two three -> "record:one,two,three")
-                |> Mark.field "one" Mark.string
-                |> Mark.field "two" Mark.string
-                |> Mark.field "three" Mark.string
-                |> Mark.close
+                |> Record.field "one" Mark.string
+                |> Record.field "two" Mark.string
+                |> Record.field "three" Mark.string
+                |> Record.toBlock
             , Mark.block "Section"
                 (\x -> "embedded:" ++ String.join "," x)
                 (Mark.manyOf

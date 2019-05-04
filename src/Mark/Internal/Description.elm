@@ -11,6 +11,7 @@ module Mark.Internal.Description exposing
     , Block(..), BlockKind(..), Document(..), Inline(..)
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
+    , Record(..), Range
     )
 
 {-|
@@ -38,6 +39,8 @@ module Mark.Internal.Description exposing
 @docs boldStyle, italicStyle, strikeStyle
 
 @docs resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
+
+@docs Record, Range
 
 -}
 
@@ -129,6 +132,13 @@ Scenarios:
 type Uncertain data
     = Uncertain ( Error.UnexpectedDetails, List Error.UnexpectedDetails )
     | Recovered ( Error.UnexpectedDetails, List Error.UnexpectedDetails ) data
+
+
+
+-- {-| -}
+-- uncertain : Error.UnexpectedDetails -> Outcome.Outcome AstError (Uncertain data) data2
+-- uncertain err =
+--     Outcome.Almost (Uncertain ( err, [] ))
 
 
 {-|
@@ -240,6 +250,31 @@ type Description
     | DescribeString Id Range String
     | DescribeMultiline Id Range String
     | DescribeNothing Id
+
+
+
+{- RECORDS -}
+
+
+{-| -}
+type Record data
+    = ProtoRecord
+        { name : String
+        , expectations : List ( String, Expectation )
+        , fieldConverter :
+            Description
+            -> Outcome Error.AstError (Uncertain (FieldConverter data)) (FieldConverter data)
+        , fields : List FieldParser
+        }
+
+
+type alias FieldConverter data =
+    ( Range, List ( String, Found Description ), data )
+
+
+type alias FieldParser =
+    Id.Seed
+    -> ( Id.Seed, ( String, Parser Error.Context Error.Problem ( String, Found Description ) ) )
 
 
 emptyRange =
