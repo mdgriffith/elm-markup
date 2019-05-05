@@ -128,7 +128,8 @@ dummyRange =
 styleParser =
     Mark.Internal.Parser.styledText
         { inlines =
-            [-- Description.ExpectAnnotation "test"
+            [--Mark.annotation
+             -- Description.ExpectAnnotation "test"
              -- [ Description.ExpectAttrString "attr" "placeholder"
              -- ]
              -- []
@@ -177,167 +178,165 @@ text =
                             }
                         )
                     )
-        , test "basic w/ inline token" <|
-            \_ ->
-                Expect.equal
-                    (Parser.run
-                        (Mark.Internal.Parser.styledText
-                            { inlines =
-                                [-- Description.ExpectToken "test"
-                                 -- []
-                                ]
-                            , replacements = []
-                            }
-                            Id.initialSeed
-                            { column = 1, line = 1, offset = 0 }
-                            emptyStyles
-                            []
-                        )
-                        "Here is my /styled/ *text*.  And a {test}."
-                    )
-                    (Ok
-                        (Description.DescribeText
-                            { id =
-                                Id.Id [ 0 ]
-                            , range = { end = { column = 43, line = 1, offset = 42 }, start = { column = 1, line = 1, offset = 0 } }
-                            , text =
-                                [ Description.Styled
-                                    { end = { column = 12, line = 1, offset = 11 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
-                                    (Description.Text emptyStyles "Here is my ")
-                                , Description.Styled
-                                    { end = { column = 18, line = 1, offset = 17 }
-                                    , start = { column = 12, line = 1, offset = 11 }
-                                    }
-                                    (Description.Text italic "styled")
-                                , Description.Styled
-                                    { end = { column = 19, line = 1, offset = 18 }
-                                    , start = { column = 18, line = 1, offset = 17 }
-                                    }
-                                    (Description.Text emptyStyles " ")
-                                , Description.Styled
-                                    { end = { column = 23, line = 1, offset = 22 }
-                                    , start = { column = 19, line = 1, offset = 18 }
-                                    }
-                                    (Description.Text bold "text")
-                                , Description.Styled
-                                    { end = { column = 32, line = 1, offset = 31 }
-                                    , start = { column = 23, line = 1, offset = 22 }
-                                    }
-                                    (Description.Text emptyStyles ".  And a ")
 
-                                -- , Description.InlineToken
-                                --     { attributes = []
-                                --     , name = "test"
-                                --     , range =
-                                --         { end = { column = 42, line = 1, offset = 41 }
-                                --         , start = { column = 36, line = 1, offset = 35 }
-                                --         }
-                                --     }
-                                , Description.Styled
-                                    { end = { column = 43, line = 1, offset = 42 }
-                                    , start = { column = 42, line = 1, offset = 41 }
-                                    }
-                                    (Description.Text emptyStyles ".")
-                                ]
-                            }
-                        )
-                    )
-        , test "basic w/ inline token w/ string attr" <|
-            \_ ->
-                Expect.equal
-                    (Parser.run
-                        (Mark.Internal.Parser.styledText
-                            { inlines =
-                                [-- Description.ExpectToken "test"
-                                 -- [ Description.ExpectAttrString "attr" "placeholder"
-                                 -- ]
-                                ]
-                            , replacements = []
-                            }
-                            Id.initialSeed
-                            { column = 1, line = 1, offset = 0 }
-                            emptyStyles
-                            []
-                        )
-                        "Here is my /styled/ *text*.  And a {test|attr = my string}."
-                    )
-                    (Ok
-                        (Description.DescribeText
-                            { id = Id.Id [ 0 ]
-                            , range = { end = { column = 60, line = 1, offset = 59 }, start = { column = 1, line = 1, offset = 0 } }
-                            , text =
-                                [ Description.Styled
-                                    { end = { column = 12, line = 1, offset = 11 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
-                                    (Description.Text emptyStyles "Here is my ")
-                                , Description.Styled
-                                    { end = { column = 18, line = 1, offset = 17 }
-                                    , start = { column = 12, line = 1, offset = 11 }
-                                    }
-                                    (Description.Text italic "styled")
-                                , Description.Styled
-                                    { end = { column = 19, line = 1, offset = 18 }
-                                    , start = { column = 18, line = 1, offset = 17 }
-                                    }
-                                    (Description.Text emptyStyles " ")
-                                , Description.Styled
-                                    { end = { column = 23, line = 1, offset = 22 }
-                                    , start = { column = 19, line = 1, offset = 18 }
-                                    }
-                                    (Description.Text bold "text")
-                                , Description.Styled
-                                    { end = { column = 32, line = 1, offset = 31 }
-                                    , start = { column = 23, line = 1, offset = 22 }
-                                    }
-                                    (Description.Text emptyStyles ".  And a ")
-
-                                -- , Description.InlineToken
-                                --     { attributes =
-                                --         [ Description.AttrString
-                                --             { name = "attr"
-                                --             , range =
-                                --                 { end =
-                                --                     { column = 58
-                                --                     , line = 1
-                                --                     , offset = 57
-                                --                     }
-                                --                 , start = { column = 42, line = 1, offset = 41 }
-                                --                 }
-                                --             , value = "my string"
-                                --             }
-                                --         ]
-                                --     , name = "test"
-                                --     , range =
-                                --         { end = { column = 59, line = 1, offset = 58 }
-                                --         , start = { column = 36, line = 1, offset = 35 }
-                                --         }
-                                --     }
-                                , Description.Styled
-                                    { end = { column = 60, line = 1, offset = 59 }
-                                    , start = { column = 59, line = 1, offset = 58 }
-                                    }
-                                    (Description.Text emptyStyles ".")
-                                ]
-                            }
-                        )
-                    )
-        , test "basic w/ inline annotation" <|
-            \_ ->
-                Expect.equal
-                    (Parser.run
-                        styleParser
-                        "Here is my /styled/ *text*.  And a [some text]{test|attr = my string}."
-                    )
-                    basicWithInlineResult
-
-        -- Stack explosion  :/
-        , test "basic w/ inline annotation, style transfer" <|
-            \_ ->
-                Expect.ok
-                    (Parser.run styleParser "Here is my /styled/ *text*.  /And a [some text/]{test|attr = my string}.")
+        -- , test "basic w/ inline token" <|
+        --     \_ ->
+        --         Expect.equal
+        --             (Parser.run
+        --                 (Mark.Internal.Parser.styledText
+        --                     { inlines =
+        --                         [-- Description.ExpectToken "test"
+        --                          -- []
+        --                         ]
+        --                     , replacements = []
+        --                     }
+        --                     Id.initialSeed
+        --                     { column = 1, line = 1, offset = 0 }
+        --                     emptyStyles
+        --                     []
+        --                 )
+        --                 "Here is my /styled/ *text*.  And a {test}."
+        --             )
+        --             (Ok
+        --                 (Description.DescribeText
+        --                     { id =
+        --                         Id.Id [ 0 ]
+        --                     , range = { end = { column = 43, line = 1, offset = 42 }, start = { column = 1, line = 1, offset = 0 } }
+        --                     , text =
+        --                         [ Description.Styled
+        --                             { end = { column = 12, line = 1, offset = 11 }
+        --                             , start = { column = 1, line = 1, offset = 0 }
+        --                             }
+        --                             (Description.Text emptyStyles "Here is my ")
+        --                         , Description.Styled
+        --                             { end = { column = 18, line = 1, offset = 17 }
+        --                             , start = { column = 12, line = 1, offset = 11 }
+        --                             }
+        --                             (Description.Text italic "styled")
+        --                         , Description.Styled
+        --                             { end = { column = 19, line = 1, offset = 18 }
+        --                             , start = { column = 18, line = 1, offset = 17 }
+        --                             }
+        --                             (Description.Text emptyStyles " ")
+        --                         , Description.Styled
+        --                             { end = { column = 23, line = 1, offset = 22 }
+        --                             , start = { column = 19, line = 1, offset = 18 }
+        --                             }
+        --                             (Description.Text bold "text")
+        --                         , Description.Styled
+        --                             { end = { column = 32, line = 1, offset = 31 }
+        --                             , start = { column = 23, line = 1, offset = 22 }
+        --                             }
+        --                             (Description.Text emptyStyles ".  And a ")
+        --                         -- , Description.InlineToken
+        --                         --     { attributes = []
+        --                         --     , name = "test"
+        --                         --     , range =
+        --                         --         { end = { column = 42, line = 1, offset = 41 }
+        --                         --         , start = { column = 36, line = 1, offset = 35 }
+        --                         --         }
+        --                         --     }
+        --                         , Description.Styled
+        --                             { end = { column = 43, line = 1, offset = 42 }
+        --                             , start = { column = 42, line = 1, offset = 41 }
+        --                             }
+        --                             (Description.Text emptyStyles ".")
+        --                         ]
+        --                     }
+        --                 )
+        --             )
+        -- , test "basic w/ inline token w/ string attr" <|
+        --     \_ ->
+        --         Expect.equal
+        --             (Parser.run
+        --                 (Mark.Internal.Parser.styledText
+        --                     { inlines =
+        --                         [-- Description.ExpectToken "test"
+        --                          -- [ Description.ExpectAttrString "attr" "placeholder"
+        --                          -- ]
+        --                         ]
+        --                     , replacements = []
+        --                     }
+        --                     Id.initialSeed
+        --                     { column = 1, line = 1, offset = 0 }
+        --                     emptyStyles
+        --                     []
+        --                 )
+        --                 "Here is my /styled/ *text*.  And a {test|attr = my string}."
+        --             )
+        --             (Ok
+        --                 (Description.DescribeText
+        --                     { id = Id.Id [ 0 ]
+        --                     , range = { end = { column = 60, line = 1, offset = 59 }, start = { column = 1, line = 1, offset = 0 } }
+        --                     , text =
+        --                         [ Description.Styled
+        --                             { end = { column = 12, line = 1, offset = 11 }
+        --                             , start = { column = 1, line = 1, offset = 0 }
+        --                             }
+        --                             (Description.Text emptyStyles "Here is my ")
+        --                         , Description.Styled
+        --                             { end = { column = 18, line = 1, offset = 17 }
+        --                             , start = { column = 12, line = 1, offset = 11 }
+        --                             }
+        --                             (Description.Text italic "styled")
+        --                         , Description.Styled
+        --                             { end = { column = 19, line = 1, offset = 18 }
+        --                             , start = { column = 18, line = 1, offset = 17 }
+        --                             }
+        --                             (Description.Text emptyStyles " ")
+        --                         , Description.Styled
+        --                             { end = { column = 23, line = 1, offset = 22 }
+        --                             , start = { column = 19, line = 1, offset = 18 }
+        --                             }
+        --                             (Description.Text bold "text")
+        --                         , Description.Styled
+        --                             { end = { column = 32, line = 1, offset = 31 }
+        --                             , start = { column = 23, line = 1, offset = 22 }
+        --                             }
+        --                             (Description.Text emptyStyles ".  And a ")
+        --                         -- , Description.InlineToken
+        --                         --     { attributes =
+        --                         --         [ Description.AttrString
+        --                         --             { name = "attr"
+        --                         --             , range =
+        --                         --                 { end =
+        --                         --                     { column = 58
+        --                         --                     , line = 1
+        --                         --                     , offset = 57
+        --                         --                     }
+        --                         --                 , start = { column = 42, line = 1, offset = 41 }
+        --                         --                 }
+        --                         --             , value = "my string"
+        --                         --             }
+        --                         --         ]
+        --                         --     , name = "test"
+        --                         --     , range =
+        --                         --         { end = { column = 59, line = 1, offset = 58 }
+        --                         --         , start = { column = 36, line = 1, offset = 35 }
+        --                         --         }
+        --                         --     }
+        --                         , Description.Styled
+        --                             { end = { column = 60, line = 1, offset = 59 }
+        --                             , start = { column = 59, line = 1, offset = 58 }
+        --                             }
+        --                             (Description.Text emptyStyles ".")
+        --                         ]
+        --                     }
+        --                 )
+        --             )
+        -- , test "basic w/ inline annotation" <|
+        --     \_ ->
+        --         Expect.equal
+        --             (Parser.run
+        --                 styleParser
+        --                 "Here is my /styled/ *text*.  And a [some text]{test|attr = my string}."
+        --             )
+        --             basicWithInlineResult
+        -- -- Stack explosion  :/
+        -- , test "basic w/ inline annotation, style transfer" <|
+        --     \_ ->
+        --         Expect.ok
+        --             (Parser.run styleParser "Here is my /styled/ *text*.  /And a [some text/]{test|attr = my string}.")
         ]
 
 

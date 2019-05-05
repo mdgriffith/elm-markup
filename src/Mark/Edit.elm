@@ -1957,7 +1957,7 @@ int view =
                         Outcome.Failure Error.NoMatch
         , expect = ExpectInteger 0
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( id, newSeed ) =
                         Id.step seed
@@ -1996,7 +1996,7 @@ float view =
                         Outcome.Failure Error.NoMatch
         , expect = ExpectFloat 0
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( id, newSeed ) =
                         Id.step seed
@@ -2035,7 +2035,7 @@ float view =
 --                     _ ->
 --                         Outcome.Failure Error.NoMatch
 --         , parser =
---             \seed ->
+--             \context seed ->
 --                 let
 --                     ( id, newSeed ) =
 --                         Id.step seed
@@ -2075,7 +2075,7 @@ string view =
                     _ ->
                         Outcome.Failure Error.NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( id, newSeed ) =
                         Id.step seed
@@ -2119,7 +2119,7 @@ bool view =
                     _ ->
                         Outcome.Failure Error.NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( id, newSeed ) =
                         Id.step seed
@@ -2198,12 +2198,12 @@ oneOf view blocks =
                     _ ->
                         Outcome.Failure Error.NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     gatherParsers myBlock details =
                         let
                             ( currentSeed, parser ) =
-                                getParser details.seed myBlock
+                                getParser context details.seed myBlock
                         in
                         case blockName myBlock of
                             Just name ->
@@ -2349,7 +2349,7 @@ manyOf view blocks =
                     _ ->
                         Outcome.Failure Error.NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( parentId, newSeed ) =
                         Id.step seed
@@ -2435,7 +2435,7 @@ tree name view contentBlock =
                     _ ->
                         Outcome.Failure Error.NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( newId, newSeed ) =
                         Id.step seed
@@ -2693,7 +2693,7 @@ text options =
                 , inlines = inlineRecords
                 }
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( _, newSeed ) =
                         Id.step seed
@@ -2742,7 +2742,7 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
                     Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
                         Outcome.Almost (Desc.Recovered e rendered)
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( parentId, parentSeed ) =
                         Id.step seed
@@ -2841,7 +2841,7 @@ convertTextDescription id options comp cursor =
                                     almostInlineBlock details.kind
                             in
                             -- TODO: MATCH RECORD TYPE AS WELL
-                            if matchKinds details.kind inlineDetails.kind then
+                            if matchKinds details inlineDetails.kind then
                                 Just inlineDetails
 
                             else
@@ -2879,154 +2879,31 @@ convertTextDescription id options comp cursor =
                         cursor
 
 
-matchKinds selection blockKind =
-    case ( selection, blockKind ) of
-        ( SelectString str, VerbatimNamed _ ) ->
-            True
+matchKinds inline blockKind =
+    let
+        recordName =
+            case inline.record of
+                Record rec ->
+                    Just rec.name
 
-        ( SelectText _, AnnotationNamed _ ) ->
-            True
+                _ ->
+                    Nothing
+    in
+    case ( recordName, inline.kind, blockKind ) of
+        ( Just inlineName, SelectString str, VerbatimNamed vertName ) ->
+            inlineName == vertName
 
-        ( EmptyAnnotation, Named _ ) ->
-            True
+        ( Just inlineName, SelectText _, AnnotationNamed annName ) ->
+            inlineName == annName
+
+        ( Just inlineName, EmptyAnnotation, Named name ) ->
+            inlineName == name
 
         _ ->
             False
 
 
 
--- InlineToken details ->
---     let
---         matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
---             case maybeFound of
---                 Nothing ->
---                     if name == inlineDetails.name && isToken inline then
---                         Just inlineDetails
---                     else
---                         Nothing
---                 _ ->
---                     maybeFound
---         maybeMatched =
---             List.foldl
---                 (matchInlineName details.name)
---                 Nothing
---                 options.inlines
---     in
---     case maybeMatched of
---         Nothing ->
---             uncertain
---                 { range = details.range
---                 , problem =
---                     Error.UnknownInline
---                         (List.map
---                             (Desc.inlineExample
---                                 << getInlineExpectation
---                             )
---                             options.inlines
---                         )
---                 }
---         Just matchedInline ->
---             mergeWith (++)
---                 (matchedInline.converter [] details.attributes)
---                 cursor
--- InlineAnnotation details ->
---     let
---         matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
---             case maybeFound of
---                 Nothing ->
---                     if name == inlineDetails.name && not (isToken inline) then
---                         Just inlineDetails
---                     else
---                         Nothing
---                 _ ->
---                     maybeFound
---         maybeMatched =
---             List.foldl
---                 (matchInlineName details.name)
---                 Nothing
---                 options.inlines
---     in
---     case maybeMatched of
---         Just matchedInline ->
---             mergeWith (++)
---                 (matchedInline.converter
---                     (List.map textToText details.text)
---                     details.attributes
---                 )
---                 cursor
---         Nothing ->
---             uncertain
---                 { range = details.range
---                 , problem =
---                     Error.UnknownInline
---                         (List.map
---                             (Desc.inlineExample
---                                 << getInlineExpectation
---                             )
---                             options.inlines
---                         )
---                 }
--- InlineVerbatim details ->
---     let
---         matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
---             case maybeFound of
---                 Nothing ->
---                     if
---                         isVerbatim inline
---                             && noInlineAttributes inlineDetails.expect
---                             && (name == Nothing)
---                     then
---                         Just inlineDetails
---                     else if isVerbatim inline && name == Just inlineDetails.name then
---                         Just inlineDetails
---                     else
---                         Nothing
---                 _ ->
---                     maybeFound
---         maybeMatched =
---             List.foldl
---                 (matchInlineName details.name)
---                 Nothing
---                 options.inlines
---     in
---     case maybeMatched of
---         Just matchedInline ->
---             mergeWith (++)
---                 (matchedInline.converter
---                     [ textToText details.text ]
---                     details.attributes
---                 )
---                 cursor
---         Nothing ->
---             uncertain
---                 { range = details.range
---                 , problem =
---                     Error.UnknownInline
---                         (List.map
---                             (Desc.inlineExample
---                                 << getInlineExpectation
---                             )
---                             options.inlines
---                         )
---                 }
--- UnexpectedInline details ->
---     uncertain details
--- {-| -}
--- isToken : Inline data -> Bool
--- isToken (Inline inline) =
---     case inline.expect of
---         ExpectToken _ _ ->
---             True
---         _ ->
---             False
--- {-| -}
--- isVerbatim : Inline data -> Bool
--- isVerbatim (Inline inline) =
---     case inline.expect of
---         ExpectVerbatim _ _ _ ->
---             True
---         _ ->
---             False
 {- TEXT EDITING -}
 
 

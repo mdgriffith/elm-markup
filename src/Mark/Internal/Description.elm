@@ -11,7 +11,7 @@ module Mark.Internal.Description exposing
     , Block(..), BlockKind(..), Document(..), Inline(..)
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
-    , Record(..), Range, AnnotationType(..), recordName
+    , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext
     )
 
 {-|
@@ -40,7 +40,7 @@ module Mark.Internal.Description exposing
 
 @docs resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
 
-@docs Record, Range, AnnotationType, recordName
+@docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext
 
 -}
 
@@ -177,8 +177,13 @@ type Block data
         { kind : BlockKind
         , converter : Description -> Outcome Error.AstError (Uncertain data) data
         , expect : Expectation
-        , parser : Id.Seed -> ( Id.Seed, Parser Error.Context Error.Problem Description )
+        , parser : ParseContext -> Id.Seed -> ( Id.Seed, Parser Error.Context Error.Problem Description )
         }
+
+
+type ParseContext
+    = ParseBlock
+    | ParseInline
 
 
 type BlockKind
@@ -186,6 +191,21 @@ type BlockKind
     | Named String
     | VerbatimNamed String
     | AnnotationNamed String
+
+
+blockKindToContext kind =
+    case kind of
+        Value ->
+            ParseBlock
+
+        Named name ->
+            ParseInline
+
+        VerbatimNamed name ->
+            ParseInline
+
+        AnnotationNamed name ->
+            ParseInline
 
 
 recordName : Description -> Maybe String
@@ -658,13 +678,13 @@ blockName (Block details) =
             Just name
 
 
-getParser : Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
-getParser seed (Block details) =
+getParser : ParseContext -> Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
+getParser context seed (Block details) =
     case details.kind of
         Named name ->
             let
                 ( newSeed, blockParser ) =
-                    details.parser seed
+                    details.parser context seed
             in
             ( newSeed
             , Parser.succeed identity
@@ -674,12 +694,12 @@ getParser seed (Block details) =
             )
 
         Value ->
-            details.parser seed
+            details.parser context seed
 
         VerbatimNamed name ->
             let
                 ( newSeed, blockParser ) =
-                    details.parser seed
+                    details.parser context seed
             in
             ( newSeed
             , blockParser
@@ -688,26 +708,27 @@ getParser seed (Block details) =
         AnnotationNamed name ->
             let
                 ( newSeed, blockParser ) =
-                    details.parser seed
+                    details.parser context seed
             in
             ( newSeed
             , blockParser
             )
 
 
-getParserNoBar seed (Block details) =
+getParserNoBar : ParseContext -> Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
+getParserNoBar context seed (Block details) =
     case details.kind of
         Named name ->
-            details.parser seed
+            details.parser context seed
 
         Value ->
-            details.parser seed
+            details.parser context seed
 
         VerbatimNamed name ->
-            details.parser seed
+            details.parser context seed
 
         AnnotationNamed name ->
-            details.parser seed
+            details.parser context seed
 
 
 emptyStyles =
@@ -748,31 +769,39 @@ strikeStyle =
 inlineExample : AnnotationType -> Expectation -> String
 inlineExample kind inline =
     let
-        inlineAttrExamples attrs =
-            attrs
-                |> List.map renderAttr
-                |> String.join ", "
+        containerAsString =
+            case inline of
+                ExpectRecord name [] ->
+                    "{" ++ name ++ "}"
 
-        renderAttr attr =
-            case attr of
-                ExpectAttrString name _ ->
-                    name ++ " = A String"
+                ExpectRecord name fields ->
+                    "{"
+                        ++ name
+                        ++ "| "
+                        ++ String.join ", " (List.map renderField fields)
+                        ++ " }"
 
-                ExpectAttrFloat name _ ->
-                    name ++ " = A Float"
+                _ ->
+                    ""
 
-                ExpectAttrInt name _ ->
-                    name ++ " = An Int"
+        renderField ( name, block ) =
+            name ++ " = " ++ "value"
     in
     case kind of
         EmptyAnnotation ->
-            ""
+            containerAsString
 
-        SelectText t ->
-            ""
+        SelectText txts ->
+            let
+                ( newStyles, renderedText ) =
+                    txts
+                        |> List.foldl gatherText ( emptyStyles, "" )
+                        |> gatherText (Text emptyStyles "")
+            in
+            "[" ++ renderedText ++ "]" ++ containerAsString
 
         SelectString str ->
-            "`" ++ str ++ "`"
+            "`" ++ str ++ "`" ++ containerAsString
 
 
 match description exp =
@@ -1541,11 +1570,6 @@ inlineDescToString inlineDesc =
 
         AttrInt { name, range, value } ->
             name ++ " = " ++ String.fromInt value
-
-
-
--- DescribeInlineText range txts ->
---     String.join "" (List.map textToString txts)
 
 
 writeTextDescription desc cursorAndStyles =

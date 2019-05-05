@@ -268,12 +268,12 @@ indentationBetween lower higher =
         )
 
 
-oneOf blocks expectations seed =
+oneOf blocks expectations context seed =
     let
         gatherParsers myBlock details =
             let
                 ( currentSeed, parser ) =
-                    getParserNoBar details.seed myBlock
+                    getParserNoBar context details.seed myBlock
             in
             case blockName myBlock of
                 Just name ->
@@ -348,12 +348,12 @@ unexpectedInOneOf expectations =
         )
 
 
-getFailableBlock seed (Block details) =
+getFailableBlock context seed (Block details) =
     case details.kind of
         Named name ->
             let
                 ( newSeed, blockParser ) =
-                    details.parser seed
+                    details.parser context seed
             in
             ( newSeed
             , failableBlocks
@@ -365,13 +365,13 @@ getFailableBlock seed (Block details) =
             )
 
         Value ->
-            Tuple.mapSecond (Parser.map Ok) (details.parser seed)
+            Tuple.mapSecond (Parser.map Ok) (details.parser context seed)
 
         VerbatimNamed name ->
-            Tuple.mapSecond (Parser.map Ok) (details.parser seed)
+            Tuple.mapSecond (Parser.map Ok) (details.parser ParseInline seed)
 
         AnnotationNamed name ->
-            Tuple.mapSecond (Parser.map Ok) (details.parser seed)
+            Tuple.mapSecond (Parser.map Ok) (details.parser ParseInline seed)
 
 
 {-| This parser will either:
@@ -531,217 +531,87 @@ styledTextLoop options meaningful untilStrings found =
         -- Parse Selection
         -- depending on selection type, capture attributes if applicable.
         , Parser.succeed
-            (\start verbatimString maybeAttributes end ->
+            (\start ( maybeNewCursor, newInlineBlock ) end ->
                 let
-                    fieldRecord =
-                        case maybeAttributes of
-                            -- TODO: THESE NULL STATES SHOULD BE REMOVED
+                    resetCursor curs =
+                        case maybeNewCursor of
                             Nothing ->
-                                DescribeNothing (Tuple.first (Id.step Id.initialSeed))
+                                curs
 
-                            Just (Err errors) ->
-                                DescribeNothing (Tuple.first (Id.step Id.initialSeed))
-
-                            Just (Ok foundFields) ->
-                                foundFields
-
-                    note =
-                        InlineBlock
-                            { kind = SelectString verbatimString
-                            , range =
-                                { start = start
-                                , end = end
-                                }
-                            , record = fieldRecord
-                            }
+                            Just (TextCursor newCursor) ->
+                                curs
+                                    |> resetBalancedReplacements newCursor.balancedReplacements
+                                    |> resetTextWith newCursor.current
                 in
                 found
                     |> commitText
-                    |> addToTextCursor note
+                    |> addToTextCursor
+                        (newInlineBlock
+                            { start = start
+                            , end = end
+                            }
+                        )
+                    |> resetCursor
                     |> advanceTo end
                     |> Parser.Loop
             )
             |= getPosition
-            |. Parser.token (Parser.Token "`" (Expecting "`"))
-            |= Parser.getChompedString
-                (Parser.chompWhile (\c -> c /= '`' && c /= '\n'))
-            |. Parser.chompWhile (\c -> c == '`')
-            |= Parser.oneOf
-                [ Parser.map Just
-                    (attrContainer
-                        { recordBlocks = List.filterMap onlyVerbatim options.inlines
-                        , onError = Tolerant.skip
-                        }
-                    )
-                , Parser.succeed Nothing
-                ]
-            |= getPosition
+            |= (textSelection options.replacements found
+                    |> Parser.andThen
+                        (\( maybeNewCursor, selection ) ->
+                            Parser.map
+                                (\attrResult ->
+                                    ( maybeNewCursor
+                                    , \range ->
+                                        case attrResult of
+                                            Err [ InlineStart ] ->
+                                                case selection of
+                                                    SelectString str ->
+                                                        Styled range (Text (getCurrentStyle found) str)
 
-        -- `verbatim`{label| attr = maybe this is here}
-        -- , Parser.succeed
-        --     (\start verbatimString maybeToken end ->
-        --         case maybeToken of
-        --             Nothing ->
-        -- let
-        --     note =
-        --         InlineVerbatim
-        --             { name = Nothing
-        --             , text = Text emptyStyles verbatimString
-        --             , range =
-        --                 { start = start
-        --                 , end = end
-        --                 }
-        --             , attributes = []
-        --             }
-        -- in
-        -- found
-        --     |> commitText
-        --     |> addToTextCursor note
-        --     |> advanceTo end
-        --     |> Parser.Loop
-        --             Just (Err errors) ->
-        --                 let
-        --                     note =
-        --                         InlineVerbatim
-        --                             { name = Nothing
-        --                             , text = Text emptyStyles verbatimString
-        --                             , range =
-        --                                 { start = start
-        --                                 , end = end
-        --                                 }
-        --                             , attributes = []
-        --                             }
-        --                 in
-        --                 found
-        --                     |> commitText
-        --                     |> addToTextCursor note
-        --                     |> advanceTo end
-        --                     |> Parser.Loop
-        --             Just (Ok ( name, attrs )) ->
-        --                 let
-        --                     note =
-        --                         InlineVerbatim
-        --                             { name = Just name
-        --                             , text = Text emptyStyles verbatimString
-        --                             , range =
-        --                                 { start = start
-        --                                 , end = end
-        --                                 }
-        --                             , attributes = attrs
-        --                             }
-        --                 in
-        --                 found
-        --                     |> commitText
-        --                     |> addToTextCursor note
-        --                     |> advanceTo end
-        --                     |> Parser.Loop
-        --     )
-        --     |= getPosition
-        --     |. Parser.token (Parser.Token "`" (Expecting "`"))
-        --     |= Parser.getChompedString
-        --         (Parser.chompWhile (\c -> c /= '`' && c /= '\n'))
-        --     |. Parser.chompWhile (\c -> c == '`')
-        --     |= Parser.oneOf
-        --         [ Parser.map Just
-        --             (attrContainer
-        --                 { attributes = List.filterMap onlyVerbatim options.inlines
-        --                 , onError = Tolerant.skip
-        --                 }
-        --             )
-        --         , Parser.succeed Nothing
-        --         ]
-        --     |= getPosition
-        -- -- {token| withAttributes = True}
-        -- , Parser.succeed
-        --     (\tokenResult ->
-        --         case tokenResult of
-        --             Err details ->
-        --                 let
-        --                     er =
-        --                         UnexpectedInline
-        --                             { range = details.range
-        --                             , problem =
-        --                                 Error.UnknownInline
-        --                                     (options.inlines
-        --                                         |> List.map inlineExample
-        --                                     )
-        --                             -- TODO: FIX THIS
-        --                             --
-        --                             -- TODO: This is the wrong error
-        --                             -- It could be:
-        --                             --   unexpected attributes
-        --                             --   missing control characters
-        --                             }
-        --                 in
-        --                 found
-        --                     |> commitText
-        --                     |> addToTextCursor er
-        --                     |> advanceTo details.range.end
-        --                     |> Parser.Loop
-        --             Ok details ->
-        --                 let
-        --                     note =
-        --                         InlineToken
-        --                             { name = Tuple.first details.value
-        --                             , range = details.range
-        --                             , attributes = Tuple.second details.value
-        --                             }
-        --                 in
-        --                 found
-        --                     |> commitText
-        --                     |> addToTextCursor note
-        --                     |> advanceTo details.range.end
-        --                     |> Parser.Loop
-        --     )
-        --     |= withRangeResult
-        --         (attrContainer
-        --             { attributes = List.filterMap onlyTokens options.inlines
-        --             , onError = Tolerant.skip
-        --             }
-        --         )
-        -- -- [Some styled /text/]{token| withAttribtues = True}
-        -- , Parser.succeed
-        --     (\result ->
-        --         case result of
-        --             Ok details ->
-        --                 let
-        --                     ( noteText, TextCursor childCursor, ( name, attrs ) ) =
-        --                         details.value
-        --                     note =
-        --                         InlineAnnotation
-        --                             { name = name
-        --                             , text = noteText
-        --                             , range = details.range
-        --                             , attributes = attrs
-        --                             }
-        --                 in
-        --                 found
-        --                     |> commitText
-        --                     |> addToTextCursor note
-        --                     |> resetBalancedReplacements childCursor.balancedReplacements
-        --                     |> resetTextWith childCursor.current
-        --                     |> advanceTo details.range.end
-        --                     |> Parser.Loop
-        --             Err errs ->
-        --                 let
-        --                     er =
-        --                         UnexpectedInline
-        --                             { range = errs.range
-        --                             , problem =
-        --                                 Error.UnknownInline
-        --                                     (options.inlines
-        --                                         |> List.map inlineExample
-        --                                     )
-        --                             }
-        --                 in
-        --                 found
-        --                     |> commitText
-        --                     |> addToTextCursor er
-        --                     |> advanceTo errs.range.end
-        --                     |> Parser.Loop
-        --     )
-        --     |= withRangeResult
-        --         (inlineAnnotation options found)
+                                                    _ ->
+                                                        -- TODO: some sort of real error happend
+                                                        InlineBlock
+                                                            { kind = selection
+                                                            , range =
+                                                                range
+                                                            , record = DescribeNothing (Tuple.first (Id.step Id.initialSeed))
+                                                            }
+
+                                            Err errs ->
+                                                -- TODO: some sort of real error happend
+                                                InlineBlock
+                                                    { kind = selection
+                                                    , range =
+                                                        range
+                                                    , record = DescribeNothing (Tuple.first (Id.step Id.initialSeed))
+                                                    }
+
+                                            Ok foundFields ->
+                                                InlineBlock
+                                                    { kind = selection
+                                                    , range =
+                                                        range
+                                                    , record = foundFields
+                                                    }
+                                    )
+                                )
+                                (attrContainer
+                                    (case selection of
+                                        SelectString _ ->
+                                            List.filterMap onlyVerbatim options.inlines
+
+                                        SelectText _ ->
+                                            List.filterMap onlyAnnotation options.inlines
+
+                                        EmptyAnnotation ->
+                                            -- TODO: parse only normal records
+                                            []
+                                    )
+                                )
+                        )
+               )
+            |= getPosition
         , -- chomp until a meaningful character
           Parser.succeed
             (\( new, final ) ->
@@ -824,45 +694,28 @@ almostReplacement replacements existing =
     List.map captureChar allFirstChars
 
 
-
--- inlineAnnotation : () -> () -> Tolerant.Parser Context Problem ( List Text, TextCursor, ( String, List InlineAttribute ) )
--- inlineAnnotation options found =
---     Tolerant.succeed
---         (\( text, cursor ) maybeNameAndAttrs ->
---             ( text, cursor, maybeNameAndAttrs )
---         )
---         |> Tolerant.ignore
---             (Tolerant.token
---                 { match = "["
---                 , problem = InlineStart
---                 , onError = Tolerant.skip
---                 }
---             )
---         |> Tolerant.keep
---             (Tolerant.try
---                 (Parser.loop
---                     (textCursor (getCurrentStyles found)
---                         { offset = 0
---                         , line = 1
---                         , column = 1
---                         }
---                     )
---                     (simpleStyledTextTill [ '\n', ']' ] options.replacements)
---                 )
---             )
---         |> Tolerant.ignore
---             (Tolerant.token
---                 { match = "]"
---                 , problem = InlineEnd
---                 , onError = Tolerant.fastForwardTo [ '}', '\n' ]
---                 }
---             )
---         |> Tolerant.keep
---             (attrContainer
---                 { attributes = List.filterMap onlyAnnotations options.inlines
---                 , onError = Tolerant.fastForwardTo [ '}', '\n' ]
---                 }
---             )
+textSelection replacements found =
+    Parser.oneOf
+        [ Parser.succeed (\str -> ( Nothing, SelectString str ))
+            |. Parser.token (Parser.Token "`" (Expecting "`"))
+            |= Parser.getChompedString
+                (Parser.chompWhile (\c -> c /= '`' && c /= '\n'))
+            |. Parser.chompWhile (\c -> c == '`')
+        , Parser.succeed
+            (\( txts, cursor ) ->
+                ( Just cursor, SelectText txts )
+            )
+            |. Parser.token (Parser.Token "[" (Expecting "["))
+            |= Parser.loop
+                (textCursor (getCurrentStyles found)
+                    { offset = 0
+                    , line = 1
+                    , column = 1
+                    }
+                )
+                (simpleStyledTextTill [ '\n', ']' ] replacements)
+            |. Parser.token (Parser.Token "]" (Expecting "]"))
+        ]
 
 
 simpleStyledTextTill :
@@ -948,26 +801,22 @@ If the attributes aren't required (i.e. in a oneOf), then we want to skip to all
 If they are required, then we can fastforward to a specific condition and continue on.
 
 -}
-attrContainer :
-    { recordBlocks : List (Block a)
-    , onError : Tolerant.OnError
-    }
-    -> Tolerant.Parser Context Problem Description
-attrContainer config =
+attrContainer : List (Block a) -> Tolerant.Parser Context Problem Description
+attrContainer recordBlocks =
     Tolerant.succeed identity
         |> Tolerant.ignore
             (Tolerant.token
                 { match = "{"
                 , problem = InlineStart
-                , onError = config.onError
+                , onError = Tolerant.stopWith InlineStart
                 }
             )
         |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
         |> Tolerant.keep
-            (Tolerant.oneOf InlineStart
-                (config.recordBlocks
+            (Tolerant.oneOf (ExpectingInlineName "")
+                (recordBlocks
                     -- NOTE: We're throwing away IDs here, maybe we dont want to do that?
-                    |> List.map (Tolerant.try << Tuple.second << getParser Id.initialSeed)
+                    |> List.map (Tolerant.try << Tuple.second << getParser ParseInline Id.initialSeed)
                 )
             )
         |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
@@ -1328,6 +1177,12 @@ commitText ((TextCursor cursor) as existingTextCursor) =
                 , current = Text styles ""
                 , balancedReplacements = cursor.balancedReplacements
                 }
+
+
+getCurrentStyle (TextCursor cursor) =
+    case cursor.current of
+        Text s _ ->
+            s
 
 
 addToTextCursor new (TextCursor cursor) =
@@ -1832,7 +1687,7 @@ makeBlocksParser blocks seed =
             let
                 -- We don't care about the new seed because that's handled by the loop.
                 ( _, parser ) =
-                    getParserNoBar seed myBlock
+                    getParserNoBar ParseBlock seed myBlock
             in
             case blockName myBlock of
                 Just name ->
@@ -1935,7 +1790,7 @@ indentedBlocksOrNewlines seed item ( indentation, existing ) =
                     (\newIndent ->
                         let
                             ( itemSeed, itemParser ) =
-                                getParser seed item
+                                getParser ParseBlock seed item
                         in
                         -- If the indent has changed, then the delimiter is required
                         Parser.withIndent newIndent <|

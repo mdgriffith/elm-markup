@@ -399,7 +399,7 @@ document view child =
             Id.initialSeed
 
         ( currentSeed, blockParser ) =
-            Parse.getFailableBlock seed child
+            Parse.getFailableBlock Desc.ParseBlock seed child
     in
     Document
         { expect = expectation
@@ -695,10 +695,10 @@ block name view child =
                     _ ->
                         Outcome.Failure NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( newSeed, childParser ) =
-                        getParser seed child
+                        getParser context seed child
 
                     ( parentId, finalSeed ) =
                         Id.step newSeed
@@ -808,16 +808,16 @@ startWith fn startBlock endBlock =
                     _ ->
                         Outcome.Failure NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( parentId, newSeed ) =
                         Id.step seed
 
                     ( startSeed, startParser ) =
-                        getParser newSeed startBlock
+                        getParser ParseBlock newSeed startBlock
 
                     ( remainSeed, endParser ) =
-                        getParser startSeed endBlock
+                        getParser ParseBlock startSeed endBlock
                 in
                 ( remainSeed
                 , Parser.succeed
@@ -945,7 +945,7 @@ manyOf blocks =
                     _ ->
                         Outcome.Failure NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( parentId, newSeed ) =
                         Id.step seed
@@ -1388,23 +1388,41 @@ string =
                     _ ->
                         Outcome.Failure NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( id, newSeed ) =
                         Id.step seed
                 in
                 ( newSeed
-                , Parser.map
-                    (\( pos, str ) ->
-                        DescribeString id pos str
-                    )
-                    (Parse.withRange
-                        (Parse.withIndent
-                            (\indentation ->
-                                Parser.loop "" (Parse.indentedString indentation)
+                , case context of
+                    ParseInline ->
+                        Parser.succeed
+                            (\start str end ->
+                                DescribeString id
+                                    { start = start
+                                    , end = end
+                                    }
+                                    (String.trim str)
                             )
-                        )
-                    )
+                            |= Parse.getPosition
+                            |= Parser.getChompedString
+                                (Parser.chompWhile
+                                    (\c -> c /= '\n' && c /= ',' && c /= '}')
+                                )
+                            |= Parse.getPosition
+
+                    ParseBlock ->
+                        Parser.map
+                            (\( pos, str ) ->
+                                DescribeString id pos str
+                            )
+                            (Parse.withRange
+                                (Parse.withIndent
+                                    (\indentation ->
+                                        Parser.loop "" (Parse.indentedString indentation)
+                                    )
+                                )
+                            )
                 )
         }
 
@@ -1424,26 +1442,26 @@ string =
 --                     _ ->
 --                         Outcome.Failure NoMatch
 --         , parser =
---             \seed ->
+--             \context seed ->
 --                 let
 --                     ( id, newSeed ) =
 --                         Id.step seed
 --                 in
 --                 ( newSeed
---                 , Parser.succeed
---                     (\start val end ->
---                         DescribeString id
---                             { start = start
---                             , end = end
---                             }
---                             val
---                     )
---                     |= Parse.getPosition
---                     |= Parser.getChompedString
---                         (Parser.chompWhile
---                             (\c -> c /= '\n')
---                         )
---                     |= Parse.getPosition
+-- , Parser.succeed
+--     (\start val end ->
+--         DescribeString id
+--             { start = start
+--             , end = end
+--             }
+--             val
+--     )
+-- |= Parse.getPosition
+-- |= Parser.getChompedString
+--     (Parser.chompWhile
+--         (\c -> c /= '\n')
+--     )
+-- |= Parse.getPosition
 --                 )
 --         }
 
@@ -1473,7 +1491,7 @@ bool =
                     _ ->
                         Outcome.Failure NoMatch
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( id, newSeed ) =
                         Id.step seed
@@ -1535,7 +1553,7 @@ int =
                         Outcome.Failure NoMatch
         , expect = ExpectInteger 0
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( id, newSeed ) =
                         Id.step seed
@@ -1569,7 +1587,7 @@ float =
                         Outcome.Failure NoMatch
         , expect = ExpectFloat 0
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( id, newSeed ) =
                         Id.step seed

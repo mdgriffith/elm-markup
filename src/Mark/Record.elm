@@ -134,7 +134,7 @@ field name value (Desc.ProtoRecord details) =
                                     , range = pos
                                     }
         , fields =
-            fieldParser newField :: details.fields
+            fieldParser (Desc.blockKindToContext details.blockKind) newField :: details.fields
         }
 
 
@@ -205,7 +205,7 @@ toBlock (Desc.ProtoRecord details) =
                     Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
                         Outcome.Almost (Desc.Recovered e rendered)
         , parser =
-            \seed ->
+            \context seed ->
                 let
                     ( parentId, parentSeed ) =
                         Id.step seed
@@ -234,11 +234,11 @@ fieldOld name child =
     Field name child
 
 
-fieldParser : Field value -> Id.Seed -> ( Id.Seed, ( String, Parser Context Problem ( String, Desc.Found Desc.Description ) ) )
-fieldParser (Field name myBlock) seed =
+fieldParser : Desc.ParseContext -> Field value -> Id.Seed -> ( Id.Seed, ( String, Parser Context Problem ( String, Desc.Found Desc.Description ) ) )
+fieldParser context (Field name myBlock) seed =
     let
         ( newSeed, blockParser ) =
-            Desc.getParser seed myBlock
+            Desc.getParser context seed myBlock
     in
     ( newSeed
     , ( name

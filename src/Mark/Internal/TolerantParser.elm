@@ -1,6 +1,6 @@
 module Mark.Internal.TolerantParser exposing
     ( Parser, try
-    , Token, token, keyword, symbol, OnError(..), skip, fastForwardTo
+    , Token, token, keyword, symbol, OnError(..), skip, fastForwardTo, stopWith
     , succeed, ignore, keep
     , oneOf
     , chompWhile
@@ -11,7 +11,7 @@ module Mark.Internal.TolerantParser exposing
 
 @docs Parser, try
 
-@docs Token, token, keyword, symbol, OnError, skip, fastForwardTo
+@docs Token, token, keyword, symbol, OnError, skip, fastForwardTo, stopWith
 
 @docs succeed, ignore, keep
 
@@ -126,9 +126,10 @@ ignore ignorePls keepPls =
 {- Basic Tokens -}
 
 
-type OnError
+type OnError error
     = FastForwardTo (List Char)
     | Skip
+    | StopWith error
 
 
 fastForwardTo =
@@ -139,10 +140,14 @@ skip =
     Skip
 
 
+stopWith err =
+    StopWith err
+
+
 type alias Token problem =
     { match : String
     , problem : problem
-    , onError : OnError
+    , onError : OnError problem
     }
 
 
@@ -175,6 +180,12 @@ runToken details tokenParser =
 
         Skip ->
             Parser.map Ok tokenParser
+
+        StopWith err ->
+            Parser.oneOf
+                [ Parser.map Ok tokenParser
+                , Parser.succeed (Err [ err ])
+                ]
 
 
 till : List Char -> problem -> Parser.Parser context problem ()
