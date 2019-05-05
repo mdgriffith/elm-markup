@@ -3,8 +3,8 @@ module Mark.New exposing
     , string, int, float, bool
     , many, tree, Tree(..), Icon(..)
     , Text, text, unstyled, bold, italics, strike, styled
-    , Attribute, annotation, token, verbatim, verbatimWith
-    , attrString, attrFloat, attrInt
+    -- , attrString, attrFloat, attrInt
+    -- , Attribute, annotation, token, verbatim, verbatimWith
     )
 
 {-|
@@ -16,10 +16,6 @@ module Mark.New exposing
 @docs many, tree, Tree, Icon
 
 @docs Text, text, unstyled, bold, italics, strike, styled
-
-@docs Attribute, annotation, token, verbatim, verbatimWith
-
-@docs attrString, attrFloat, attrInt
 
 -}
 
@@ -146,60 +142,44 @@ text =
     ExpectTextBlock
 
 
-{-| -}
-type alias Attribute =
-    AttrExpectation
 
-
-{-| -}
-attrString : String -> String -> Attribute
-attrString =
-    ExpectAttrString
-
-
-{-| -}
-attrFloat : String -> Float -> Attribute
-attrFloat name fl =
-    ExpectAttrFloat name ( String.fromFloat fl, fl )
-
-
-{-| -}
-attrInt : String -> Int -> Attribute
-attrInt =
-    ExpectAttrInt
-
-
-{-| -}
-annotation : List Text -> String -> List Attribute -> Text
-annotation content name attrs =
-    ExpectAnnotation name attrs (List.filterMap onlyText content)
-
-
-onlyText txt =
-    case txt of
-        ExpectText t ->
-            Just t
-
-        _ ->
-            Nothing
-
-
-{-| -}
-token : String -> List Attribute -> Text
-token =
-    ExpectToken
-
-
-{-| -}
-verbatim : String -> Text
-verbatim =
-    ExpectVerbatim "" []
-
-
-{-| -}
-verbatimWith : String -> String -> List Attribute -> Text
-verbatimWith content name attributes =
-    ExpectVerbatim name attributes content
+-- {-| -}
+-- type alias Attribute =
+--     AttrExpectation
+-- {-| -}
+-- attrString : String -> String -> Attribute
+-- attrString =
+--     ExpectAttrString
+-- {-| -}
+-- attrFloat : String -> Float -> Attribute
+-- attrFloat name fl =
+--     ExpectAttrFloat name ( String.fromFloat fl, fl )
+-- {-| -}
+-- attrInt : String -> Int -> Attribute
+-- attrInt =
+--     ExpectAttrInt
+-- {-| -}
+-- annotation : List Text -> String -> List Attribute -> Text
+-- annotation content name attrs =
+--     ExpectAnnotation name attrs (List.filterMap onlyText content)
+-- onlyText txt =
+--     case txt of
+--         ExpectText t ->
+--             Just t
+--         _ ->
+--             Nothing
+-- {-| -}
+-- token : String -> List Attribute -> Text
+-- token =
+--     ExpectToken
+-- {-| -}
+-- verbatim : String -> Text
+-- verbatim =
+--     ExpectVerbatim "" []
+-- {-| -}
+-- verbatimWith : String -> String -> List Attribute -> Text
+-- verbatimWith content name attributes =
+--     ExpectVerbatim name attributes content
 
 
 {-| -}

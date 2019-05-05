@@ -128,10 +128,10 @@ dummyRange =
 styleParser =
     Mark.Internal.Parser.styledText
         { inlines =
-            [ Description.ExpectAnnotation "test"
-                [ Description.ExpectAttrString "attr" "placeholder"
-                ]
-                []
+            [-- Description.ExpectAnnotation "test"
+             -- [ Description.ExpectAttrString "attr" "placeholder"
+             -- ]
+             -- []
             ]
         , replacements = []
         }
@@ -183,8 +183,8 @@ text =
                     (Parser.run
                         (Mark.Internal.Parser.styledText
                             { inlines =
-                                [ Description.ExpectToken "test"
-                                    []
+                                [-- Description.ExpectToken "test"
+                                 -- []
                                 ]
                             , replacements = []
                             }
@@ -226,14 +226,15 @@ text =
                                     , start = { column = 23, line = 1, offset = 22 }
                                     }
                                     (Description.Text emptyStyles ".  And a ")
-                                , Description.InlineToken
-                                    { attributes = []
-                                    , name = "test"
-                                    , range =
-                                        { end = { column = 42, line = 1, offset = 41 }
-                                        , start = { column = 36, line = 1, offset = 35 }
-                                        }
-                                    }
+
+                                -- , Description.InlineToken
+                                --     { attributes = []
+                                --     , name = "test"
+                                --     , range =
+                                --         { end = { column = 42, line = 1, offset = 41 }
+                                --         , start = { column = 36, line = 1, offset = 35 }
+                                --         }
+                                --     }
                                 , Description.Styled
                                     { end = { column = 43, line = 1, offset = 42 }
                                     , start = { column = 42, line = 1, offset = 41 }
@@ -249,9 +250,9 @@ text =
                     (Parser.run
                         (Mark.Internal.Parser.styledText
                             { inlines =
-                                [ Description.ExpectToken "test"
-                                    [ Description.ExpectAttrString "attr" "placeholder"
-                                    ]
+                                [-- Description.ExpectToken "test"
+                                 -- [ Description.ExpectAttrString "attr" "placeholder"
+                                 -- ]
                                 ]
                             , replacements = []
                             }
@@ -292,27 +293,28 @@ text =
                                     , start = { column = 23, line = 1, offset = 22 }
                                     }
                                     (Description.Text emptyStyles ".  And a ")
-                                , Description.InlineToken
-                                    { attributes =
-                                        [ Description.AttrString
-                                            { name = "attr"
-                                            , range =
-                                                { end =
-                                                    { column = 58
-                                                    , line = 1
-                                                    , offset = 57
-                                                    }
-                                                , start = { column = 42, line = 1, offset = 41 }
-                                                }
-                                            , value = "my string"
-                                            }
-                                        ]
-                                    , name = "test"
-                                    , range =
-                                        { end = { column = 59, line = 1, offset = 58 }
-                                        , start = { column = 36, line = 1, offset = 35 }
-                                        }
-                                    }
+
+                                -- , Description.InlineToken
+                                --     { attributes =
+                                --         [ Description.AttrString
+                                --             { name = "attr"
+                                --             , range =
+                                --                 { end =
+                                --                     { column = 58
+                                --                     , line = 1
+                                --                     , offset = 57
+                                --                     }
+                                --                 , start = { column = 42, line = 1, offset = 41 }
+                                --                 }
+                                --             , value = "my string"
+                                --             }
+                                --         ]
+                                --     , name = "test"
+                                --     , range =
+                                --         { end = { column = 59, line = 1, offset = 58 }
+                                --         , start = { column = 36, line = 1, offset = 35 }
+                                --         }
+                                --     }
                                 , Description.Styled
                                     { end = { column = 60, line = 1, offset = 59 }
                                     , start = { column = 59, line = 1, offset = 58 }
@@ -371,24 +373,25 @@ basicWithInlineResult =
                     , start = { column = 23, line = 1, offset = 22 }
                     }
                     (Description.Text emptyStyles ".  And a ")
-                , Description.InlineAnnotation
-                    { name = "test"
-                    , attributes =
-                        [ Description.AttrString
-                            { name = "attr"
-                            , range =
-                                { end = { column = 69, line = 1, offset = 68 }
-                                , start = { column = 53, line = 1, offset = 52 }
-                                }
-                            , value = "my string"
-                            }
-                        ]
-                    , range =
-                        { end = { column = 70, line = 1, offset = 69 }
-                        , start = { column = 36, line = 1, offset = 35 }
-                        }
-                    , text = [ Description.Text emptyStyles "some text" ]
-                    }
+
+                -- , Description.InlineAnnotation
+                --     { name = "test"
+                --     , attributes =
+                --         [ Description.AttrString
+                --             { name = "attr"
+                --             , range =
+                --                 { end = { column = 69, line = 1, offset = 68 }
+                --                 , start = { column = 53, line = 1, offset = 52 }
+                --                 }
+                --             , value = "my string"
+                --             }
+                --         ]
+                --     , range =
+                --         { end = { column = 70, line = 1, offset = 69 }
+                --         , start = { column = 36, line = 1, offset = 35 }
+                --         }
+                --     , text = [ Description.Text emptyStyles "some text" ]
+                --     }
                 , Description.Styled
                     { end = { column = 71, line = 1, offset = 70 }
                     , start = { column = 70, line = 1, offset = 69 }
@@ -435,24 +438,25 @@ styleTransfer =
                 , start = { column = 26, line = 1, offset = 25 }
                 }
                 (Description.Text italic "And a ")
-            , Description.InlineAnnotation
-                { name = "test"
-                , attributes =
-                    [ Description.AttrString
-                        { name = "attr"
-                        , range =
-                            { end = { column = 71, line = 1, offset = 70 }
-                            , start = { column = 55, line = 1, offset = 54 }
-                            }
-                        , value = " my string"
-                        }
-                    ]
-                , range =
-                    { end = { column = 72, line = 1, offset = 71 }
-                    , start = { column = 37, line = 1, offset = 36 }
-                    }
-                , text = [ Description.Text italic "some text" ]
-                }
+
+            -- , Description.InlineAnnotation
+            --     { name = "test"
+            --     , attributes =
+            --         [ Description.AttrString
+            --             { name = "attr"
+            --             , range =
+            --                 { end = { column = 71, line = 1, offset = 70 }
+            --                 , start = { column = 55, line = 1, offset = 54 }
+            --                 }
+            --             , value = " my string"
+            --             }
+            --         ]
+            --     , range =
+            --         { end = { column = 72, line = 1, offset = 71 }
+            --         , start = { column = 37, line = 1, offset = 36 }
+            --         }
+            --     , text = [ Description.Text italic "some text" ]
+            --     }
             , Description.Styled
                 { end = { column = 73, line = 1, offset = 72 }
                 , start = { column = 72, line = 1, offset = 71 }

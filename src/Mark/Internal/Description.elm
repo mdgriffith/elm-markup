@@ -11,7 +11,7 @@ module Mark.Internal.Description exposing
     , Block(..), BlockKind(..), Document(..), Inline(..)
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
-    , Record(..), Range
+    , Record(..), Range, AnnotationType(..), recordName
     )
 
 {-|
@@ -40,7 +40,7 @@ module Mark.Internal.Description exposing
 
 @docs resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
 
-@docs Record, Range
+@docs Record, Range, AnnotationType, recordName
 
 -}
 
@@ -186,6 +186,16 @@ type BlockKind
     | Named String
 
 
+recordName : Description -> Maybe String
+recordName desc =
+    case desc of
+        Record details ->
+            Just details.name
+
+        _ ->
+            Nothing
+
+
 {-| -}
 type Description
     = DescribeBlock
@@ -252,8 +262,196 @@ type Description
     | DescribeNothing Id
 
 
+type AnnotationType
+    = EmptyAnnotation
+    | SelectText (List Text)
+    | SelectString String
 
-{- RECORDS -}
+
+{-| -}
+type TextDescription
+    = Styled Range Text
+    | InlineBlock
+        { kind : AnnotationType
+        , range : Range
+        , record : Description
+        }
+
+
+{-| A text fragment with some styling.
+-}
+type Text
+    = Text Styling String
+
+
+type Inline data
+    = Inline
+        { converter : List Text -> List InlineAttribute -> Outcome Error.AstError (Uncertain (List data)) (List data)
+        , expect : InlineExpectation
+        , name : String
+        }
+
+
+type alias Styling =
+    { bold : Bool
+    , italic : Bool
+    , strike : Bool
+    }
+
+
+{-| -}
+type InlineAttribute
+    = AttrString
+        { name : String
+        , range : Range
+        , value : String
+        }
+    | AttrInt
+        { name : String
+        , range : Range
+        , value : Int
+        }
+    | AttrFloat
+        { name : String
+        , range : Range
+        , value : ( String, Float )
+        }
+
+
+
+{- EXPECTATIONS -}
+
+
+{-| -}
+type Style
+    = Bold
+    | Italic
+    | Strike
+
+
+{-| -}
+type Expectation
+    = ExpectBlock String Expectation
+    | ExpectRecord String (List ( String, Expectation ))
+    | ExpectOneOf (List Expectation)
+    | ExpectManyOf (List Expectation)
+    | ExpectStartsWith Expectation Expectation
+    | ExpectBoolean Bool
+    | ExpectInteger Int
+    | ExpectFloat Float
+    | ExpectTextBlock (List InlineExpectation)
+    | ExpectString String
+    | ExpectMultiline String
+    | ExpectTree Expectation (List TreeExpectation)
+    | ExpectNothing
+
+
+{-| -}
+type TreeExpectation
+    = TreeExpectation
+        { icon : Icon
+        , content : List Expectation
+        , children : List TreeExpectation
+        }
+
+
+{-| -}
+type InlineExpectation
+    = ExpectText Text
+    | ExpectInlineBlock
+        { name : String
+        , kind : AnnotationType
+        , fields : List ( String, Expectation )
+        }
+
+
+noInlineAttributes expect =
+    case expect of
+        ExpectInlineBlock details ->
+            List.isEmpty details.fields
+
+        ExpectText _ ->
+            True
+
+
+expectationToAttr : AttrExpectation -> InlineAttribute
+expectationToAttr exp =
+    case exp of
+        ExpectAttrString name default ->
+            AttrString
+                { name = name
+                , range = emptyRange
+                , value = default
+                }
+
+        ExpectAttrFloat name default ->
+            AttrFloat
+                { name = name
+                , range = emptyRange
+                , value = default
+                }
+
+        ExpectAttrInt name default ->
+            AttrInt
+                { name = name
+                , range = emptyRange
+                , value = default
+                }
+
+
+{-| -}
+type
+    AttrExpectation
+    --                 name   default
+    = ExpectAttrString String String
+    | ExpectAttrFloat String ( String, Float )
+    | ExpectAttrInt String Int
+
+
+{-| -}
+mapFound : (a -> b) -> Found a -> Found b
+mapFound fn found =
+    case found of
+        Found range item ->
+            Found range (fn item)
+
+        Unexpected unexp ->
+            Unexpected unexp
+
+
+getFoundSize : Found a -> Range
+getFoundSize found =
+    case found of
+        Found range _ ->
+            range
+
+        Unexpected unexp ->
+            unexp.range
+
+
+{-| -}
+uncertain : Error.UnexpectedDetails -> Outcome Error.AstError (Uncertain data) data
+uncertain err =
+    Almost (Uncertain ( err, [] ))
+
+
+mapSuccessAndRecovered :
+    (success -> otherSuccess)
+    -> Outcome f (Uncertain success) success
+    -> Outcome f (Uncertain otherSuccess) otherSuccess
+mapSuccessAndRecovered fn outcome =
+    case outcome of
+        Success s ->
+            Success (fn s)
+
+        Almost (Uncertain u) ->
+            Almost (Uncertain u)
+
+        Almost (Recovered e a) ->
+            Almost (Recovered e (fn a))
+
+        Failure f ->
+            Failure f
 
 
 {-| -}
@@ -262,7 +460,7 @@ type Record data
         { name : String
         , expectations : List ( String, Expectation )
         , fieldConverter :
-            Description
+            Description -> AnnotationType
             -> Outcome Error.AstError (Uncertain (FieldConverter data)) (FieldConverter data)
         , fields : List FieldParser
         }
@@ -423,222 +621,8 @@ textDescriptionRange textDesc =
         Styled rng _ ->
             rng
 
-        InlineAnnotation details ->
+        InlineBlock details ->
             details.range
-
-        InlineToken details ->
-            details.range
-
-        InlineVerbatim details ->
-            details.range
-
-        UnexpectedInline details ->
-            details.range
-
-
-{-| -}
-type TextDescription
-    = Styled Range Text
-    | InlineAnnotation
-        { name : String
-        , range : Range
-        , text : List Text
-        , attributes : List InlineAttribute
-        }
-    | InlineToken
-        { name : String
-        , range : Range
-        , attributes : List InlineAttribute
-        }
-    | InlineVerbatim
-        { name : Maybe String
-        , range : Range
-        , text : Text
-        , attributes : List InlineAttribute
-        }
-    | UnexpectedInline Error.UnexpectedDetails
-
-
-{-| A text fragment with some styling.
--}
-type Text
-    = Text Styling String
-
-
-type Inline data
-    = Inline
-        { converter : List Text -> List InlineAttribute -> Outcome Error.AstError (Uncertain (List data)) (List data)
-        , expect : InlineExpectation
-        , name : String
-        }
-
-
-type alias Styling =
-    { bold : Bool
-    , italic : Bool
-    , strike : Bool
-    }
-
-
-{-| -}
-type InlineAttribute
-    = AttrString
-        { name : String
-        , range : Range
-        , value : String
-        }
-    | AttrInt
-        { name : String
-        , range : Range
-        , value : Int
-        }
-    | AttrFloat
-        { name : String
-        , range : Range
-        , value : ( String, Float )
-        }
-
-
-
-{- EXPECTATIONS -}
-
-
-{-| -}
-type Style
-    = Bold
-    | Italic
-    | Strike
-
-
-{-| -}
-type Expectation
-    = ExpectBlock String Expectation
-    | ExpectRecord String (List ( String, Expectation ))
-    | ExpectOneOf (List Expectation)
-    | ExpectManyOf (List Expectation)
-    | ExpectStartsWith Expectation Expectation
-    | ExpectBoolean Bool
-    | ExpectInteger Int
-    | ExpectFloat Float
-    | ExpectTextBlock (List InlineExpectation)
-    | ExpectString String
-    | ExpectMultiline String
-    | ExpectTree Expectation (List TreeExpectation)
-    | ExpectNothing
-
-
-{-| -}
-type TreeExpectation
-    = TreeExpectation
-        { icon : Icon
-        , content : List Expectation
-        , children : List TreeExpectation
-        }
-
-
-{-| -}
-type InlineExpectation
-    = ExpectText Text
-    | ExpectAnnotation String (List AttrExpectation) (List Text)
-      -- tokens have no placeholder
-    | ExpectToken String (List AttrExpectation)
-      -- name, attrs, placeholder content
-    | ExpectVerbatim String (List AttrExpectation) String
-
-
-noInlineAttributes expect =
-    case expect of
-        ExpectAnnotation _ attrs _ ->
-            List.isEmpty attrs
-
-        ExpectToken _ attrs ->
-            List.isEmpty attrs
-
-        ExpectVerbatim _ attrs _ ->
-            List.isEmpty attrs
-
-        ExpectText _ ->
-            True
-
-
-expectationToAttr : AttrExpectation -> InlineAttribute
-expectationToAttr exp =
-    case exp of
-        ExpectAttrString name default ->
-            AttrString
-                { name = name
-                , range = emptyRange
-                , value = default
-                }
-
-        ExpectAttrFloat name default ->
-            AttrFloat
-                { name = name
-                , range = emptyRange
-                , value = default
-                }
-
-        ExpectAttrInt name default ->
-            AttrInt
-                { name = name
-                , range = emptyRange
-                , value = default
-                }
-
-
-{-| -}
-type
-    AttrExpectation
-    --                 name   default
-    = ExpectAttrString String String
-    | ExpectAttrFloat String ( String, Float )
-    | ExpectAttrInt String Int
-
-
-{-| -}
-mapFound : (a -> b) -> Found a -> Found b
-mapFound fn found =
-    case found of
-        Found range item ->
-            Found range (fn item)
-
-        Unexpected unexp ->
-            Unexpected unexp
-
-
-getFoundSize : Found a -> Range
-getFoundSize found =
-    case found of
-        Found range _ ->
-            range
-
-        Unexpected unexp ->
-            unexp.range
-
-
-{-| -}
-uncertain : Error.UnexpectedDetails -> Outcome Error.AstError (Uncertain data) data
-uncertain err =
-    Almost (Uncertain ( err, [] ))
-
-
-mapSuccessAndRecovered :
-    (success -> otherSuccess)
-    -> Outcome f (Uncertain success) success
-    -> Outcome f (Uncertain otherSuccess) otherSuccess
-mapSuccessAndRecovered fn outcome =
-    case outcome of
-        Success s ->
-            Success (fn s)
-
-        Almost (Uncertain u) ->
-            Almost (Uncertain u)
-
-        Almost (Recovered e a) ->
-            Almost (Recovered e (fn a))
-
-        Failure f ->
-            Failure f
 
 
 renderBlock : Block data -> Description -> Outcome Error.AstError (Uncertain data) data
@@ -720,8 +704,15 @@ strikeStyle =
     }
 
 
-inlineExample : InlineExpectation -> String
-inlineExample inline =
+
+--  AnnotationType
+--     = EmptyAnnotation
+--     | SelectText (List Text)
+--     | SelectString String
+
+
+inlineExample : AnnotationType -> Expectation -> String
+inlineExample kind inline =
     let
         inlineAttrExamples attrs =
             attrs
@@ -739,38 +730,15 @@ inlineExample inline =
                 ExpectAttrInt name _ ->
                     name ++ " = An Int"
     in
-    case inline of
-        ExpectText text ->
+    case kind of
+        EmptyAnnotation ->
             ""
 
-        ExpectAnnotation name attrs placeholder ->
-            if List.isEmpty attrs then
-                "[some styled text]{" ++ name ++ "}"
+        SelectText t ->
+            ""
 
-            else
-                "[some styled text]{"
-                    ++ name
-                    ++ "|"
-                    ++ inlineAttrExamples attrs
-                    ++ "}"
-
-        ExpectToken name attrs ->
-            if List.isEmpty attrs then
-                "{" ++ name ++ "}"
-
-            else
-                "{" ++ name ++ "|" ++ inlineAttrExamples attrs ++ "}"
-
-        ExpectVerbatim name attrs placeholder ->
-            if List.isEmpty attrs then
-                "`some styled text`"
-
-            else
-                "`some styled text`{"
-                    ++ name
-                    ++ "|"
-                    ++ inlineAttrExamples attrs
-                    ++ "}"
+        SelectString str ->
+            "`" ++ str ++ "`"
 
 
 match description exp =
@@ -1495,50 +1463,37 @@ textDescriptionToString existingStyles txt =
         Styled range t ->
             textToString existingStyles t
 
-        InlineToken details ->
-            Tuple.pair existingStyles <|
-                case details.attributes of
-                    [] ->
-                        "{" ++ details.name ++ "}"
-
-                    _ ->
+        InlineBlock details ->
+            -- TODO: Render attributes!
+            case details.kind of
+                EmptyAnnotation ->
+                    Tuple.pair existingStyles <|
                         "{"
-                            ++ details.name
-                            ++ " |"
-                            ++ String.join ", " (List.map inlineDescToString details.attributes)
+                            -- ++ details.name
                             ++ "}"
 
-        InlineAnnotation details ->
-            let
-                ( newStyles, renderedText ) =
-                    details.text
-                        |> List.foldl gatherText ( existingStyles, "" )
-                        |> gatherText (Text emptyStyles "")
-            in
-            ( newStyles
-            , "["
-                ++ renderedText
-                ++ "]{"
-                ++ String.join ", " (List.map inlineDescToString details.attributes)
-                ++ "}"
-            )
+                SelectText txts ->
+                    let
+                        ( newStyles, renderedText ) =
+                            txts
+                                |> List.foldl gatherText ( existingStyles, "" )
+                                |> gatherText (Text emptyStyles "")
+                    in
+                    ( newStyles
+                    , "["
+                        ++ renderedText
+                        ++ "]"
+                      -- ++ "{"
+                      -- ++ String.join ", " (List.map inlineDescToString details.attributes)
+                      -- ++ "}"
+                    )
 
-        InlineVerbatim details ->
-            case details.text of
-                Text _ str ->
+                SelectString str ->
                     Tuple.pair existingStyles <|
-                        if List.isEmpty details.attributes then
-                            "`" ++ str ++ "`"
-
-                        else
-                            "`"
-                                ++ str
-                                ++ "`{"
-                                ++ String.join ", " (List.map inlineDescToString details.attributes)
-                                ++ "}"
-
-        UnexpectedInline unexpected ->
-            ( existingStyles, "" )
+                        -- if List.isEmpty details.attributes then
+                        "`"
+                            ++ str
+                            ++ "`"
 
 
 inlineDescToString : InlineAttribute -> String
@@ -1752,79 +1707,105 @@ inlineExpectationToDesc exp cursor =
             , styling = newStyling
             }
 
-        ExpectAnnotation name attrs txts ->
+        ExpectInlineBlock details ->
             let
                 end =
                     cursor.position
-                        |> moveColumn (String.length name + 5)
-                        |> moveColumn (attributesLength attrs)
+
+                -- |> moveColumn (String.length name + 5)
+                -- |> moveColumn (attributesLength attrs)
+                -- TODO: Change position!
             in
             { position = end
             , styling = cursor.styling
             , text =
-                InlineAnnotation
-                    { name = name
+                InlineBlock
+                    { kind = details.kind
                     , range =
                         { start = cursor.position
                         , end = end
                         }
-                    , text = txts
-                    , attributes = List.map expectationToAttr attrs
+                    , record =
+                        DescribeNothing (Tuple.first (Id.step Id.initialSeed))
+
+                    -- TODO: MAKE CONVERSION TO DESCRIPTION!
+                    -- List.map expectationToAttr attrs
                     }
                     :: cursor.text
             }
 
-        ExpectToken name attrs ->
-            let
-                end =
-                    cursor.position
-                        -- add 5 which accounts for
-                        -- two brackets, a bar, and two spaces
-                        |> moveColumn (String.length name + 5)
-                        |> moveColumn (attributesLength attrs)
-            in
-            { position = end
-            , styling = cursor.styling
-            , text =
-                InlineToken
-                    { name = name
-                    , range =
-                        { start = cursor.position
-                        , end = end
-                        }
-                    , attributes = List.map expectationToAttr attrs
-                    }
-                    :: cursor.text
-            }
 
-        -- name, attrs, placeholder content
-        ExpectVerbatim name attrs content ->
-            let
-                end =
-                    cursor.position
-                        |> moveColumn (String.length name + 5)
-                        |> moveColumn (attributesLength attrs)
-            in
-            { position =
-                end
-            , styling = cursor.styling
-            , text =
-                InlineVerbatim
-                    { name =
-                        if name == "" && attrs == [] then
-                            Nothing
 
-                        else
-                            Just name
-                    , range =
-                        { start = cursor.position
-                        , end = end
-                        }
-                    , text = Text emptyStyles content
-                    , attributes = List.map expectationToAttr attrs
-                    }
-                    :: cursor.text
-            }
+-- ExpectAnnotation name attrs txts ->
+--     let
+--         end =
+--             cursor.position
+--                 |> moveColumn (String.length name + 5)
+--                 |> moveColumn (attributesLength attrs)
+--     in
+--     { position = end
+--     , styling = cursor.styling
+--     , text =
+--         InlineAnnotation
+--             { name = name
+--             , range =
+--                 { start = cursor.position
+--                 , end = end
+--                 }
+--             , text = txts
+--             , attributes = List.map expectationToAttr attrs
+--             }
+--             :: cursor.text
+--     }
+-- ExpectToken name attrs ->
+--     let
+--         end =
+--             cursor.position
+--                 -- add 5 which accounts for
+--                 -- two brackets, a bar, and two spaces
+--                 |> moveColumn (String.length name + 5)
+--                 |> moveColumn (attributesLength attrs)
+--     in
+--     { position = end
+--     , styling = cursor.styling
+--     , text =
+--         InlineToken
+--             { name = name
+--             , range =
+--                 { start = cursor.position
+--                 , end = end
+--                 }
+--             , attributes = List.map expectationToAttr attrs
+--             }
+--             :: cursor.text
+--     }
+-- -- name, attrs, placeholder content
+-- ExpectVerbatim name attrs content ->
+--     let
+--         end =
+--             cursor.position
+--                 |> moveColumn (String.length name + 5)
+--                 |> moveColumn (attributesLength attrs)
+--     in
+--     { position =
+--         end
+--     , styling = cursor.styling
+--     , text =
+--         InlineVerbatim
+--             { name =
+--                 if name == "" && attrs == [] then
+--                     Nothing
+--                 else
+--                     Just name
+--             , range =
+--                 { start = cursor.position
+--                 , end = end
+--                 }
+--             , text = Text emptyStyles content
+--             , attributes = List.map expectationToAttr attrs
+--             }
+--             :: cursor.text
+--     }
 
 
 attributesLength : List AttrExpectation -> Int

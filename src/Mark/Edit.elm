@@ -120,8 +120,8 @@ type Edit
 
 
 type Annotation
-    = Annotation String (List Mark.New.Attribute)
-    | Verbatim String (List Mark.New.Attribute)
+    = Annotation String (List ( String, Mark.New.Block ))
+    | Verbatim String (List ( String, Mark.New.Block ))
 
 
 {-| -}
@@ -159,7 +159,7 @@ insertAt =
 
 
 {-| -}
-annotate : Id -> Selection -> String -> List Mark.New.Attribute -> Edit
+annotate : Id -> Selection -> String -> List ( String, Mark.New.Block ) -> Edit
 annotate id selection name attrs =
     Annotate id selection (Annotation name attrs)
 
@@ -171,7 +171,7 @@ verbatim id selection name =
 
 
 {-| -}
-verbatimWith : Id -> Selection -> String -> List Mark.New.Attribute -> Edit
+verbatimWith : Id -> Selection -> String -> List ( String, Mark.New.Block ) -> Edit
 verbatimWith id selection name attrs =
     Annotate id selection (Verbatim name attrs)
 
@@ -388,15 +388,33 @@ update doc edit (Parsed original) =
                                                                 wrapped =
                                                                     case wrapper of
                                                                         Annotation name attrs ->
-                                                                            ExpectAnnotation name attrs (List.concatMap onlyText els)
+                                                                            -- ExpectAnnotation name attrs (List.concatMap onlyText els)
+                                                                            ExpectInlineBlock
+                                                                                { name = name
+
+                                                                                -- TODO: REPLACE THIS!
+                                                                                , kind = SelectText [] -- REPLACE THIS
+
+                                                                                --     (List.concatMap onlyText els
+                                                                                --     |> List.map textString
+                                                                                --     |> String.join ""
+                                                                                -- )
+                                                                                , fields = attrs
+                                                                                }
 
                                                                         Verbatim name attrs ->
-                                                                            ExpectVerbatim name
-                                                                                attrs
-                                                                                (List.concatMap onlyText els
-                                                                                    |> List.map textString
-                                                                                    |> String.join ""
-                                                                                )
+                                                                            ExpectInlineBlock
+                                                                                { name = name
+
+                                                                                -- TODO: REPLACE THIS!
+                                                                                , kind = SelectString "REPLACE ME PLS NOW"
+
+                                                                                --     (List.concatMap onlyText els
+                                                                                --     |> List.map textString
+                                                                                --     |> String.join ""
+                                                                                -- )
+                                                                                , fields = attrs
+                                                                                }
 
                                                                 ( end, newText ) =
                                                                     createInline
@@ -2652,19 +2670,28 @@ text :
         -> Styles
         -> String
         -> rendered
-    , inlines : List (Inline rendered)
+    , inlines : List (Record rendered)
     , replacements : List Replacement
     }
     -> Block (List rendered)
 text options =
     let
-        inlineExpectations =
-            List.map getInlineExpectation options.inlines
+        inlineRecords =
+            List.map recordToInlineBlock options.inlines
+
+        -- inlineExpectations =
+        --     List.map getInlineExpectation options.inlines
     in
     Block
         { kind = Value
-        , expect = ExpectTextBlock inlineExpectations
-        , converter = renderText options
+
+        -- TODO: add expectations
+        , expect = ExpectTextBlock []
+        , converter =
+            renderText
+                { view = options.view
+                , inlines = inlineRecords
+                }
         , parser =
             \seed ->
                 let
@@ -2679,7 +2706,7 @@ text options =
                     |> Parser.andThen
                         (\pos ->
                             Parse.styledText
-                                { inlines = inlineExpectations
+                                { inlines = List.map (\x -> x Desc.EmptyAnnotation) inlineRecords
                                 , replacements = options.replacements
                                 }
                                 newSeed
@@ -2687,6 +2714,48 @@ text options =
                                 emptyStyles
                                 []
                         )
+                )
+        }
+
+
+recordToInlineBlock (Desc.ProtoRecord details) annotationType =
+    let
+        expectations =
+            Desc.ExpectRecord details.name
+                details.expectations
+    in
+    Desc.Block
+        { kind = Desc.Named details.name
+        , expect = expectations
+        , converter =
+            \desc ->
+                case details.fieldConverter desc annotationType of
+                    Outcome.Success ( pos, fieldDescriptions, rendered ) ->
+                        Outcome.Success rendered
+
+                    Outcome.Failure fail ->
+                        Outcome.Failure fail
+
+                    Outcome.Almost (Desc.Uncertain e) ->
+                        Outcome.Almost (Desc.Uncertain e)
+
+                    Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
+                        Outcome.Almost (Desc.Recovered e rendered)
+        , parser =
+            \seed ->
+                let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
+                    ( newSeed, fields ) =
+                        Id.thread parentSeed (List.reverse details.fields)
+                in
+                ( newSeed
+                , Parse.record Parse.InlineRecord
+                    parentId
+                    details.name
+                    expectations
+                    fields
                 )
         }
 
@@ -2707,8 +2776,7 @@ renderText :
         -> Styles
         -> String
         -> rendered
-    , inlines : List (Inline rendered)
-    , replacements : List Replacement
+    , inlines : List (Desc.AnnotationType -> Block rendered)
     }
     -> Description
     -> Cursor (List rendered)
@@ -2736,8 +2804,7 @@ convertTextDescription :
             -> Styles
             -> String
             -> rendered
-        , inlines : List (Inline rendered)
-        , replacements : List Replacement
+        , inlines : List (Desc.AnnotationType -> Block rendered)
         }
     -> TextDescription
     -> Cursor (List rendered)
@@ -2760,12 +2827,22 @@ convertTextDescription id options comp cursor =
                 )
                 cursor
 
-        InlineToken details ->
+        InlineBlock details ->
             let
-                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+                recordName =
+                    Desc.recordName details.record
+                        |> Maybe.withDefault ""
+
+                matchInlineName name almostInlineBlock maybeFound =
                     case maybeFound of
                         Nothing ->
-                            if name == inlineDetails.name && isToken inline then
+                            let
+                                (Block inlineDetails) =
+                                    almostInlineBlock details.kind
+                            in
+                            -- TODO: MATCH RECORD TYPE AS WELL
+                            if Named name == inlineDetails.kind then
+                                --&& isToken inline then
                                 Just inlineDetails
 
                             else
@@ -2776,7 +2853,7 @@ convertTextDescription id options comp cursor =
 
                 maybeMatched =
                     List.foldl
-                        (matchInlineName details.name)
+                        (matchInlineName recordName)
                         Nothing
                         options.inlines
             in
@@ -2787,136 +2864,155 @@ convertTextDescription id options comp cursor =
                         , problem =
                             Error.UnknownInline
                                 (List.map
-                                    (Desc.inlineExample
-                                        << getInlineExpectation
+                                    (\inline ->
+                                        inline Desc.EmptyAnnotation
+                                            |> getBlockExpectation
+                                            |> Desc.inlineExample details.kind
                                     )
                                     options.inlines
                                 )
                         }
 
-                Just matchedInline ->
-                    mergeWith (++)
-                        (matchedInline.converter [] details.attributes)
+                Just matched ->
+                    mergeWith (::)
+                        --TODO:  This converter also needs Annotation Type
+                        (matched.converter details.record)
                         cursor
 
-        InlineAnnotation details ->
-            let
-                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
-                    case maybeFound of
-                        Nothing ->
-                            if name == inlineDetails.name && not (isToken inline) then
-                                Just inlineDetails
-
-                            else
-                                Nothing
-
-                        _ ->
-                            maybeFound
-
-                maybeMatched =
-                    List.foldl
-                        (matchInlineName details.name)
-                        Nothing
-                        options.inlines
-            in
-            case maybeMatched of
-                Just matchedInline ->
-                    mergeWith (++)
-                        (matchedInline.converter
-                            (List.map textToText details.text)
-                            details.attributes
-                        )
-                        cursor
-
-                Nothing ->
-                    uncertain
-                        { range = details.range
-                        , problem =
-                            Error.UnknownInline
-                                (List.map
-                                    (Desc.inlineExample
-                                        << getInlineExpectation
-                                    )
-                                    options.inlines
-                                )
-                        }
-
-        InlineVerbatim details ->
-            let
-                matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
-                    case maybeFound of
-                        Nothing ->
-                            if
-                                isVerbatim inline
-                                    && noInlineAttributes inlineDetails.expect
-                                    && (name == Nothing)
-                            then
-                                Just inlineDetails
-
-                            else if isVerbatim inline && name == Just inlineDetails.name then
-                                Just inlineDetails
-
-                            else
-                                Nothing
-
-                        _ ->
-                            maybeFound
-
-                maybeMatched =
-                    List.foldl
-                        (matchInlineName details.name)
-                        Nothing
-                        options.inlines
-            in
-            case maybeMatched of
-                Just matchedInline ->
-                    mergeWith (++)
-                        (matchedInline.converter
-                            [ textToText details.text ]
-                            details.attributes
-                        )
-                        cursor
-
-                Nothing ->
-                    uncertain
-                        { range = details.range
-                        , problem =
-                            Error.UnknownInline
-                                (List.map
-                                    (Desc.inlineExample
-                                        << getInlineExpectation
-                                    )
-                                    options.inlines
-                                )
-                        }
-
-        UnexpectedInline details ->
-            uncertain details
 
 
-{-| -}
-isToken : Inline data -> Bool
-isToken (Inline inline) =
-    case inline.expect of
-        ExpectToken _ _ ->
-            True
-
-        _ ->
-            False
-
-
-{-| -}
-isVerbatim : Inline data -> Bool
-isVerbatim (Inline inline) =
-    case inline.expect of
-        ExpectVerbatim _ _ _ ->
-            True
-
-        _ ->
-            False
-
-
-
+-- InlineToken details ->
+--     let
+--         matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+--             case maybeFound of
+--                 Nothing ->
+--                     if name == inlineDetails.name && isToken inline then
+--                         Just inlineDetails
+--                     else
+--                         Nothing
+--                 _ ->
+--                     maybeFound
+--         maybeMatched =
+--             List.foldl
+--                 (matchInlineName details.name)
+--                 Nothing
+--                 options.inlines
+--     in
+--     case maybeMatched of
+--         Nothing ->
+--             uncertain
+--                 { range = details.range
+--                 , problem =
+--                     Error.UnknownInline
+--                         (List.map
+--                             (Desc.inlineExample
+--                                 << getInlineExpectation
+--                             )
+--                             options.inlines
+--                         )
+--                 }
+--         Just matchedInline ->
+--             mergeWith (++)
+--                 (matchedInline.converter [] details.attributes)
+--                 cursor
+-- InlineAnnotation details ->
+--     let
+--         matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+--             case maybeFound of
+--                 Nothing ->
+--                     if name == inlineDetails.name && not (isToken inline) then
+--                         Just inlineDetails
+--                     else
+--                         Nothing
+--                 _ ->
+--                     maybeFound
+--         maybeMatched =
+--             List.foldl
+--                 (matchInlineName details.name)
+--                 Nothing
+--                 options.inlines
+--     in
+--     case maybeMatched of
+--         Just matchedInline ->
+--             mergeWith (++)
+--                 (matchedInline.converter
+--                     (List.map textToText details.text)
+--                     details.attributes
+--                 )
+--                 cursor
+--         Nothing ->
+--             uncertain
+--                 { range = details.range
+--                 , problem =
+--                     Error.UnknownInline
+--                         (List.map
+--                             (Desc.inlineExample
+--                                 << getInlineExpectation
+--                             )
+--                             options.inlines
+--                         )
+--                 }
+-- InlineVerbatim details ->
+--     let
+--         matchInlineName name ((Inline inlineDetails) as inline) maybeFound =
+--             case maybeFound of
+--                 Nothing ->
+--                     if
+--                         isVerbatim inline
+--                             && noInlineAttributes inlineDetails.expect
+--                             && (name == Nothing)
+--                     then
+--                         Just inlineDetails
+--                     else if isVerbatim inline && name == Just inlineDetails.name then
+--                         Just inlineDetails
+--                     else
+--                         Nothing
+--                 _ ->
+--                     maybeFound
+--         maybeMatched =
+--             List.foldl
+--                 (matchInlineName details.name)
+--                 Nothing
+--                 options.inlines
+--     in
+--     case maybeMatched of
+--         Just matchedInline ->
+--             mergeWith (++)
+--                 (matchedInline.converter
+--                     [ textToText details.text ]
+--                     details.attributes
+--                 )
+--                 cursor
+--         Nothing ->
+--             uncertain
+--                 { range = details.range
+--                 , problem =
+--                     Error.UnknownInline
+--                         (List.map
+--                             (Desc.inlineExample
+--                                 << getInlineExpectation
+--                             )
+--                             options.inlines
+--                         )
+--                 }
+-- UnexpectedInline details ->
+--     uncertain details
+-- {-| -}
+-- isToken : Inline data -> Bool
+-- isToken (Inline inline) =
+--     case inline.expect of
+--         ExpectToken _ _ ->
+--             True
+--         _ ->
+--             False
+-- {-| -}
+-- isVerbatim : Inline data -> Bool
+-- isVerbatim (Inline inline) =
+--     case inline.expect of
+--         ExpectVerbatim _ _ _ ->
+--             True
+--         _ ->
+--             False
 {- TEXT EDITING -}
 
 
@@ -2933,17 +3029,19 @@ type Restyle
 onlyText : TextDescription -> List Text
 onlyText txt =
     case txt of
-        InlineAnnotation details ->
-            details.text
+        InlineBlock details ->
+            case details.kind of
+                EmptyAnnotation ->
+                    []
 
-        InlineToken details ->
-            []
+                SelectText ts ->
+                    ts
 
-        InlineVerbatim details ->
-            [ details.text ]
+                SelectString str ->
+                    [ Text emptyStyles str ]
 
-        x ->
-            []
+        Styled _ t ->
+            [ t ]
 
 
 {-| Folds over a list of styles and merges them if they're compatible
@@ -2966,30 +3064,26 @@ mergeStyles inlineEl gathered =
 attemptMerge : TextDescription -> TextDescription -> Maybe TextDescription
 attemptMerge first second =
     case ( first, second ) of
-        ( Styled rngOne (Text stylingOne strOne), Styled rngTwo (Text stylingTwo strTwo) ) ->
-            if stylingOne == stylingTwo then
-                Just (Styled (mergeRanges rngOne rngTwo) (Text stylingOne (strOne ++ strTwo)))
-
-            else
-                Nothing
-
-        ( InlineAnnotation one, InlineAnnotation two ) ->
-            if one.name == two.name && one.attributes == two.attributes then
-                Just <|
-                    InlineAnnotation
-                        { name = one.name
-                        , attributes = one.attributes
-                        , range = mergeRanges one.range two.range
-                        , text = one.text ++ two.text
-                        }
-
-            else
-                Nothing
-
-        ( InlineVerbatim one, InlineVerbatim two ) ->
-            Nothing
-
+        -- ( Styled rngOne (Text stylingOne strOne), Styled rngTwo (Text stylingTwo strTwo) ) ->
+        --     if stylingOne == stylingTwo then
+        --         Just (Styled (mergeRanges rngOne rngTwo) (Text stylingOne (strOne ++ strTwo)))
+        --     else
+        --         Nothing
+        -- ( InlineAnnotation one, InlineAnnotation two ) ->
+        --     if one.name == two.name && one.attributes == two.attributes then
+        --         Just <|
+        --             InlineAnnotation
+        --                 { name = one.name
+        --                 , attributes = one.attributes
+        --                 , range = mergeRanges one.range two.range
+        --                 , text = one.text ++ two.text
+        --                 }
+        --     else
+        --         Nothing
+        -- ( InlineVerbatim one, InlineVerbatim two ) ->
+        --     Nothing
         ( _, _ ) ->
+            -- TODO: ACTUALLY MERGE!
             Nothing
 
 
@@ -3098,21 +3192,18 @@ doTextEdit { anchor, focus } editFn current cursor =
 applyStyles : Restyle -> TextDescription -> TextDescription
 applyStyles styling inlineEl =
     case inlineEl of
-        Styled range txt ->
-            Styled range (applyStylesToText styling txt)
-
-        InlineAnnotation details ->
-            InlineAnnotation
-                { details
-                    | text = List.map (applyStylesToText styling) details.text
-                }
-
-        InlineToken details ->
-            InlineToken details
-
-        InlineVerbatim details ->
-            InlineVerbatim details
-
+        -- Styled range txt ->
+        --     Styled range (applyStylesToText styling txt)
+        -- InlineAnnotation details ->
+        --     InlineAnnotation
+        --         { details
+        --             | text = List.map (applyStylesToText styling) details.text
+        --         }
+        -- InlineToken details ->
+        --     InlineToken details
+        -- InlineVerbatim details ->
+        --     InlineVerbatim details
+        -- TODO: ACTUALLY APPLY STYLES
         x ->
             x
 
@@ -3145,16 +3236,15 @@ length inlineEl =
         Styled _ txt ->
             textLength txt
 
-        InlineAnnotation details ->
-            List.sum (List.map textLength details.text)
-
-        InlineToken _ ->
-            0
-
-        InlineVerbatim details ->
-            textLength details.text
-
-        UnexpectedInline err ->
+        -- InlineAnnotation details ->
+        --     List.sum (List.map textLength details.text)
+        -- InlineToken _ ->
+        --     0
+        -- InlineVerbatim details ->
+        --     textLength details.text
+        -- UnexpectedInline err ->
+        _ ->
+            -- TODO: ACTUALLY DO THIS
             0
 
 
@@ -3183,85 +3273,80 @@ splitAt offset inlineEl =
             , Styled rightRange rightText
             )
 
-        -- InlineAnnotation name attrs textElements ->
-        InlineAnnotation details ->
-            let
-                { left, right } =
-                    List.foldl (splitTextElements offset)
-                        { offset = 0
-                        , left = []
-                        , right = []
-                        }
-                        details.text
-
-                splitTextElements off (Text styling txt) cursor =
-                    if off >= cursor.offset && off <= cursor.offset + String.length txt then
-                        { offset = cursor.offset + String.length txt
-                        , left = Text styling (String.left (offset - cursor.offset) txt) :: cursor.left
-                        , right = Text styling (String.dropLeft (offset - cursor.offset) txt) :: cursor.right
-                        }
-
-                    else if off < cursor.offset then
-                        { offset = cursor.offset + String.length txt
-                        , left = cursor.left
-                        , right = Text styling txt :: cursor.right
-                        }
-
-                    else
-                        { offset = cursor.offset + String.length txt
-                        , left = Text styling txt :: cursor.left
-                        , right = cursor.right
-                        }
-
-                ( leftRange, rightRange ) =
-                    splitRange offset details.range
-            in
-            ( InlineAnnotation
-                { name = details.name
-                , range = leftRange
-                , text = List.reverse left
-                , attributes = details.attributes
-                }
-            , InlineAnnotation
-                { name = details.name
-                , range = rightRange
-                , text = List.reverse right
-                , attributes = details.attributes
-                }
-            )
-
-        InlineToken details ->
-            -- This shoudn't happen because we're expecting the offset
-            -- to be within the range, and a token has a lenght of 0
-            ( Styled emptyRange (Text emptyStyles "")
-            , InlineToken details
-            )
-
-        InlineVerbatim details ->
-            let
-                ( leftRange, rightRange ) =
-                    splitRange offset details.range
-
-                ( leftText, rightText ) =
-                    splitText offset details.text
-            in
-            ( --ExpectVerbatim name attrs (String.left offset str)
-              InlineVerbatim
-                { details
-                    | range = leftRange
-                    , text = leftText
-                }
-            , InlineVerbatim
-                { details
-                    | range = rightRange
-                    , text = rightText
-                }
-            )
-
-        UnexpectedInline err ->
-            ( UnexpectedInline err
-            , UnexpectedInline err
-            )
+        InlineBlock details ->
+            -- -- InlineAnnotation name attrs textElements ->
+            -- InlineAnnotation details ->
+            --     let
+            --         { left, right } =
+            --             List.foldl (splitTextElements offset)
+            --                 { offset = 0
+            --                 , left = []
+            --                 , right = []
+            --                 }
+            --                 details.text
+            --         splitTextElements off (Text styling txt) cursor =
+            --             if off >= cursor.offset && off <= cursor.offset + String.length txt then
+            --                 { offset = cursor.offset + String.length txt
+            --                 , left = Text styling (String.left (offset - cursor.offset) txt) :: cursor.left
+            --                 , right = Text styling (String.dropLeft (offset - cursor.offset) txt) :: cursor.right
+            --                 }
+            --             else if off < cursor.offset then
+            --                 { offset = cursor.offset + String.length txt
+            --                 , left = cursor.left
+            --                 , right = Text styling txt :: cursor.right
+            --                 }
+            --             else
+            --                 { offset = cursor.offset + String.length txt
+            --                 , left = Text styling txt :: cursor.left
+            --                 , right = cursor.right
+            --                 }
+            --         ( leftRange, rightRange ) =
+            --             splitRange offset details.range
+            --     in
+            --     ( InlineAnnotation
+            --         { name = details.name
+            --         , range = leftRange
+            --         , text = List.reverse left
+            --         , attributes = details.attributes
+            --         }
+            --     , InlineAnnotation
+            --         { name = details.name
+            --         , range = rightRange
+            --         , text = List.reverse right
+            --         , attributes = details.attributes
+            --         }
+            --     )
+            -- InlineToken details ->
+            --     -- This shoudn't happen because we're expecting the offset
+            --     -- to be within the range, and a token has a length of 0
+            --     ( Styled emptyRange (Text emptyStyles "")
+            --     , InlineToken details
+            --     )
+            -- InlineVerbatim details ->
+            --     let
+            --         ( leftRange, rightRange ) =
+            --             splitRange offset details.range
+            --         ( leftText, rightText ) =
+            --             splitText offset details.text
+            --     in
+            --     ( --ExpectVerbatim name attrs (String.left offset str)
+            --       InlineVerbatim
+            --         { details
+            --             | range = leftRange
+            --             , text = leftText
+            --         }
+            --     , InlineVerbatim
+            --         { details
+            --             | range = rightRange
+            --             , text = rightText
+            --         }
+            --     )
+            -- UnexpectedInline err ->
+            --     ( UnexpectedInline err
+            --     , UnexpectedInline err
+            --     )
+            -- TODO: IMPLEMENT THIS FUNCTION
+            ( inlineEl, inlineEl )
 
 
 splitText offset (Text styling str) =

@@ -72,8 +72,8 @@ inlineMultipleVerbatim =
                     (\str one two ->
                         [ str, one, two ]
                     )
-                    |> Mark.attrString "one"
-                    |> Mark.attrString "two"
+                    |> Record.field "one" Mark.string
+                    |> Record.field "two" Mark.string
                 ]
             }
         )
@@ -101,8 +101,8 @@ inlineOrder =
                     (\txt one two ->
                         Just ( one, two )
                     )
-                    |> Mark.attrString "one"
-                    |> Mark.attrString "two"
+                    |> Record.field "one" Mark.string
+                    |> Record.field "two" Mark.string
                 ]
             }
         )

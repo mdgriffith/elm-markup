@@ -1,13 +1,10 @@
 module Mark exposing
-    ( Document
-    , document, documentWith
+    ( Document, document, documentWith
     , Block, block
     , string, int, float, bool
-    , Styles, text
-    , textWith
+    , Styles, text, textWith
     , Replacement, commonReplacements, replacement, balanced
-    , Inline, annotation, verbatim, token
-    , attrString, attrFloat, attrInt
+    , annotation, verbatim
     , oneOf, manyOf
     , tree
     , Outcome(..), Partial
@@ -17,12 +14,10 @@ module Mark exposing
 
 {-|
 
-@docs Document
-
 
 # Building Documents
 
-@docs document, documentWith
+@docs Document, document, documentWith
 
 @docs Block, block
 
@@ -34,9 +29,7 @@ module Mark exposing
 
 # Text
 
-@docs Styles, text
-
-@docs textWith
+@docs Styles, text, textWith
 
 
 # Text Replacements
@@ -48,9 +41,7 @@ module Mark exposing
 
 Along with basic [`styling`](#text) and [`replacements`](#replacement), we also have a few ways to annotate text.
 
-@docs Inline, annotation, verbatim, token
-
-@docs attrString, attrFloat, attrInt
+@docs annotation, verbatim
 
 
 # Higher Level
@@ -85,6 +76,7 @@ import Mark.Internal.Error as Error exposing (AstError(..), Context(..), Problem
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
+import Mark.Record
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
@@ -474,6 +466,8 @@ document view child =
 
 {-| Capture some metadata at the start of your document, followed by the body.
 
+    import Mark.Record as Record
+
     Mark.documentWith
         (\metadata body ->
             { metadata = metadata
@@ -481,15 +475,15 @@ document view child =
             }
         )
         { metadata =
-            Mark.record
+            Record.record
                 (\author publishedAt ->
                     { author = author
                     , publishedAt = publishedAt
                     }
                 )
-                |> Mark.field "author" Mark.string
-                |> Mark.field "publishedAt" Mark.string
-                |> Mark.close
+                |> Record.field "author" Mark.string
+                |> Record.field "publishedAt" Mark.string
+                |> Record.toBlock
         , body =
             --...
         }
@@ -1089,7 +1083,7 @@ But `textWith` is where a lot of things come together. Let's check out what thes
 textWith :
     { view : Styles -> String -> rendered
     , replacements : List Replacement
-    , inlines : List (Inline rendered)
+    , inlines : List (Mark.Record.Record rendered)
     }
     -> Block (List rendered)
 textWith options =
@@ -1106,57 +1100,25 @@ type alias Replacement =
 
 
 
-{- Inline Rewrite
-
-   Valid States:
-
-       [Some text]{link| attribute=anything, !yup }
-
-       - You can attach attributes to a stretch of text.
-       - Attributes can have a value.
-
-       You can also define a token, which shows up like this.
-
-       {token}
-
-       It can also have attributes
-
-       {token| attribute = yoyoyo!}
-
-       For inline stuff, all names must be lowercase.
-
--}
-
-
-{-| -}
-type alias Inline data =
-    Desc.Inline data
-
-
-{-| Lastly, a `token` is like an annotation but has no text that it's attached to, it will just insert a certain value.
-
-Maybe the easiest usecase to think of would be to insert an emoji or an icon:
-
-```markup
-My markup with a {smilie}.
-```
-
-Could be created via
-
-    emoji =
-        Mark.token "smilie" (Html.text 😄)
-
--}
-token : String -> result -> Inline result
-token name result =
-    Inline
-        { converter =
-            \_ attrs ->
-                Outcome.Success [ result ]
-        , expect =
-            ExpectToken name []
-        , name = name
-        }
+-- {-| Lastly, a `token` is like an annotation but has no text that it's attached to, it will just insert a certain value.
+-- Maybe the easiest usecase to think of would be to insert an emoji or an icon:
+-- ```markup
+-- My markup with a {smilie}.
+-- ```
+-- Could be created via
+--     emoji =
+--         Mark.token "smilie" (Html.text 😄)
+-- -}
+-- token : String -> result -> Inline result
+-- token name result =
+--     Inline
+--         { converter =
+--             \_ attrs ->
+--                 Outcome.Success [ result ]
+--         , expect =
+--             ExpectToken name []
+--         , name = name
+--         }
 
 
 {-| An annotation is some **text**, a **name**, and zero or more **attributes**.
@@ -1182,23 +1144,61 @@ and rendered in elm-land via:
                     [ Html.Attributes.href url ]
                     (List.map renderStyles styles)
             )
-            |> Mark.withString "url"
+            |> Record.field "url" Mark.string
 
 -}
-annotation : String -> (List ( Styles, String ) -> result) -> Inline result
-annotation name result =
-    Inline
-        { converter =
-            \textPieces attrs ->
-                Outcome.Success [ result (List.map textToTuple textPieces) ]
-        , expect =
-            ExpectAnnotation name [] []
-        , name = name
+annotation : String -> (List ( Styles, String ) -> result) -> Record result
+annotation name view =
+    Desc.ProtoRecord
+        { name = name
+        , expectations = []
+        , fieldConverter =
+            \desc selected ->
+                case desc of
+                    Desc.Record details ->
+                        if details.name == name then
+                            case details.found of
+                                Desc.Found pos fieldDescriptions ->
+                                    Outcome.Success ( pos, fieldDescriptions, view (selectedText selected) )
+
+                                Desc.Unexpected unexpected ->
+                                    Desc.uncertain unexpected
+
+                        else
+                            Outcome.Failure NoMatch
+
+                    _ ->
+                        Outcome.Failure NoMatch
+        , fields = []
         }
+
+
+selectedText sel =
+    case sel of
+        EmptyAnnotation ->
+            []
+
+        SelectText txts ->
+            List.map textToTuple txts
+
+        SelectString _ ->
+            []
 
 
 textToTuple (Desc.Text style str) =
     ( style, str )
+
+
+selectedString sel =
+    case sel of
+        EmptyAnnotation ->
+            ""
+
+        SelectText txts ->
+            ""
+
+        SelectString str ->
+            str
 
 
 {-| A `verbatim` annotation is denoted by backticks(\`) and allows you to capture a literal string.
@@ -1218,134 +1218,122 @@ Let's take a look at `http://elm-lang.com`.
 It will match the first `verbatim` definition listed in `textWith` that has no attributes.
 
 -}
-verbatim : String -> (String -> result) -> Inline result
-verbatim name result =
-    Inline
-        { converter =
-            \textPieces attrs ->
-                case textPieces of
-                    [] ->
-                        -- This should never happen
-                        Outcome.Failure NoMatch
+verbatim : String -> (String -> result) -> Record result
+verbatim name view =
+    Desc.ProtoRecord
+        { name = name
+        , expectations = []
+        , fieldConverter =
+            \desc selected ->
+                case desc of
+                    Desc.Record details ->
+                        if details.name == name then
+                            case details.found of
+                                Desc.Found pos fieldDescriptions ->
+                                    Outcome.Success ( pos, fieldDescriptions, view (selectedString selected) )
 
-                    (Desc.Text _ fst) :: _ ->
-                        Outcome.Success [ result fst ]
-        , expect =
-            ExpectVerbatim name [] "placeholder"
-        , name = name
+                                Desc.Unexpected unexpected ->
+                                    Desc.uncertain unexpected
+
+                        else
+                            Outcome.Failure NoMatch
+
+                    _ ->
+                        Outcome.Failure NoMatch
+        , fields = []
         }
 
 
-{-| -}
-attrString : String -> Inline (String -> result) -> Inline result
-attrString name newInline =
-    case newInline of
-        Inline details ->
-            Inline
-                { converter =
-                    \textPieces attrs ->
-                        case attrs of
-                            [] ->
-                                Outcome.Failure NoMatch
 
-                            (AttrString attr) :: remaining ->
-                                details.converter textPieces remaining
-                                    |> mapSuccessAndRecovered (List.map (\x -> x (String.trim attr.value)))
-
-                            _ ->
-                                Outcome.Failure NoMatch
-                , expect =
-                    case details.expect of
-                        ExpectToken tokenName attrs ->
-                            ExpectToken tokenName (ExpectAttrString name "" :: attrs)
-
-                        ExpectAnnotation noteName attrs placeholder ->
-                            ExpectAnnotation noteName (ExpectAttrString name "" :: attrs) placeholder
-
-                        ExpectVerbatim verbatimName attrs placeholder ->
-                            ExpectVerbatim verbatimName (ExpectAttrString name "" :: attrs) placeholder
-
-                        -- This shouldn't happen
-                        ExpectText x ->
-                            ExpectText x
-                , name = details.name
-                }
-
-
-{-| -}
-attrInt : String -> Inline (Int -> result) -> Inline result
-attrInt name newInline =
-    case newInline of
-        Inline details ->
-            Inline
-                { converter =
-                    \textPieces attrs ->
-                        case attrs of
-                            [] ->
-                                Outcome.Failure NoMatch
-
-                            (AttrInt attr) :: remaining ->
-                                details.converter textPieces remaining
-                                    |> mapSuccessAndRecovered (List.map (\x -> x attr.value))
-
-                            _ ->
-                                Outcome.Failure NoMatch
-                , expect =
-                    case details.expect of
-                        ExpectToken tokenName attrs ->
-                            ExpectToken tokenName (ExpectAttrInt name 0 :: attrs)
-
-                        ExpectAnnotation noteName attrs placeholder ->
-                            ExpectAnnotation noteName (ExpectAttrInt name 0 :: attrs) placeholder
-
-                        ExpectVerbatim verbatimName attrs placeholder ->
-                            ExpectVerbatim verbatimName (ExpectAttrInt name 0 :: attrs) placeholder
-
-                        -- This shouldn't happen
-                        ExpectText x ->
-                            ExpectText x
-                , name = details.name
-                }
-
-
-defaultFloatAttr =
-    ( "0", 0 )
-
-
-{-| -}
-attrFloat : String -> Inline (Float -> result) -> Inline result
-attrFloat name newInline =
-    case newInline of
-        Inline details ->
-            Inline
-                { converter =
-                    \textPieces attrs ->
-                        case attrs of
-                            [] ->
-                                Outcome.Failure NoMatch
-
-                            (AttrFloat attr) :: remaining ->
-                                details.converter textPieces remaining
-                                    |> mapSuccessAndRecovered (List.map (\x -> x (Tuple.second attr.value)))
-
-                            _ ->
-                                Outcome.Failure NoMatch
-                , expect =
-                    case details.expect of
-                        ExpectToken tokenName attrs ->
-                            ExpectToken tokenName (ExpectAttrFloat name defaultFloatAttr :: attrs)
-
-                        ExpectAnnotation noteName attrs placeholder ->
-                            ExpectAnnotation noteName (ExpectAttrFloat name defaultFloatAttr :: attrs) placeholder
-
-                        ExpectVerbatim verbatimName attrs placeholder ->
-                            ExpectVerbatim verbatimName (ExpectAttrFloat name defaultFloatAttr :: attrs) placeholder
-
-                        -- This shouldn't happen
-                        ExpectText x ->
-                            ExpectText x
-                , name = details.name
-                }
+-- {-| -}
+-- attrString : String -> Inline (String -> result) -> Inline result
+-- attrString name newInline =
+--     case newInline of
+--         Inline details ->
+--             Inline
+--                 { converter =
+--                     \textPieces attrs ->
+--                         case attrs of
+--                             [] ->
+--                                 Outcome.Failure NoMatch
+--                             (AttrString attr) :: remaining ->
+--                                 details.converter textPieces remaining
+--                                     |> mapSuccessAndRecovered (List.map (\x -> x (String.trim attr.value)))
+--                             _ ->
+--                                 Outcome.Failure NoMatch
+--                 , expect =
+--                     case details.expect of
+--                         ExpectToken tokenName attrs ->
+--                             ExpectToken tokenName (ExpectAttrString name "" :: attrs)
+--                         ExpectAnnotation noteName attrs placeholder ->
+--                             ExpectAnnotation noteName (ExpectAttrString name "" :: attrs) placeholder
+--                         ExpectVerbatim verbatimName attrs placeholder ->
+--                             ExpectVerbatim verbatimName (ExpectAttrString name "" :: attrs) placeholder
+--                         -- This shouldn't happen
+--                         ExpectText x ->
+--                             ExpectText x
+--                 , name = details.name
+--                 }
+-- {-| -}
+-- attrInt : String -> Inline (Int -> result) -> Inline result
+-- attrInt name newInline =
+--     case newInline of
+--         Inline details ->
+--             Inline
+--                 { converter =
+--                     \textPieces attrs ->
+--                         case attrs of
+--                             [] ->
+--                                 Outcome.Failure NoMatch
+--                             (AttrInt attr) :: remaining ->
+--                                 details.converter textPieces remaining
+--                                     |> mapSuccessAndRecovered (List.map (\x -> x attr.value))
+--                             _ ->
+--                                 Outcome.Failure NoMatch
+--                 , expect =
+--                     case details.expect of
+--                         ExpectToken tokenName attrs ->
+--                             ExpectToken tokenName (ExpectAttrInt name 0 :: attrs)
+--                         ExpectAnnotation noteName attrs placeholder ->
+--                             ExpectAnnotation noteName (ExpectAttrInt name 0 :: attrs) placeholder
+--                         ExpectVerbatim verbatimName attrs placeholder ->
+--                             ExpectVerbatim verbatimName (ExpectAttrInt name 0 :: attrs) placeholder
+--                         -- This shouldn't happen
+--                         ExpectText x ->
+--                             ExpectText x
+--                 , name = details.name
+--                 }
+-- defaultFloatAttr =
+--     ( "0", 0 )
+-- {-| -}
+-- attrFloat : String -> Inline (Float -> result) -> Inline result
+-- attrFloat name newInline =
+--     case newInline of
+--         Inline details ->
+--             Inline
+--                 { converter =
+--                     \textPieces attrs ->
+--                         case attrs of
+--                             [] ->
+--                                 Outcome.Failure NoMatch
+--                             (AttrFloat attr) :: remaining ->
+--                                 details.converter textPieces remaining
+--                                     |> mapSuccessAndRecovered (List.map (\x -> x (Tuple.second attr.value)))
+--                             _ ->
+--                                 Outcome.Failure NoMatch
+--                 , expect =
+--                     case details.expect of
+--                         ExpectToken tokenName attrs ->
+--                             ExpectToken tokenName (ExpectAttrFloat name defaultFloatAttr :: attrs)
+--                         ExpectAnnotation noteName attrs placeholder ->
+--                             ExpectAnnotation noteName (ExpectAttrFloat name defaultFloatAttr :: attrs) placeholder
+--                         ExpectVerbatim verbatimName attrs placeholder ->
+--                             ExpectVerbatim verbatimName (ExpectAttrFloat name defaultFloatAttr :: attrs) placeholder
+--                         -- This shouldn't happen
+--                         ExpectText x ->
+--                             ExpectText x
+--                 , name = details.name
+--                 }
 
 
 getInlineExpectation (Inline details) =

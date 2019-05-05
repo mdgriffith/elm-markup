@@ -55,10 +55,10 @@ record name view =
         { name = name
         , expectations = []
         , fieldConverter =
-            \desc ->
+            \desc ann ->
                 case desc of
                     Desc.Record details ->
-                        if details.name == name then
+                        if details.name == name && ann == Desc.EmptyAnnotation then
                             case details.found of
                                 Desc.Found pos fieldDescriptions ->
                                     Outcome.Success ( pos, fieldDescriptions, view )
@@ -86,8 +86,8 @@ field name value (Desc.ProtoRecord details) =
         { name = details.name
         , expectations = fieldExpectation newField :: details.expectations
         , fieldConverter =
-            \desc ->
-                case details.fieldConverter desc of
+            \desc ann ->
+                case details.fieldConverter desc ann of
                     Outcome.Success ( pos, fieldDescriptions, rendered ) ->
                         case getField newField fieldDescriptions of
                             Ok (Desc.Found rng myField) ->
@@ -136,6 +136,46 @@ field name value (Desc.ProtoRecord details) =
         }
 
 
+getField :
+    Field value
+    -> List ( String, Desc.Found Desc.Description )
+    -> Result Error.Error (Desc.Found value)
+getField (Field name fieldBlock) fields =
+    List.foldl (matchField name fieldBlock) (Err (Error.MissingFields [ name ])) fields
+
+
+matchField :
+    String
+    -> Block value
+    -> ( String, Desc.Found Desc.Description )
+    -> Result Error.Error (Desc.Found value)
+    -> Result Error.Error (Desc.Found value)
+matchField targetName targetBlock ( name, foundDescription ) existing =
+    case existing of
+        Ok _ ->
+            existing
+
+        Err err ->
+            if name == targetName then
+                case foundDescription of
+                    Desc.Found rng description ->
+                        case Desc.renderBlock targetBlock description of
+                            Outcome.Success rendered ->
+                                Ok (Desc.Found rng rendered)
+
+                            Outcome.Almost invalidAst ->
+                                Err err
+
+                            Outcome.Failure _ ->
+                                Err err
+
+                    Desc.Unexpected unexpected ->
+                        Ok (Desc.Unexpected unexpected)
+
+            else
+                existing
+
+
 {-| Convert a `Record` to a `Block`.
 -}
 toBlock : Record a -> Block a
@@ -150,7 +190,7 @@ toBlock (Desc.ProtoRecord details) =
         , expect = expectations
         , converter =
             \desc ->
-                case details.fieldConverter desc of
+                case details.fieldConverter desc Desc.EmptyAnnotation of
                     Outcome.Success ( pos, fieldDescriptions, rendered ) ->
                         Outcome.Success rendered
 
@@ -172,7 +212,8 @@ toBlock (Desc.ProtoRecord details) =
                         Id.thread parentSeed (List.reverse details.fields)
                 in
                 ( newSeed
-                , parseRecord parentId
+                , Parse.record Parse.BlockRecord
+                    parentId
                     details.name
                     expectations
                     fields
@@ -215,70 +256,6 @@ fieldExpectation (Field name fieldBlock) =
     ( name, Desc.getBlockExpectation fieldBlock )
 
 
-
-{- RECORD PARSER HELPERS -}
-
-
-backtrackCharacters chars range =
-    { start =
-        { offset = range.start.offset - chars
-        , line = range.start.line
-        , column = range.start.column - chars
-        }
-    , end = range.end
-    }
-
-
-parseRecord :
-    Id.Id
-    -> String
-    -> Desc.Expectation
-    -> List ( String, Parser Context Problem ( String, Desc.Found Desc.Description ) )
-    -> Parser Context Problem Desc.Description
-parseRecord id recordName expectations fields =
-    Parser.succeed
-        (\result ->
-            case result of
-                Ok details ->
-                    Desc.Record
-                        { expected = expectations
-                        , id = id
-                        , name = recordName
-                        , found =
-                            Desc.Found (backtrackCharacters 2 details.range) details.value
-                        }
-
-                -- Err ( maybePosition, prob ) ->
-                Err err ->
-                    Desc.Record
-                        { expected = expectations
-                        , id = id
-                        , name = recordName
-                        , found =
-                            Desc.Unexpected
-                                { range = Maybe.withDefault (backtrackCharacters 2 err.range) (Tuple.first err.error)
-                                , problem = Tuple.second err.error
-                                }
-                        }
-        )
-        |= Parse.withRangeResult
-            (Parse.withIndent
-                (\indentation ->
-                    Parser.succeed identity
-                        |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |. Parser.chompIf (\c -> c == '\n') Newline
-                        |= Parser.withIndent (indentation + 4)
-                            (Parser.loop
-                                { remaining = fields
-                                , found = Ok []
-                                }
-                                (parseFields recordName (List.map Tuple.first fields))
-                            )
-                )
-            )
-
-
 withFieldName : String -> Parser Error.Context Error.Problem Desc.Description -> Parser Error.Context Error.Problem ( String, Desc.Found Desc.Description )
 withFieldName name parser =
     Parse.withIndent
@@ -305,38 +282,6 @@ withFieldName name parser =
         )
 
 
-unexpectedField recordName options =
-    Parse.withIndent
-        (\indentation ->
-            Parser.map
-                (\{ range, value } ->
-                    ( value
-                    , Desc.Unexpected
-                        { range = range
-                        , problem =
-                            Error.UnexpectedField
-                                { found = value
-                                , options = options
-                                , recordName = recordName
-                                }
-                        }
-                    )
-                )
-                (Parse.getRangeAndSource
-                    (Parser.succeed identity
-                        |= Parser.getChompedString (Parser.chompWhile Char.isAlphaNum)
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        -- TODO: parse multiline string
-                        |. Parser.withIndent (indentation + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
-                     -- |. Parse.newline
-                     -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
-                    )
-                )
-        )
-
-
 renderRecordResult pos result =
     case result of
         Ok parsedCorrectly ->
@@ -352,246 +297,3 @@ renderRecordResult pos result =
                 { problem = prob
                 , range = pos
                 }
-
-
-type alias RecordFields =
-    { remaining :
-        List ( String, Parser Context Problem ( String, Desc.Found Desc.Description ) )
-    , found :
-        Result ( Maybe Desc.Range, Error.Error ) (List ( String, Desc.Found Desc.Description ))
-    }
-
-
-type Indented thing
-    = Indented thing
-    | WeirdIndent Int
-    | EmptyLine
-
-
-{-| Either:
-
-    1. Parses indent ++ parser ++ Parse.newline
-        -> Outcome.Success!
-    2. Parses many spaces ++ Parse.newline
-        -> Ignore completely
-    3. Parses some number of spaces ++ some not Parse.newlines ++ Parse.newline
-        -> Is improperly indented
-
--}
-indentOrSkip :
-    Int
-    -> Parser Context Problem (Parser.Step RecordFields a)
-    -> Parser Context Problem (Indented (Parser.Step RecordFields a))
-indentOrSkip indentation successParser =
-    Parser.oneOf
-        [ Parser.succeed identity
-            |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
-            |= Parser.oneOf
-                [ Parser.map (always EmptyLine) Parse.newline
-                , Parser.succeed
-                    (\foundIndent content ->
-                        if content /= "" then
-                            WeirdIndent (String.length foundIndent)
-
-                        else
-                            EmptyLine
-                    )
-                    |. Parser.chompIf (\c -> c == ' ') Space
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
-                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
-                    |. Parse.newlineWith "indentOrSkip one"
-
-                -- parse field
-                , Parser.succeed Indented
-                    |= successParser
-
-                -- |. Parse.newlineWith "indentOrSkip two"
-                ]
-
-        -- We're here because there is less than the desired indent.
-        , Parser.succeed
-            (\foundIndent hasContent ->
-                if hasContent then
-                    WeirdIndent (String.length foundIndent)
-
-                else
-                    EmptyLine
-            )
-            |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
-            |= Parser.oneOf
-                [ Parser.map (always False) Parse.newline
-                , Parser.succeed True
-                    |. Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
-                    |. Parse.newline
-                ]
-        ]
-
-
-{-| -}
-parseFields :
-    String
-    -> List String
-    -> RecordFields
-    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Desc.Range, Error.Error ) (List ( String, Desc.Found Desc.Description ))))
-parseFields recordName fieldNames fields =
-    case fields.remaining of
-        [] ->
-            Parse.withIndent
-                (\indentation ->
-                    Parser.succeed
-                        (\remaining ->
-                            if String.trim remaining == "" then
-                                Parser.Done fields.found
-
-                            else
-                                Parser.Done
-                                    (Err
-                                        ( Nothing
-                                        , Error.UnexpectedField
-                                            { options = fieldNames
-                                            , found = String.trim remaining
-                                            , recordName = recordName
-                                            }
-                                        )
-                                    )
-                        )
-                        |= Parser.oneOf
-                            [ Parser.succeed identity
-                                |. Parser.token
-                                    (Parser.Token (String.repeat indentation " ")
-                                        (ExpectingIndentation indentation)
-                                    )
-                                |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
-                            , Parser.succeed ""
-                            ]
-                )
-
-        _ ->
-            case fields.found of
-                Ok found ->
-                    Parse.withIndent
-                        (\indentation ->
-                            Parser.oneOf
-                                [ indentOrSkip indentation (captureField found recordName fields fieldNames)
-                                    |> Parser.map
-                                        (\indentedField ->
-                                            case indentedField of
-                                                Indented thing ->
-                                                    thing
-
-                                                EmptyLine ->
-                                                    Parser.Loop fields
-
-                                                WeirdIndent i ->
-                                                    Parser.Loop
-                                                        { found =
-                                                            Err ( Nothing, Error.ExpectingIndent indentation )
-                                                        , remaining =
-                                                            fields.remaining
-                                                        }
-                                        )
-
-                                -- We've reached here because:
-                                -- 1. We still have expected fields, but we didn't parse them.
-                                -- 2. No other errors occurred.
-                                -- 3. We did not find the correct indentation
-                                -- 4. And This is not a blank line
-                                -- So, the only thing left is that we have some fields that we didn't parse
-                                , Parser.succeed
-                                    (Parser.Done
-                                        (Err
-                                            ( Nothing, Error.MissingFields (List.map Tuple.first fields.remaining) )
-                                        )
-                                    )
-                                ]
-                        )
-
-                Err unexpected ->
-                    -- We've encountered an error, but we still need to parse
-                    -- the entire indented block.  so that the parser can continue.
-                    Parse.withIndent
-                        (\indentation ->
-                            Parser.succeed (Parser.Done fields.found)
-                                |. Parser.loop "" (Parse.raggedIndentedStringAbove (indentation - 4))
-                        )
-
-
-captureField :
-    List ( String, Desc.Found Desc.Description )
-    -> String
-    -> RecordFields
-    -> List String
-    -> Parser Context Problem (Parser.Step RecordFields a)
-captureField found recordName fields fieldNames =
-    Parser.map
-        (\maybeField ->
-            case maybeField of
-                Nothing ->
-                    Parser.Loop fields
-
-                Just ( foundFieldname, fieldValue ) ->
-                    case fieldValue of
-                        Desc.Found _ _ ->
-                            Parser.Loop
-                                { found = Ok (( foundFieldname, fieldValue ) :: found)
-                                , remaining =
-                                    List.filter
-                                        (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
-                                        fields.remaining
-                                }
-
-                        Desc.Unexpected unexpected ->
-                            Parser.Loop
-                                { found = Err ( Just unexpected.range, unexpected.problem )
-                                , remaining =
-                                    List.filter
-                                        (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
-                                        fields.remaining
-                                }
-        )
-        (Parser.oneOf
-            (List.map (Parser.map Just << Tuple.second) fields.remaining
-                ++ [ Parser.map Just (unexpectedField recordName fieldNames)
-                   ]
-            )
-        )
-
-
-getField :
-    Field value
-    -> List ( String, Desc.Found Desc.Description )
-    -> Result Error.Error (Desc.Found value)
-getField (Field name fieldBlock) fields =
-    List.foldl (matchField name fieldBlock) (Err (Error.MissingFields [ name ])) fields
-
-
-matchField :
-    String
-    -> Block value
-    -> ( String, Desc.Found Desc.Description )
-    -> Result Error.Error (Desc.Found value)
-    -> Result Error.Error (Desc.Found value)
-matchField targetName targetBlock ( name, foundDescription ) existing =
-    case existing of
-        Ok _ ->
-            existing
-
-        Err err ->
-            if name == targetName then
-                case foundDescription of
-                    Desc.Found rng description ->
-                        case Desc.renderBlock targetBlock description of
-                            Outcome.Success rendered ->
-                                Ok (Desc.Found rng rendered)
-
-                            Outcome.Almost invalidAst ->
-                                Err err
-
-                            Outcome.Failure _ ->
-                                Err err
-
-                    Desc.Unexpected unexpected ->
-                        Ok (Desc.Unexpected unexpected)
-
-            else
-                existing

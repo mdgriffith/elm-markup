@@ -1,8 +1,10 @@
 module Mark.Internal.Parser exposing
-    ( Replacement(..)
+    ( RecordType(..)
+    , Replacement(..)
     , addToChildren
     , attribute
     , attributeList
+    , backtrackCharacters
     , blocksOrNewlines
     , buildTree
     , float
@@ -17,6 +19,7 @@ module Mark.Internal.Parser exposing
     , oneOf
     , peek
     , raggedIndentedStringAbove
+    , record
     , skipBlankLineWith
     , styledText
     , withIndent
@@ -441,7 +444,7 @@ textCursor inheritedStyles startingPos =
 
 
 styledText :
-    { inlines : List InlineExpectation
+    { inlines : List (Block a)
     , replacements : List Replacement
     }
     -> Id.Seed
@@ -490,7 +493,7 @@ styledText options seed startingPos inheritedStyles until =
 
 {-| -}
 styledTextLoop :
-    { inlines : List InlineExpectation
+    { inlines : List (Block a)
     , replacements : List Replacement
     }
     -> List Char
@@ -517,66 +520,39 @@ styledTextLoop options meaningful untilStrings found =
                 , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
                 ]
 
-        -- `verbatim`{label| attr = maybe this is here}
+        {- WORKING -}
+        -- Parse Selection
+        -- depending on selection type, capture attributes if applicable.
         , Parser.succeed
-            (\start verbatimString maybeToken end ->
-                case maybeToken of
-                    Nothing ->
-                        let
-                            note =
-                                InlineVerbatim
-                                    { name = Nothing
-                                    , text = Text emptyStyles verbatimString
-                                    , range =
-                                        { start = start
-                                        , end = end
-                                        }
-                                    , attributes = []
-                                    }
-                        in
-                        found
-                            |> commitText
-                            |> addToTextCursor note
-                            |> advanceTo end
-                            |> Parser.Loop
+            (\start verbatimString maybeAttributes end ->
+                let
+                    fieldRecord =
+                        case maybeAttributes of
+                            -- TODO: THESE NULL STATES SHOULD BE REMOVED
+                            Nothing ->
+                                DescribeNothing (Tuple.first (Id.step Id.initialSeed))
 
-                    Just (Err errors) ->
-                        let
-                            note =
-                                InlineVerbatim
-                                    { name = Nothing
-                                    , text = Text emptyStyles verbatimString
-                                    , range =
-                                        { start = start
-                                        , end = end
-                                        }
-                                    , attributes = []
-                                    }
-                        in
-                        found
-                            |> commitText
-                            |> addToTextCursor note
-                            |> advanceTo end
-                            |> Parser.Loop
+                            Just (Err errors) ->
+                                DescribeNothing (Tuple.first (Id.step Id.initialSeed))
 
-                    Just (Ok ( name, attrs )) ->
-                        let
-                            note =
-                                InlineVerbatim
-                                    { name = Just name
-                                    , text = Text emptyStyles verbatimString
-                                    , range =
-                                        { start = start
-                                        , end = end
-                                        }
-                                    , attributes = attrs
-                                    }
-                        in
-                        found
-                            |> commitText
-                            |> addToTextCursor note
-                            |> advanceTo end
-                            |> Parser.Loop
+                            Just (Ok foundFields) ->
+                                foundFields
+
+                    note =
+                        InlineBlock
+                            { kind = SelectString verbatimString
+                            , range =
+                                { start = start
+                                , end = end
+                                }
+                            , record = fieldRecord
+                            }
+                in
+                found
+                    |> commitText
+                    |> addToTextCursor note
+                    |> advanceTo end
+                    |> Parser.Loop
             )
             |= getPosition
             |. Parser.token (Parser.Token "`" (Expecting "`"))
@@ -586,7 +562,7 @@ styledTextLoop options meaningful untilStrings found =
             |= Parser.oneOf
                 [ Parser.map Just
                     (attrContainer
-                        { attributes = List.filterMap onlyVerbatim options.inlines
+                        { recordBlocks = List.filterMap onlyVerbatim options.inlines
                         , onError = Tolerant.skip
                         }
                     )
@@ -594,102 +570,171 @@ styledTextLoop options meaningful untilStrings found =
                 ]
             |= getPosition
 
-        -- {token| withAttributes = True}
-        , Parser.succeed
-            (\tokenResult ->
-                case tokenResult of
-                    Err details ->
-                        let
-                            er =
-                                UnexpectedInline
-                                    { range = details.range
-                                    , problem =
-                                        Error.UnknownInline
-                                            (options.inlines
-                                                |> List.map inlineExample
-                                            )
-
-                                    -- TODO: FIX THIS
-                                    --
-                                    -- TODO: This is the wrong error
-                                    -- It could be:
-                                    --   unexpected attributes
-                                    --   missing control characters
-                                    }
-                        in
-                        found
-                            |> commitText
-                            |> addToTextCursor er
-                            |> advanceTo details.range.end
-                            |> Parser.Loop
-
-                    Ok details ->
-                        let
-                            note =
-                                InlineToken
-                                    { name = Tuple.first details.value
-                                    , range = details.range
-                                    , attributes = Tuple.second details.value
-                                    }
-                        in
-                        found
-                            |> commitText
-                            |> addToTextCursor note
-                            |> advanceTo details.range.end
-                            |> Parser.Loop
-            )
-            |= withRangeResult
-                (attrContainer
-                    { attributes = List.filterMap onlyTokens options.inlines
-                    , onError = Tolerant.skip
-                    }
-                )
-
-        -- [Some styled /text/]{token| withAttribtues = True}
-        , Parser.succeed
-            (\result ->
-                case result of
-                    Ok details ->
-                        let
-                            ( noteText, TextCursor childCursor, ( name, attrs ) ) =
-                                details.value
-
-                            note =
-                                InlineAnnotation
-                                    { name = name
-                                    , text = noteText
-                                    , range = details.range
-                                    , attributes = attrs
-                                    }
-                        in
-                        found
-                            |> commitText
-                            |> addToTextCursor note
-                            |> resetBalancedReplacements childCursor.balancedReplacements
-                            |> resetTextWith childCursor.current
-                            |> advanceTo details.range.end
-                            |> Parser.Loop
-
-                    Err errs ->
-                        let
-                            er =
-                                UnexpectedInline
-                                    { range = errs.range
-                                    , problem =
-                                        Error.UnknownInline
-                                            (options.inlines
-                                                |> List.map inlineExample
-                                            )
-                                    }
-                        in
-                        found
-                            |> commitText
-                            |> addToTextCursor er
-                            |> advanceTo errs.range.end
-                            |> Parser.Loop
-            )
-            |= withRangeResult
-                (inlineAnnotation options found)
+        -- `verbatim`{label| attr = maybe this is here}
+        -- , Parser.succeed
+        --     (\start verbatimString maybeToken end ->
+        --         case maybeToken of
+        --             Nothing ->
+        -- let
+        --     note =
+        --         InlineVerbatim
+        --             { name = Nothing
+        --             , text = Text emptyStyles verbatimString
+        --             , range =
+        --                 { start = start
+        --                 , end = end
+        --                 }
+        --             , attributes = []
+        --             }
+        -- in
+        -- found
+        --     |> commitText
+        --     |> addToTextCursor note
+        --     |> advanceTo end
+        --     |> Parser.Loop
+        --             Just (Err errors) ->
+        --                 let
+        --                     note =
+        --                         InlineVerbatim
+        --                             { name = Nothing
+        --                             , text = Text emptyStyles verbatimString
+        --                             , range =
+        --                                 { start = start
+        --                                 , end = end
+        --                                 }
+        --                             , attributes = []
+        --                             }
+        --                 in
+        --                 found
+        --                     |> commitText
+        --                     |> addToTextCursor note
+        --                     |> advanceTo end
+        --                     |> Parser.Loop
+        --             Just (Ok ( name, attrs )) ->
+        --                 let
+        --                     note =
+        --                         InlineVerbatim
+        --                             { name = Just name
+        --                             , text = Text emptyStyles verbatimString
+        --                             , range =
+        --                                 { start = start
+        --                                 , end = end
+        --                                 }
+        --                             , attributes = attrs
+        --                             }
+        --                 in
+        --                 found
+        --                     |> commitText
+        --                     |> addToTextCursor note
+        --                     |> advanceTo end
+        --                     |> Parser.Loop
+        --     )
+        --     |= getPosition
+        --     |. Parser.token (Parser.Token "`" (Expecting "`"))
+        --     |= Parser.getChompedString
+        --         (Parser.chompWhile (\c -> c /= '`' && c /= '\n'))
+        --     |. Parser.chompWhile (\c -> c == '`')
+        --     |= Parser.oneOf
+        --         [ Parser.map Just
+        --             (attrContainer
+        --                 { attributes = List.filterMap onlyVerbatim options.inlines
+        --                 , onError = Tolerant.skip
+        --                 }
+        --             )
+        --         , Parser.succeed Nothing
+        --         ]
+        --     |= getPosition
+        -- -- {token| withAttributes = True}
+        -- , Parser.succeed
+        --     (\tokenResult ->
+        --         case tokenResult of
+        --             Err details ->
+        --                 let
+        --                     er =
+        --                         UnexpectedInline
+        --                             { range = details.range
+        --                             , problem =
+        --                                 Error.UnknownInline
+        --                                     (options.inlines
+        --                                         |> List.map inlineExample
+        --                                     )
+        --                             -- TODO: FIX THIS
+        --                             --
+        --                             -- TODO: This is the wrong error
+        --                             -- It could be:
+        --                             --   unexpected attributes
+        --                             --   missing control characters
+        --                             }
+        --                 in
+        --                 found
+        --                     |> commitText
+        --                     |> addToTextCursor er
+        --                     |> advanceTo details.range.end
+        --                     |> Parser.Loop
+        --             Ok details ->
+        --                 let
+        --                     note =
+        --                         InlineToken
+        --                             { name = Tuple.first details.value
+        --                             , range = details.range
+        --                             , attributes = Tuple.second details.value
+        --                             }
+        --                 in
+        --                 found
+        --                     |> commitText
+        --                     |> addToTextCursor note
+        --                     |> advanceTo details.range.end
+        --                     |> Parser.Loop
+        --     )
+        --     |= withRangeResult
+        --         (attrContainer
+        --             { attributes = List.filterMap onlyTokens options.inlines
+        --             , onError = Tolerant.skip
+        --             }
+        --         )
+        -- -- [Some styled /text/]{token| withAttribtues = True}
+        -- , Parser.succeed
+        --     (\result ->
+        --         case result of
+        --             Ok details ->
+        --                 let
+        --                     ( noteText, TextCursor childCursor, ( name, attrs ) ) =
+        --                         details.value
+        --                     note =
+        --                         InlineAnnotation
+        --                             { name = name
+        --                             , text = noteText
+        --                             , range = details.range
+        --                             , attributes = attrs
+        --                             }
+        --                 in
+        --                 found
+        --                     |> commitText
+        --                     |> addToTextCursor note
+        --                     |> resetBalancedReplacements childCursor.balancedReplacements
+        --                     |> resetTextWith childCursor.current
+        --                     |> advanceTo details.range.end
+        --                     |> Parser.Loop
+        --             Err errs ->
+        --                 let
+        --                     er =
+        --                         UnexpectedInline
+        --                             { range = errs.range
+        --                             , problem =
+        --                                 Error.UnknownInline
+        --                                     (options.inlines
+        --                                         |> List.map inlineExample
+        --                                     )
+        --                             }
+        --                 in
+        --                 found
+        --                     |> commitText
+        --                     |> addToTextCursor er
+        --                     |> advanceTo errs.range.end
+        --                     |> Parser.Loop
+        --     )
+        --     |= withRangeResult
+        --         (inlineAnnotation options found)
         , -- chomp until a meaningful character
           Parser.succeed
             (\( new, final ) ->
@@ -743,10 +788,6 @@ styledTextLoop options meaningful untilStrings found =
                                 ]
                         )
                )
-
-        -- |> Parser.andThen
-        --     (\new ->
-        --     )
         ]
 
 
@@ -778,45 +819,43 @@ almostReplacement replacements existing =
 
 
 -- inlineAnnotation : () -> () -> Tolerant.Parser Context Problem ( List Text, TextCursor, ( String, List InlineAttribute ) )
-
-
-inlineAnnotation options found =
-    Tolerant.succeed
-        (\( text, cursor ) maybeNameAndAttrs ->
-            ( text, cursor, maybeNameAndAttrs )
-        )
-        |> Tolerant.ignore
-            (Tolerant.token
-                { match = "["
-                , problem = InlineStart
-                , onError = Tolerant.skip
-                }
-            )
-        |> Tolerant.keep
-            (Tolerant.try
-                (Parser.loop
-                    (textCursor (getCurrentStyles found)
-                        { offset = 0
-                        , line = 1
-                        , column = 1
-                        }
-                    )
-                    (simpleStyledTextTill [ '\n', ']' ] options.replacements)
-                )
-            )
-        |> Tolerant.ignore
-            (Tolerant.token
-                { match = "]"
-                , problem = InlineEnd
-                , onError = Tolerant.fastForwardTo [ '}', '\n' ]
-                }
-            )
-        |> Tolerant.keep
-            (attrContainer
-                { attributes = List.filterMap onlyAnnotations options.inlines
-                , onError = Tolerant.fastForwardTo [ '}', '\n' ]
-                }
-            )
+-- inlineAnnotation options found =
+--     Tolerant.succeed
+--         (\( text, cursor ) maybeNameAndAttrs ->
+--             ( text, cursor, maybeNameAndAttrs )
+--         )
+--         |> Tolerant.ignore
+--             (Tolerant.token
+--                 { match = "["
+--                 , problem = InlineStart
+--                 , onError = Tolerant.skip
+--                 }
+--             )
+--         |> Tolerant.keep
+--             (Tolerant.try
+--                 (Parser.loop
+--                     (textCursor (getCurrentStyles found)
+--                         { offset = 0
+--                         , line = 1
+--                         , column = 1
+--                         }
+--                     )
+--                     (simpleStyledTextTill [ '\n', ']' ] options.replacements)
+--                 )
+--             )
+--         |> Tolerant.ignore
+--             (Tolerant.token
+--                 { match = "]"
+--                 , problem = InlineEnd
+--                 , onError = Tolerant.fastForwardTo [ '}', '\n' ]
+--                 }
+--             )
+--         |> Tolerant.keep
+--             (attrContainer
+--                 { attributes = List.filterMap onlyAnnotations options.inlines
+--                 , onError = Tolerant.fastForwardTo [ '}', '\n' ]
+--                 }
+--             )
 
 
 simpleStyledTextTill :
@@ -903,10 +942,10 @@ If they are required, then we can fastforward to a specific condition and contin
 
 -}
 attrContainer :
-    { attributes : List ( String, List AttrExpectation )
+    { recordBlocks : List (Block a)
     , onError : Tolerant.OnError
     }
-    -> Tolerant.Parser Context Problem ( String, List InlineAttribute )
+    -> Tolerant.Parser Context Problem Description
 attrContainer config =
     Tolerant.succeed identity
         |> Tolerant.ignore
@@ -919,7 +958,10 @@ attrContainer config =
         |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
         |> Tolerant.keep
             (Tolerant.oneOf InlineStart
-                (List.map tokenBody config.attributes)
+                (config.recordBlocks
+                    -- NOTE: We're throwing away IDs here, maybe we dont want to do that?
+                    |> List.map (Tolerant.try << Tuple.second << getParser Id.initialSeed)
+                )
             )
         |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
         |> Tolerant.ignore
@@ -1619,66 +1661,49 @@ parseTillEnd =
 
 
 {- MISC HELPERS -}
+-- onlyTokens inline =
+--     case inline of
+--         ExpectAnnotation name attrs _ ->
+--             Nothing
+--         ExpectToken name attrs ->
+--             Just ( name, attrs )
+--         ExpectVerbatim name _ _ ->
+--             Nothing
+--         ExpectText _ ->
+--             Nothing
+-- onlyAnnotations inline =
+--     case inline of
+--         ExpectAnnotation name attrs _ ->
+--             Just ( name, attrs )
+--         ExpectToken name attrs ->
+--             Nothing
+--         ExpectVerbatim name _ _ ->
+--             Nothing
+--         ExpectText _ ->
+--             Nothing
 
 
-onlyTokens inline =
-    case inline of
-        ExpectAnnotation name attrs _ ->
+onlyVerbatim : Block a -> Maybe (Block a)
+onlyVerbatim (Block details) =
+    case details.kind of
+        Value ->
             Nothing
 
-        ExpectToken name attrs ->
-            Just ( name, attrs )
-
-        ExpectVerbatim name _ _ ->
-            Nothing
-
-        ExpectText _ ->
-            Nothing
-
-
-onlyAnnotations inline =
-    case inline of
-        ExpectAnnotation name attrs _ ->
-            Just ( name, attrs )
-
-        ExpectToken name attrs ->
-            Nothing
-
-        ExpectVerbatim name _ _ ->
-            Nothing
-
-        ExpectText _ ->
-            Nothing
-
-
-onlyVerbatim inline =
-    case inline of
-        ExpectAnnotation name attrs _ ->
-            Nothing
-
-        ExpectToken name attrs ->
-            Nothing
-
-        ExpectVerbatim name attrs _ ->
-            Just ( name, attrs )
-
-        ExpectText _ ->
+        Named name ->
             Nothing
 
 
-getInlineName inline =
-    case inline of
-        ExpectAnnotation name attrs _ ->
-            name
 
-        ExpectToken name attrs ->
-            name
-
-        ExpectVerbatim name _ _ ->
-            name
-
-        ExpectText _ ->
-            ""
+-- getInlineName inline =
+--     case inline of
+--         ExpectAnnotation name attrs _ ->
+--             name
+--         ExpectToken name attrs ->
+--             name
+--         ExpectVerbatim name _ _ ->
+--             name
+--         ExpectText _ ->
+--             ""
 
 
 removeByIndex index list =
@@ -1711,7 +1736,7 @@ blocksOrNewlines indentation blocks cursor =
                 , seed = cursor.seed
                 }
             )
-            |. newlineWith "empty Parse.newline"
+            |. newlineWith "empty newline"
         , if not cursor.parsedSomething then
             -- First thing already has indentation accounted for.
             makeBlocksParser blocks cursor.seed
@@ -1940,6 +1965,403 @@ indentedBlocksOrNewlines seed item ( indentation, existing ) =
         ]
 
 
+type RecordType
+    = InlineRecord
+    | BlockRecord
+
+
+record recordType id recordName expectations fields =
+    Parser.succeed
+        (\result ->
+            case result of
+                Ok details ->
+                    Record
+                        { expected = expectations
+                        , id = id
+                        , name = recordName
+                        , found =
+                            Found (backtrackCharacters 2 details.range) details.value
+                        }
+
+                Err err ->
+                    Record
+                        { expected = expectations
+                        , id = id
+                        , name = recordName
+                        , found =
+                            Unexpected
+                                { range = Maybe.withDefault (backtrackCharacters 2 err.range) (Tuple.first err.error)
+                                , problem = Tuple.second err.error
+                                }
+                        }
+        )
+        |= withRangeResult
+            (withIndent
+                (\indentation ->
+                    Parser.succeed identity
+                        |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |. (case recordType of
+                                InlineRecord ->
+                                    Parser.chompIf (\c -> c == '|') Newline
+
+                                BlockRecord ->
+                                    Parser.chompIf (\c -> c == '\n') Newline
+                           )
+                        |= (case recordType of
+                                InlineRecord ->
+                                    Parser.loop
+                                        { remaining = fields
+                                        , found = Ok []
+                                        }
+                                        (parseInlineFields recordName (List.map Tuple.first fields))
+
+                                BlockRecord ->
+                                    Parser.withIndent (indentation + 4)
+                                        (Parser.loop
+                                            { remaining = fields
+                                            , found = Ok []
+                                            }
+                                            (parseFields recordName (List.map Tuple.first fields))
+                                        )
+                           )
+                )
+            )
+
+
+backtrackCharacters chars range =
+    { start =
+        { offset = range.start.offset - chars
+        , line = range.start.line
+        , column = range.start.column - chars
+        }
+    , end = range.end
+    }
+
+
+type alias RecordFields =
+    { remaining :
+        List ( String, Parser Context Problem ( String, Found Description ) )
+    , found :
+        Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))
+    }
+
+
+type Indented thing
+    = Indented thing
+    | WeirdIndent Int
+    | EmptyLine
+
+
+{-| -}
+parseFields :
+    String
+    -> List String
+    -> RecordFields
+    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))))
+parseFields recordName fieldNames fields =
+    case fields.remaining of
+        [] ->
+            withIndent
+                (\indentation ->
+                    Parser.succeed
+                        (\remaining ->
+                            if String.trim remaining == "" then
+                                Parser.Done fields.found
+
+                            else
+                                Parser.Done
+                                    (Err
+                                        ( Nothing
+                                        , Error.UnexpectedField
+                                            { options = fieldNames
+                                            , found = String.trim remaining
+                                            , recordName = recordName
+                                            }
+                                        )
+                                    )
+                        )
+                        |= Parser.oneOf
+                            [ Parser.succeed identity
+                                |. Parser.token
+                                    (Parser.Token (String.repeat indentation " ")
+                                        (ExpectingIndentation indentation)
+                                    )
+                                |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
+                            , Parser.succeed ""
+                            ]
+                )
+
+        _ ->
+            case fields.found of
+                Ok found ->
+                    withIndent
+                        (\indentation ->
+                            Parser.oneOf
+                                [ indentOrSkip indentation (captureField found recordName fields fieldNames)
+                                    |> Parser.map
+                                        (\indentedField ->
+                                            case indentedField of
+                                                Indented thing ->
+                                                    thing
+
+                                                EmptyLine ->
+                                                    Parser.Loop fields
+
+                                                WeirdIndent i ->
+                                                    Parser.Loop
+                                                        { found =
+                                                            Err ( Nothing, Error.ExpectingIndent indentation )
+                                                        , remaining =
+                                                            fields.remaining
+                                                        }
+                                        )
+
+                                -- We've reached here because:
+                                -- 1. We still have expected fields, but we didn't parse them.
+                                -- 2. No other errors occurred.
+                                -- 3. We did not find the correct indentation
+                                -- 4. And This is not a blank line
+                                -- So, the only thing left is that we have some fields that we didn't parse
+                                , Parser.succeed
+                                    (Parser.Done
+                                        (Err
+                                            ( Nothing, Error.MissingFields (List.map Tuple.first fields.remaining) )
+                                        )
+                                    )
+                                ]
+                        )
+
+                Err unexpected ->
+                    -- We've encountered an error, but we still need to parse
+                    -- the entire indented block.  so that the parser can continue.
+                    withIndent
+                        (\indentation ->
+                            Parser.succeed (Parser.Done fields.found)
+                                |. Parser.loop "" (raggedIndentedStringAbove (indentation - 4))
+                        )
+
+
+{-| Either:
+
+    1. Parses indent ++ parser ++ newline
+        -> Outcome.Success!
+    2. Parses many spaces ++ newline
+        -> Ignore completely
+    3. Parses some number of spaces ++ some not newlines ++ newline
+        -> Is improperly indented
+
+-}
+indentOrSkip :
+    Int
+    -> Parser Context Problem (Parser.Step RecordFields a)
+    -> Parser Context Problem (Indented (Parser.Step RecordFields a))
+indentOrSkip indentation successParser =
+    Parser.oneOf
+        [ Parser.succeed identity
+            |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
+            |= Parser.oneOf
+                [ Parser.map (always EmptyLine) newline
+                , Parser.succeed
+                    (\foundIndent content ->
+                        if content /= "" then
+                            WeirdIndent (String.length foundIndent)
+
+                        else
+                            EmptyLine
+                    )
+                    |. Parser.chompIf (\c -> c == ' ') Space
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
+                    |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
+                    |. newlineWith "indentOrSkip one"
+
+                -- parse field
+                , Parser.succeed Indented
+                    |= successParser
+
+                -- |. newlineWith "indentOrSkip two"
+                ]
+
+        -- We're here because there is less than the desired indent.
+        , Parser.succeed
+            (\foundIndent hasContent ->
+                if hasContent then
+                    WeirdIndent (String.length foundIndent)
+
+                else
+                    EmptyLine
+            )
+            |= Parser.getChompedString (Parser.chompWhile (\c -> c == ' '))
+            |= Parser.oneOf
+                [ Parser.map (always False) newline
+                , Parser.succeed True
+                    |. Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
+                    |. newline
+                ]
+        ]
+
+
+captureField :
+    List ( String, Found Description )
+    -> String
+    -> RecordFields
+    -> List String
+    -> Parser Context Problem (Parser.Step RecordFields a)
+captureField found recordName fields fieldNames =
+    Parser.map
+        (\maybeField ->
+            case maybeField of
+                Nothing ->
+                    Parser.Loop fields
+
+                Just ( foundFieldname, fieldValue ) ->
+                    case fieldValue of
+                        Found _ _ ->
+                            Parser.Loop
+                                { found = Ok (( foundFieldname, fieldValue ) :: found)
+                                , remaining =
+                                    List.filter
+                                        (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
+                                        fields.remaining
+                                }
+
+                        Unexpected unexpected ->
+                            Parser.Loop
+                                { found = Err ( Just unexpected.range, unexpected.problem )
+                                , remaining =
+                                    List.filter
+                                        (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
+                                        fields.remaining
+                                }
+        )
+        (Parser.oneOf
+            (List.map (Parser.map Just << Tuple.second) fields.remaining
+                ++ [ Parser.map Just (unexpectedField recordName fieldNames)
+                   ]
+            )
+        )
+
+
+unexpectedField recordName options =
+    withIndent
+        (\indentation ->
+            Parser.map
+                (\{ range, value } ->
+                    ( value
+                    , Unexpected
+                        { range = range
+                        , problem =
+                            Error.UnexpectedField
+                                { found = value
+                                , options = options
+                                , recordName = recordName
+                                }
+                        }
+                    )
+                )
+                (getRangeAndSource
+                    (Parser.succeed identity
+                        |= Parser.getChompedString (Parser.chompWhile Char.isAlphaNum)
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        -- TODO: parse multiline string
+                        |. Parser.withIndent (indentation + 4) (Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n')))
+                     -- |. newline
+                     -- |. Parser.map (Debug.log "unexpected capture") (Parser.loop "" (raggedIndentedStringAbove (indent - 4)))
+                    )
+                )
+        )
+
+
+
+{- Inline Record Fields -}
+
+
+{-| -}
+parseInlineFields :
+    String
+    -> List String
+    -> RecordFields
+    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))))
+parseInlineFields recordName fieldNames fields =
+    case fields.remaining of
+        [] ->
+            withIndent
+                (\indentation ->
+                    Parser.succeed
+                        (\remaining ->
+                            if String.trim remaining == "" then
+                                Parser.Done fields.found
+
+                            else
+                                Parser.Done
+                                    (Err
+                                        ( Nothing
+                                        , Error.UnexpectedField
+                                            { options = fieldNames
+                                            , found = String.trim remaining
+                                            , recordName = recordName
+                                            }
+                                        )
+                                    )
+                        )
+                        |= Parser.oneOf
+                            [ Parser.succeed identity
+                                |. Parser.token
+                                    (Parser.Token (String.repeat indentation " ")
+                                        (ExpectingIndentation indentation)
+                                    )
+                                |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '}'))
+                            , Parser.succeed ""
+                            ]
+                )
+
+        _ ->
+            case fields.found of
+                Ok found ->
+                    Parser.oneOf
+                        [ captureField found recordName fields fieldNames
+                            |> Parser.map
+                                (\indentedField ->
+                                    case indentedField of
+                                        Indented thing ->
+                                            thing
+
+                                        EmptyLine ->
+                                            Parser.Loop fields
+
+                                        WeirdIndent i ->
+                                            Parser.Loop
+                                                { found =
+                                                    Err ( Nothing, Error.ExpectingIndent indentation )
+                                                , remaining =
+                                                    fields.remaining
+                                                }
+                                )
+
+                        -- We've reached here because:
+                        -- 1. We still have expected fields, but we didn't parse them.
+                        -- 2. No other errors occurred.
+                        -- 3. We did not find the correct indentation
+                        -- 4. And This is not a blank line
+                        -- So, the only thing left is that we have some fields that we didn't parse
+                        , Parser.succeed
+                            (Parser.Done
+                                (Err
+                                    ( Nothing, Error.MissingFields (List.map Tuple.first fields.remaining) )
+                                )
+                            )
+                        ]
+
+                Err unexpected ->
+                    -- We've encountered an error, but we still need to parse
+                    -- the entire indented block.  so that the parser can continue.
+                    Parser.succeed (Parser.Done fields.found)
+                        |. Parser.chompWhile (\c -> c /= '}')
+
+
+{--}
 {-| We only expect nearby indentations.
 
 We can't go below the `base` indentation.
