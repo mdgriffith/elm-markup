@@ -17,6 +17,7 @@ module Mark.Internal.Parser exposing
     , newline
     , newlineWith
     , oneOf
+    , parseInlineFields
     , peek
     , raggedIndentedStringAbove
     , record
@@ -364,6 +365,12 @@ getFailableBlock seed (Block details) =
             )
 
         Value ->
+            Tuple.mapSecond (Parser.map Ok) (details.parser seed)
+
+        VerbatimNamed name ->
+            Tuple.mapSecond (Parser.map Ok) (details.parser seed)
+
+        AnnotationNamed name ->
             Tuple.mapSecond (Parser.map Ok) (details.parser seed)
 
 
@@ -1684,13 +1691,35 @@ parseTillEnd =
 
 
 onlyVerbatim : Block a -> Maybe (Block a)
-onlyVerbatim (Block details) =
+onlyVerbatim ((Block details) as thisBlock) =
     case details.kind of
         Value ->
             Nothing
 
         Named name ->
             Nothing
+
+        VerbatimNamed _ ->
+            Just thisBlock
+
+        AnnotationNamed _ ->
+            Nothing
+
+
+onlyAnnotation : Block a -> Maybe (Block a)
+onlyAnnotation ((Block details) as thisBlock) =
+    case details.kind of
+        Value ->
+            Nothing
+
+        Named name ->
+            Nothing
+
+        VerbatimNamed _ ->
+            Nothing
+
+        AnnotationNamed _ ->
+            Just thisBlock
 
 
 
@@ -2001,29 +2030,35 @@ record recordType id recordName expectations fields =
                     Parser.succeed identity
                         |. Parser.keyword (Parser.Token recordName (ExpectingBlockName recordName))
                         |. Parser.chompWhile (\c -> c == ' ')
-                        |. (case recordType of
-                                InlineRecord ->
-                                    Parser.chompIf (\c -> c == '|') Newline
+                        |= (if List.isEmpty fields then
+                                Parser.succeed (Ok [])
 
-                                BlockRecord ->
-                                    Parser.chompIf (\c -> c == '\n') Newline
-                           )
-                        |= (case recordType of
-                                InlineRecord ->
-                                    Parser.loop
-                                        { remaining = fields
-                                        , found = Ok []
-                                        }
-                                        (parseInlineFields recordName (List.map Tuple.first fields))
+                            else
+                                Parser.succeed identity
+                                    |. (case recordType of
+                                            InlineRecord ->
+                                                Parser.chompIf (\c -> c == '|') (Expecting "bar")
 
-                                BlockRecord ->
-                                    Parser.withIndent (indentation + 4)
-                                        (Parser.loop
-                                            { remaining = fields
-                                            , found = Ok []
-                                            }
-                                            (parseFields recordName (List.map Tuple.first fields))
-                                        )
+                                            BlockRecord ->
+                                                Parser.chompIf (\c -> c == '\n') Newline
+                                       )
+                                    |= (case recordType of
+                                            InlineRecord ->
+                                                Parser.loop
+                                                    { remaining = fields
+                                                    , found = Ok []
+                                                    }
+                                                    (parseInlineFields recordName (List.map Tuple.first fields))
+
+                                            BlockRecord ->
+                                                Parser.withIndent (indentation + 4)
+                                                    (Parser.loop
+                                                        { remaining = fields
+                                                        , found = Ok []
+                                                        }
+                                                        (parseFields recordName (List.map Tuple.first fields))
+                                                    )
+                                       )
                            )
                 )
             )
@@ -2285,60 +2320,56 @@ parseInlineFields :
     -> RecordFields
     -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))))
 parseInlineFields recordName fieldNames fields =
+    let
+        hasMore =
+            case fields.remaining of
+                [] ->
+                    False
+
+                fst :: [] ->
+                    False
+
+                _ ->
+                    True
+    in
     case fields.remaining of
         [] ->
-            withIndent
-                (\indentation ->
-                    Parser.succeed
-                        (\remaining ->
-                            if String.trim remaining == "" then
-                                Parser.Done fields.found
+            Parser.succeed
+                (\remaining ->
+                    if String.trim remaining == "" then
+                        Parser.Done fields.found
 
-                            else
-                                Parser.Done
-                                    (Err
-                                        ( Nothing
-                                        , Error.UnexpectedField
-                                            { options = fieldNames
-                                            , found = String.trim remaining
-                                            , recordName = recordName
-                                            }
-                                        )
-                                    )
-                        )
-                        |= Parser.oneOf
-                            [ Parser.succeed identity
-                                |. Parser.token
-                                    (Parser.Token (String.repeat indentation " ")
-                                        (ExpectingIndentation indentation)
-                                    )
-                                |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '}'))
-                            , Parser.succeed ""
-                            ]
+                    else
+                        Parser.Done
+                            (Err
+                                ( Nothing
+                                , Error.UnexpectedField
+                                    { options = fieldNames
+                                    , found = String.trim remaining
+                                    , recordName = recordName
+                                    }
+                                )
+                            )
                 )
+                |= Parser.oneOf
+                    [ Parser.getChompedString (Parser.chompWhile (\c -> c /= '}'))
+                    , Parser.succeed ""
+                    ]
 
         _ ->
             case fields.found of
                 Ok found ->
                     Parser.oneOf
-                        [ captureField found recordName fields fieldNames
-                            |> Parser.map
-                                (\indentedField ->
-                                    case indentedField of
-                                        Indented thing ->
-                                            thing
+                        [ Parser.succeed identity
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |= captureField found recordName fields fieldNames
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |. (if hasMore then
+                                    Parser.token (Parser.Token "," (Expecting ","))
 
-                                        EmptyLine ->
-                                            Parser.Loop fields
-
-                                        WeirdIndent i ->
-                                            Parser.Loop
-                                                { found =
-                                                    Err ( Nothing, Error.ExpectingIndent indentation )
-                                                , remaining =
-                                                    fields.remaining
-                                                }
-                                )
+                                else
+                                    Parser.succeed ()
+                               )
 
                         -- We've reached here because:
                         -- 1. We still have expected fields, but we didn't parse them.

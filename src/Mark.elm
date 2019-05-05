@@ -1077,7 +1077,7 @@ But `textWith` is where a lot of things come together. Let's check out what thes
 
   - `view` is the function to render an individual fragment of text. This is mostly what [`Mark.text`](#text) does, so it should seem familiar.
   - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
-  - `inlines` are custom inline blocks. You can use these to render things like links or render emojis :D.
+  - `inlines` are custom inline blocks. You can use these to render things like links or emojis :D.
 
 -}
 textWith :
@@ -1151,6 +1151,7 @@ annotation : String -> (List ( Styles, String ) -> result) -> Record result
 annotation name view =
     Desc.ProtoRecord
         { name = name
+        , blockKind = Desc.AnnotationNamed name
         , expectations = []
         , fieldConverter =
             \desc selected ->
@@ -1222,6 +1223,7 @@ verbatim : String -> (String -> result) -> Record result
 verbatim name view =
     Desc.ProtoRecord
         { name = name
+        , blockKind = Desc.VerbatimNamed name
         , expectations = []
         , fieldConverter =
             \desc selected ->

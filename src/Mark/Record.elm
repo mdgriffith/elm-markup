@@ -53,6 +53,7 @@ record : String -> data -> Record data
 record name view =
     Desc.ProtoRecord
         { name = name
+        , blockKind = Desc.Named name
         , expectations = []
         , fieldConverter =
             \desc ann ->
@@ -84,6 +85,7 @@ field name value (Desc.ProtoRecord details) =
     in
     Desc.ProtoRecord
         { name = details.name
+        , blockKind = details.blockKind
         , expectations = fieldExpectation newField :: details.expectations
         , fieldConverter =
             \desc ann ->
@@ -186,7 +188,7 @@ toBlock (Desc.ProtoRecord details) =
                 details.expectations
     in
     Desc.Block
-        { kind = Desc.Named details.name
+        { kind = details.blockKind
         , expect = expectations
         , converter =
             \desc ->

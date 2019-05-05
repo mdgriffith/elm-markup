@@ -2725,7 +2725,7 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
                 details.expectations
     in
     Desc.Block
-        { kind = Desc.Named details.name
+        { kind = details.blockKind
         , expect = expectations
         , converter =
             \desc ->
@@ -2841,8 +2841,7 @@ convertTextDescription id options comp cursor =
                                     almostInlineBlock details.kind
                             in
                             -- TODO: MATCH RECORD TYPE AS WELL
-                            if Named name == inlineDetails.kind then
-                                --&& isToken inline then
+                            if matchKinds details.kind inlineDetails.kind then
                                 Just inlineDetails
 
                             else
@@ -2878,6 +2877,21 @@ convertTextDescription id options comp cursor =
                         --TODO:  This converter also needs Annotation Type
                         (matched.converter details.record)
                         cursor
+
+
+matchKinds selection blockKind =
+    case ( selection, blockKind ) of
+        ( SelectString str, VerbatimNamed _ ) ->
+            True
+
+        ( SelectText _, AnnotationNamed _ ) ->
+            True
+
+        ( EmptyAnnotation, Named _ ) ->
+            True
+
+        _ ->
+            False
 
 
 

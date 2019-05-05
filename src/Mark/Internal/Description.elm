@@ -184,6 +184,8 @@ type Block data
 type BlockKind
     = Value
     | Named String
+    | VerbatimNamed String
+    | AnnotationNamed String
 
 
 recordName : Description -> Maybe String
@@ -458,9 +460,11 @@ mapSuccessAndRecovered fn outcome =
 type Record data
     = ProtoRecord
         { name : String
+        , blockKind : BlockKind
         , expectations : List ( String, Expectation )
         , fieldConverter :
-            Description -> AnnotationType
+            Description
+            -> AnnotationType
             -> Outcome Error.AstError (Uncertain (FieldConverter data)) (FieldConverter data)
         , fields : List FieldParser
         }
@@ -647,6 +651,12 @@ blockName (Block details) =
         Value ->
             Nothing
 
+        VerbatimNamed name ->
+            Just name
+
+        AnnotationNamed name ->
+            Just name
+
 
 getParser : Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
 getParser seed (Block details) =
@@ -666,6 +676,24 @@ getParser seed (Block details) =
         Value ->
             details.parser seed
 
+        VerbatimNamed name ->
+            let
+                ( newSeed, blockParser ) =
+                    details.parser seed
+            in
+            ( newSeed
+            , blockParser
+            )
+
+        AnnotationNamed name ->
+            let
+                ( newSeed, blockParser ) =
+                    details.parser seed
+            in
+            ( newSeed
+            , blockParser
+            )
+
 
 getParserNoBar seed (Block details) =
     case details.kind of
@@ -673,6 +701,12 @@ getParserNoBar seed (Block details) =
             details.parser seed
 
         Value ->
+            details.parser seed
+
+        VerbatimNamed name ->
+            details.parser seed
+
+        AnnotationNamed name ->
             details.parser seed
 
 
