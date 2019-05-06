@@ -615,7 +615,10 @@ suite =
                     Expect.equal
                         (toResult inlines "[my]{highlurt} highlighted sentence")
                         (Err
-                            [ Error.UnknownInline [ "[some styled text]{highlight}", "`some styled text`" ]
+                            [ Error.UnknownInline
+                                [ "[my]{highlight}"
+                                , "[my]{verb}"
+                                ]
                             ]
                         )
             ]

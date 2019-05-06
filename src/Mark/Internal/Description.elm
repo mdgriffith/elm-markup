@@ -11,7 +11,7 @@ module Mark.Internal.Description exposing
     , Block(..), BlockKind(..), Document(..), Inline(..)
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
-    , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext
+    , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection
     )
 
 {-|
@@ -40,7 +40,7 @@ module Mark.Internal.Description exposing
 
 @docs resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
 
-@docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext
+@docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext, blockKindToSelection
 
 -}
 
@@ -206,6 +206,21 @@ blockKindToContext kind =
 
         AnnotationNamed name ->
             ParseInline
+
+
+blockKindToSelection kind =
+    case kind of
+        Value ->
+            EmptyAnnotation
+
+        Named name ->
+            EmptyAnnotation
+
+        VerbatimNamed name ->
+            SelectString ""
+
+        AnnotationNamed name ->
+            SelectText []
 
 
 recordName : Description -> Maybe String
@@ -757,13 +772,6 @@ strikeStyle =
     , italic = False
     , strike = True
     }
-
-
-
---  AnnotationType
---     = EmptyAnnotation
---     | SelectText (List Text)
---     | SelectString String
 
 
 inlineExample : AnnotationType -> Expectation -> String
@@ -1527,13 +1535,44 @@ textDescriptionToString existingStyles txt =
             textToString existingStyles t
 
         InlineBlock details ->
-            -- TODO: Render attributes!
+            let
+                renderField ( name, foundDesc ) =
+                    name
+                        ++ " = "
+                        ++ (case foundDesc of
+                                Found _ desc ->
+                                    descriptionToString desc
+
+                                _ ->
+                                    ""
+                           )
+
+                inlineRecord =
+                    case details.record of
+                        Record recordDetails ->
+                            case recordDetails.found of
+                                Found _ [] ->
+                                    "{"
+                                        ++ recordDetails.name
+                                        ++ "}"
+
+                                Found _ fields ->
+                                    "{"
+                                        ++ recordDetails.name
+                                        ++ "|"
+                                        ++ String.join ", " (List.map renderField fields)
+                                        ++ "}"
+
+                                Unexpected _ ->
+                                    ""
+
+                        _ ->
+                            ""
+            in
             case details.kind of
                 EmptyAnnotation ->
                     Tuple.pair existingStyles <|
-                        "{"
-                            -- ++ details.name
-                            ++ "}"
+                        inlineRecord
 
                 SelectText txts ->
                     let
@@ -1543,20 +1582,12 @@ textDescriptionToString existingStyles txt =
                                 |> gatherText (Text emptyStyles "")
                     in
                     ( newStyles
-                    , "["
-                        ++ renderedText
-                        ++ "]"
-                      -- ++ "{"
-                      -- ++ String.join ", " (List.map inlineDescToString details.attributes)
-                      -- ++ "}"
+                    , "[" ++ renderedText ++ "]" ++ inlineRecord
                     )
 
                 SelectString str ->
-                    Tuple.pair existingStyles <|
-                        -- if List.isEmpty details.attributes then
-                        "`"
-                            ++ str
-                            ++ "`"
+                    Tuple.pair existingStyles
+                        ("`" ++ str ++ "`" ++ inlineRecord)
 
 
 inlineDescToString : InlineAttribute -> String

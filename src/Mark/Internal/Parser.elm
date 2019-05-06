@@ -1523,26 +1523,6 @@ parseTillEnd =
 
 
 {- MISC HELPERS -}
--- onlyTokens inline =
---     case inline of
---         ExpectAnnotation name attrs _ ->
---             Nothing
---         ExpectToken name attrs ->
---             Just ( name, attrs )
---         ExpectVerbatim name _ _ ->
---             Nothing
---         ExpectText _ ->
---             Nothing
--- onlyAnnotations inline =
---     case inline of
---         ExpectAnnotation name attrs _ ->
---             Just ( name, attrs )
---         ExpectToken name attrs ->
---             Nothing
---         ExpectVerbatim name _ _ ->
---             Nothing
---         ExpectText _ ->
---             Nothing
 
 
 onlyVerbatim : Block a -> Maybe (Block a)
@@ -2068,8 +2048,7 @@ indentOrSkip indentation successParser =
                 -- parse field
                 , Parser.succeed Indented
                     |= successParser
-
-                -- |. newlineWith "indentOrSkip two"
+                    |. Parser.chompWhile (\c -> c == '\n')
                 ]
 
         -- We're here because there is less than the desired indent.

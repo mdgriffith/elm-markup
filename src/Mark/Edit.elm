@@ -2679,14 +2679,21 @@ text options =
         inlineRecords =
             List.map recordToInlineBlock options.inlines
 
-        -- inlineExpectations =
-        --     List.map getInlineExpectation options.inlines
+        inlineExpectations =
+            List.map
+                (\(ProtoRecord rec) ->
+                    ExpectInlineBlock
+                        { name = rec.name
+                        , kind =
+                            blockKindToSelection rec.blockKind
+                        , fields = rec.expectations
+                        }
+                )
+                options.inlines
     in
     Block
         { kind = Value
-
-        -- TODO: add expectations
-        , expect = ExpectTextBlock []
+        , expect = ExpectTextBlock inlineExpectations
         , converter =
             renderText
                 { view = options.view
@@ -2765,6 +2772,12 @@ getInlineExpectation (Inline details) =
 
 
 type alias Cursor data =
+    { outcome : Outcome.Outcome Error.AstError (Uncertain data) data
+    , lastOffset : Int
+    }
+
+
+type alias TextOutcome data =
     Outcome.Outcome Error.AstError (Uncertain data) data
 
 
@@ -2779,11 +2792,16 @@ renderText :
     , inlines : List (Desc.AnnotationType -> Block rendered)
     }
     -> Description
-    -> Cursor (List rendered)
+    -> TextOutcome (List rendered)
 renderText options description =
     case description of
         DescribeText details ->
-            List.foldl (convertTextDescription details.id options) (Outcome.Success []) details.text
+            details.text
+                |> List.foldl (convertTextDescription details.id options)
+                    { outcome = Outcome.Success []
+                    , lastOffset = 0
+                    }
+                |> .outcome
                 |> mapSuccessAndRecovered List.reverse
 
         _ ->
@@ -2792,6 +2810,12 @@ renderText options description =
 
 textToText (Desc.Text styling txt) =
     Text styling txt
+
+
+emptySelection =
+    { anchor = 0
+    , focus = 0
+    }
 
 
 convertTextDescription :
@@ -2810,22 +2834,30 @@ convertTextDescription :
     -> Cursor (List rendered)
     -> Cursor (List rendered)
 convertTextDescription id options comp cursor =
+    let
+        blockLength =
+            length comp
+    in
     case comp of
         Styled range (Desc.Text styling str) ->
-            mergeWith (::)
-                (Outcome.Success
-                    (options.view
-                        { id = id
-                        , selection =
-                            { anchor = 0
-                            , focus = 0
+            { outcome =
+                mergeWith (::)
+                    (Outcome.Success
+                        (options.view
+                            { id = id
+                            , selection =
+                                { anchor = cursor.lastOffset
+                                , focus = cursor.lastOffset + blockLength
+                                }
                             }
-                        }
-                        styling
-                        str
+                            styling
+                            str
+                        )
                     )
-                )
-                cursor
+                    cursor.outcome
+            , lastOffset =
+                cursor.lastOffset + blockLength
+            }
 
         InlineBlock details ->
             let
@@ -2840,7 +2872,6 @@ convertTextDescription id options comp cursor =
                                 (Block inlineDetails) =
                                     almostInlineBlock details.kind
                             in
-                            -- TODO: MATCH RECORD TYPE AS WELL
                             if matchKinds details inlineDetails.kind then
                                 Just inlineDetails
 
@@ -2858,25 +2889,30 @@ convertTextDescription id options comp cursor =
             in
             case maybeMatched of
                 Nothing ->
-                    uncertain
-                        { range = details.range
-                        , problem =
-                            Error.UnknownInline
-                                (List.map
-                                    (\inline ->
-                                        inline Desc.EmptyAnnotation
-                                            |> getBlockExpectation
-                                            |> Desc.inlineExample details.kind
+                    { outcome =
+                        uncertain
+                            { range = details.range
+                            , problem =
+                                Error.UnknownInline
+                                    (List.map
+                                        (\inline ->
+                                            inline Desc.EmptyAnnotation
+                                                |> getBlockExpectation
+                                                |> Desc.inlineExample details.kind
+                                        )
+                                        options.inlines
                                     )
-                                    options.inlines
-                                )
-                        }
+                            }
+                    , lastOffset = cursor.lastOffset + blockLength
+                    }
 
                 Just matched ->
-                    mergeWith (::)
-                        --TODO:  This converter also needs Annotation Type
-                        (matched.converter details.record)
-                        cursor
+                    { outcome =
+                        mergeWith (::)
+                            (matched.converter details.record)
+                            cursor.outcome
+                    , lastOffset = cursor.lastOffset + blockLength
+                    }
 
 
 matchKinds inline blockKind =
@@ -2955,26 +2991,19 @@ mergeStyles inlineEl gathered =
 attemptMerge : TextDescription -> TextDescription -> Maybe TextDescription
 attemptMerge first second =
     case ( first, second ) of
-        -- ( Styled rngOne (Text stylingOne strOne), Styled rngTwo (Text stylingTwo strTwo) ) ->
-        --     if stylingOne == stylingTwo then
-        --         Just (Styled (mergeRanges rngOne rngTwo) (Text stylingOne (strOne ++ strTwo)))
-        --     else
-        --         Nothing
-        -- ( InlineAnnotation one, InlineAnnotation two ) ->
-        --     if one.name == two.name && one.attributes == two.attributes then
-        --         Just <|
-        --             InlineAnnotation
-        --                 { name = one.name
-        --                 , attributes = one.attributes
-        --                 , range = mergeRanges one.range two.range
-        --                 , text = one.text ++ two.text
-        --                 }
-        --     else
-        --         Nothing
-        -- ( InlineVerbatim one, InlineVerbatim two ) ->
-        --     Nothing
+        ( Styled rngOne (Text stylingOne strOne), Styled rngTwo (Text stylingTwo strTwo) ) ->
+            if stylingOne == stylingTwo then
+                Just (Styled (mergeRanges rngOne rngTwo) (Text stylingOne (strOne ++ strTwo)))
+
+            else
+                Nothing
+
+        ( InlineBlock one, InlineBlock two ) ->
+            -- TODO: Merge two inlines if they are the same.
+            -- Same == same type, same attribute list, same attribute values
+            Nothing
+
         ( _, _ ) ->
-            -- TODO: ACTUALLY MERGE!
             Nothing
 
 
@@ -3083,20 +3112,19 @@ doTextEdit { anchor, focus } editFn current cursor =
 applyStyles : Restyle -> TextDescription -> TextDescription
 applyStyles styling inlineEl =
     case inlineEl of
-        -- Styled range txt ->
-        --     Styled range (applyStylesToText styling txt)
-        -- InlineAnnotation details ->
-        --     InlineAnnotation
-        --         { details
-        --             | text = List.map (applyStylesToText styling) details.text
-        --         }
-        -- InlineToken details ->
-        --     InlineToken details
-        -- InlineVerbatim details ->
-        --     InlineVerbatim details
-        -- TODO: ACTUALLY APPLY STYLES
-        x ->
-            x
+        Styled range txt ->
+            Styled range (applyStylesToText styling txt)
+
+        InlineBlock details ->
+            case details.kind of
+                SelectText txts ->
+                    InlineBlock
+                        { details
+                            | kind = SelectText (List.map (applyStylesToText styling) txts)
+                        }
+
+                x ->
+                    inlineEl
 
 
 applyStylesToText styling (Text styles str) =
@@ -3121,22 +3149,23 @@ applyStylesToText styling (Text styles str) =
                 str
 
 
+{-| -}
 length : TextDescription -> Int
 length inlineEl =
     case inlineEl of
         Styled _ txt ->
             textLength txt
 
-        -- InlineAnnotation details ->
-        --     List.sum (List.map textLength details.text)
-        -- InlineToken _ ->
-        --     0
-        -- InlineVerbatim details ->
-        --     textLength details.text
-        -- UnexpectedInline err ->
-        _ ->
-            -- TODO: ACTUALLY DO THIS
-            0
+        InlineBlock details ->
+            case details.kind of
+                EmptyAnnotation ->
+                    0
+
+                SelectString str ->
+                    String.length str
+
+                SelectText txts ->
+                    List.sum (List.map textLength txts)
 
 
 textLength : Desc.Text -> Int
@@ -3147,6 +3176,8 @@ textLength (Text _ str) =
 {-| Splits the current element based on an index.
 
 This function should only be called when the offset is definitely contained within the element provided, not on the edges.
+
+_Reminder_ Indexes are based on the size of the rendered text.
 
 -}
 splitAt : Offset -> TextDescription -> ( TextDescription, TextDescription )
@@ -3165,79 +3196,80 @@ splitAt offset inlineEl =
             )
 
         InlineBlock details ->
-            -- -- InlineAnnotation name attrs textElements ->
-            -- InlineAnnotation details ->
-            --     let
-            --         { left, right } =
-            --             List.foldl (splitTextElements offset)
-            --                 { offset = 0
-            --                 , left = []
-            --                 , right = []
-            --                 }
-            --                 details.text
-            --         splitTextElements off (Text styling txt) cursor =
-            --             if off >= cursor.offset && off <= cursor.offset + String.length txt then
-            --                 { offset = cursor.offset + String.length txt
-            --                 , left = Text styling (String.left (offset - cursor.offset) txt) :: cursor.left
-            --                 , right = Text styling (String.dropLeft (offset - cursor.offset) txt) :: cursor.right
-            --                 }
-            --             else if off < cursor.offset then
-            --                 { offset = cursor.offset + String.length txt
-            --                 , left = cursor.left
-            --                 , right = Text styling txt :: cursor.right
-            --                 }
-            --             else
-            --                 { offset = cursor.offset + String.length txt
-            --                 , left = Text styling txt :: cursor.left
-            --                 , right = cursor.right
-            --                 }
-            --         ( leftRange, rightRange ) =
-            --             splitRange offset details.range
-            --     in
-            --     ( InlineAnnotation
-            --         { name = details.name
-            --         , range = leftRange
-            --         , text = List.reverse left
-            --         , attributes = details.attributes
-            --         }
-            --     , InlineAnnotation
-            --         { name = details.name
-            --         , range = rightRange
-            --         , text = List.reverse right
-            --         , attributes = details.attributes
-            --         }
-            --     )
-            -- InlineToken details ->
-            --     -- This shoudn't happen because we're expecting the offset
-            --     -- to be within the range, and a token has a length of 0
-            --     ( Styled emptyRange (Text emptyStyles "")
-            --     , InlineToken details
-            --     )
-            -- InlineVerbatim details ->
-            --     let
-            --         ( leftRange, rightRange ) =
-            --             splitRange offset details.range
-            --         ( leftText, rightText ) =
-            --             splitText offset details.text
-            --     in
-            --     ( --ExpectVerbatim name attrs (String.left offset str)
-            --       InlineVerbatim
-            --         { details
-            --             | range = leftRange
-            --             , text = leftText
-            --         }
-            --     , InlineVerbatim
-            --         { details
-            --             | range = rightRange
-            --             , text = rightText
-            --         }
-            --     )
-            -- UnexpectedInline err ->
-            --     ( UnexpectedInline err
-            --     , UnexpectedInline err
-            --     )
-            -- TODO: IMPLEMENT THIS FUNCTION
-            ( inlineEl, inlineEl )
+            case details.kind of
+                EmptyAnnotation ->
+                    -- This shoudn't happen because we're expecting the offset
+                    -- to be within the range, and a token has a length of 0
+                    ( Styled emptyRange (Text emptyStyles "")
+                    , InlineBlock details
+                    )
+
+                SelectString str ->
+                    let
+                        ( leftRange, rightRange ) =
+                            splitRange offset details.range
+
+                        leftString =
+                            String.slice 0 offset str
+
+                        rightString =
+                            String.slice offset -1 str
+                    in
+                    ( InlineBlock
+                        { details
+                            | range = leftRange
+                            , kind = SelectString leftString
+                        }
+                    , InlineBlock
+                        { details
+                            | range = rightRange
+                            , kind = SelectString rightString
+                        }
+                    )
+
+                SelectText txts ->
+                    let
+                        { left, right } =
+                            List.foldl (splitTextElements offset)
+                                { offset = 0
+                                , left = []
+                                , right = []
+                                }
+                                txts
+
+                        splitTextElements off (Text styling txt) cursor =
+                            if off >= cursor.offset && off <= cursor.offset + String.length txt then
+                                { offset = cursor.offset + String.length txt
+                                , left = Text styling (String.left (offset - cursor.offset) txt) :: cursor.left
+                                , right = Text styling (String.dropLeft (offset - cursor.offset) txt) :: cursor.right
+                                }
+
+                            else if off < cursor.offset then
+                                { offset = cursor.offset + String.length txt
+                                , left = cursor.left
+                                , right = Text styling txt :: cursor.right
+                                }
+
+                            else
+                                { offset = cursor.offset + String.length txt
+                                , left = Text styling txt :: cursor.left
+                                , right = cursor.right
+                                }
+
+                        ( leftRange, rightRange ) =
+                            splitRange offset details.range
+                    in
+                    ( InlineBlock
+                        { details
+                            | range = leftRange
+                            , kind = SelectText (List.reverse left)
+                        }
+                    , InlineBlock
+                        { details
+                            | range = rightRange
+                            , kind = SelectText (List.reverse right)
+                        }
+                    )
 
 
 splitText offset (Text styling str) =
