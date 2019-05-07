@@ -388,31 +388,23 @@ update doc edit (Parsed original) =
                                                                 wrapped =
                                                                     case wrapper of
                                                                         Annotation name attrs ->
-                                                                            -- ExpectAnnotation name attrs (List.concatMap onlyText els)
                                                                             ExpectInlineBlock
                                                                                 { name = name
-
-                                                                                -- TODO: REPLACE THIS!
-                                                                                , kind = SelectText [] -- REPLACE THIS
-
-                                                                                --     (List.concatMap onlyText els
-                                                                                --     |> List.map textString
-                                                                                --     |> String.join ""
-                                                                                -- )
+                                                                                , kind =
+                                                                                    SelectText
+                                                                                        (List.concatMap onlyText els)
                                                                                 , fields = attrs
                                                                                 }
 
                                                                         Verbatim name attrs ->
                                                                             ExpectInlineBlock
                                                                                 { name = name
-
-                                                                                -- TODO: REPLACE THIS!
-                                                                                , kind = SelectString "REPLACE ME PLS NOW"
-
-                                                                                --     (List.concatMap onlyText els
-                                                                                --     |> List.map textString
-                                                                                --     |> String.join ""
-                                                                                -- )
+                                                                                , kind =
+                                                                                    SelectString
+                                                                                        (List.concatMap onlyText els
+                                                                                            |> List.map textString
+                                                                                            |> String.join ""
+                                                                                        )
                                                                                 , fields = attrs
                                                                                 }
 
@@ -1296,8 +1288,17 @@ pushNested maybePush ((Nested nestedDetails) as nestedDesc) =
             nestedDesc
 
         Just to ->
-            -- TODO: need to push and account for new index
-            nestedDesc
+            Nested
+                { nestedDetails
+                    | content =
+                        List.map
+                            (pushDescription to)
+                            nestedDetails.content
+                    , children =
+                        List.map
+                            (pushNested maybePush)
+                            nestedDetails.children
+                }
 
 
 push : Push -> Found Description -> Found Description
@@ -2999,11 +3000,53 @@ attemptMerge first second =
                 Nothing
 
         ( InlineBlock one, InlineBlock two ) ->
-            -- TODO: Merge two inlines if they are the same.
-            -- Same == same type, same attribute list, same attribute values
-            Nothing
+            let
+                matchingAttributes foundOne foundTwo =
+                    case ( foundOne, foundTwo ) of
+                        ( Found _ attr1, Found _ attr2 ) ->
+                            List.map Tuple.first attr1
+                                == List.map Tuple.first attr2
 
-        ( _, _ ) ->
+                        _ ->
+                            False
+
+                mergeMatchingRecords r1 r2 newKind =
+                    case ( r1, r2 ) of
+                        ( Record rec1, Record rec2 ) ->
+                            if
+                                rec1.name
+                                    == rec2.name
+                                    && matchingAttributes rec1.found rec2.found
+                            then
+                                Just
+                                    (InlineBlock
+                                        { kind = newKind
+                                        , range = mergeRanges one.range two.range
+                                        , record = one.record
+                                        }
+                                    )
+
+                            else
+                                Nothing
+
+                        _ ->
+                            Nothing
+            in
+            -- Same == same type, same attribute list, same attribute values
+            case ( one.kind, two.kind ) of
+                ( EmptyAnnotation, EmptyAnnotation ) ->
+                    mergeMatchingRecords one.record two.record EmptyAnnotation
+
+                ( SelectText txt1, SelectText txt2 ) ->
+                    mergeMatchingRecords one.record two.record (SelectText (txt1 ++ txt2))
+
+                ( SelectString str1, SelectString str2 ) ->
+                    mergeMatchingRecords one.record two.record (SelectString (str1 ++ str2))
+
+                _ ->
+                    Nothing
+
+        _ ->
             Nothing
 
 
