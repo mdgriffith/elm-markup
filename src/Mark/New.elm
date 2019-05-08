@@ -1,21 +1,65 @@
 module Mark.New exposing
-    ( Block, block, record
+    ( Block
     , string, int, float, bool
-    , many, tree, Tree(..), Icon(..)
-    , Text, text, unstyled, bold, italics, strike, styled
-    -- , attrString, attrFloat, attrInt
-    -- , Attribute, annotation, token, verbatim, verbatimWith
+    , block, record, many, tree, Tree(..), Icon(..)
+    , Text, text, unstyled, bold, italics, strike, Styles, styled
+    , annotation, verbatim
     )
 
-{-|
+{-| Create a new `Mark.Block` that can be added to your document using `Mark.Edit.replace` or `Mark.insertAt`.
 
-@docs Block, block, record
+Let's say we are capturing a basic diagram in our document and we want to dynamically insert a circle.
+
+We can make a new circle by writing the following function
+
+    import Mark.New as New
+
+    type alias Circle =
+        { x : Int
+        , y : Int
+        , label : String
+        }
+
+    circle : Circle -> Mark.New.Block
+    circle details =
+        New.record "Circle"
+            [ ( "label", New.string details.label )
+            , ( "x", New.int details.x )
+            , ( "y", New.int details.y )
+            ]
+
+And then insert our newly made circle using `Mark.Edit.insertAt`.
+
+@docs Block
+
+
+# Primitives
 
 @docs string, int, float, bool
 
-@docs many, tree, Tree, Icon
 
-@docs Text, text, unstyled, bold, italics, strike, styled
+# Blocks
+
+@docs block, record, many, tree, Tree, Icon
+
+
+# Text
+
+Here's an example of creating some text.
+
+    newText =
+        New.text
+            [ Mark.unstyled "Look at my "
+            , Mark.bold "cool"
+            , Mark.unstyled " new text!"
+            ]
+
+@docs Text, text, unstyled, bold, italics, strike, Styles, styled
+
+
+# Text Annotation
+
+@docs annotation, verbatim
 
 -}
 
@@ -25,23 +69,6 @@ import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
-
-
-
-{-
-   General Use of Setters.
-
-
-   makeCircle default =
-       New.record "Circle"
-           [ ("label", (New.string "Heres my circle!"))
-           , ( "x", (New.int 10))
-           , ( "y", (New.int 10))
-           ]
-
-
-
--}
 
 
 {-| -}
@@ -140,6 +167,51 @@ type alias Text =
 text : List Text -> Block
 text =
     ExpectTextBlock
+
+
+{-|
+
+    New.annotation
+        { name = "link"
+        , text =
+            [ New.unstyled "my link to the elm website!" ]
+        , fields =
+            [ ( "url", Mark.string "https://elm-lang.com" ) ]
+        }
+
+-}
+annotation :
+    { name : String
+    , text : List ( Styles, String )
+    , fields : List ( String, Block )
+    }
+    -> Text
+annotation config =
+    ExpectInlineBlock
+        { name = config.name
+        , kind = SelectText (List.map toText config.text)
+        , fields = config.fields
+        }
+
+
+toText : ( Styles, String ) -> Desc.Text
+toText ( styles, str ) =
+    Text styles str
+
+
+{-| -}
+verbatim :
+    { name : String
+    , text : String
+    , fields : List ( String, Block )
+    }
+    -> Text
+verbatim config =
+    ExpectInlineBlock
+        { name = config.name
+        , kind = SelectString config.text
+        , fields = config.fields
+        }
 
 
 

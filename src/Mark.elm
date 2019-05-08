@@ -1229,10 +1229,6 @@ verbatim name view =
         }
 
 
-getInlineExpectation (Inline details) =
-    details.expect
-
-
 
 {- PRIMITIVE BLOCKS -}
 

@@ -7,7 +7,7 @@ module Mark.Edit exposing
     , replace, delete, insertAt
     , Id
     , bool, int, float, string, oneOf, manyOf
-    , text, Replacement, Inline
+    , text, Replacement
     , Tree(..), Icon(..), tree
     )
 
@@ -49,7 +49,7 @@ These blocks can be used just like the blocks in [`Mark`](Mark) except you also 
 
 @docs bool, int, float, string, oneOf, manyOf
 
-@docs text, Replacement, Inline
+@docs text, Replacement
 
 @docs Tree, Icon, tree
 
@@ -64,15 +64,6 @@ import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
 import Mark.New
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
-
-
-
--- {-| -}
--- type alias Error =
---     { message : List Format.Text
---     , region : { start : Position, end : Position }
---     , title : String
---     }
 
 
 {-| -}
@@ -2415,8 +2406,18 @@ tree :
     -> Block result
 tree name view contentBlock =
     let
+        blockExpectation =
+            getBlockExpectation contentBlock
+
         expectation =
-            ExpectTree (getBlockExpectation contentBlock) []
+            ExpectTree
+                (getBlockExpectation contentBlock)
+                [ TreeExpectation
+                    { icon = Desc.Bullet
+                    , content = [ blockExpectation ]
+                    , children = []
+                    }
+                ]
     in
     Block
         { kind = Named name
@@ -2614,11 +2615,6 @@ onError recover (Block details) =
 
 
 {-| -}
-type alias Inline data =
-    Desc.Inline data
-
-
-{-| -}
 type alias Replacement =
     Parse.Replacement
 
@@ -2766,10 +2762,6 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
                     fields
                 )
         }
-
-
-getInlineExpectation (Inline details) =
-    details.expect
 
 
 type alias Cursor data =

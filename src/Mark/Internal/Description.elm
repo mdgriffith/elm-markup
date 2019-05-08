@@ -1,16 +1,16 @@
 module Mark.Internal.Description exposing
     ( render, compile
     , Found(..), Nested(..), Icon(..)
-    , Description(..), TextDescription(..), InlineAttribute(..), Text(..), Style(..)
-    , Expectation(..), InlineExpectation(..), AttrExpectation(..), TreeExpectation(..)
+    , Description(..), TextDescription(..), Text(..), Style(..)
+    , Expectation(..), InlineExpectation(..), TreeExpectation(..)
     , Parsed(..), startingPoint, descriptionToString, toString, mergeWith
     , create, createInline
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
-    , Block(..), BlockKind(..), Document(..), Inline(..)
+    , Block(..), BlockKind(..), Document(..)
     , boldStyle, italicStyle, strikeStyle
-    , resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
+    , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection
     )
 
@@ -20,9 +20,9 @@ module Mark.Internal.Description exposing
 
 @docs Found, Nested, Icon
 
-@docs Description, TextDescription, InlineAttribute, Text, Style
+@docs Description, TextDescription, Text, Style
 
-@docs Expectation, InlineExpectation, AttrExpectation, TreeExpectation
+@docs Expectation, InlineExpectation, TreeExpectation
 
 @docs Parsed, startingPoint, descriptionToString, toString, mergeWith
 
@@ -34,11 +34,11 @@ module Mark.Internal.Description exposing
 
 @docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
 
-@docs Block, BlockKind, Document, Inline
+@docs Block, BlockKind, Document
 
 @docs boldStyle, italicStyle, strikeStyle
 
-@docs resultToFound, getId, expectationToAttr, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
+@docs resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
 
 @docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext, blockKindToSelection
 
@@ -321,12 +321,13 @@ type Text
     = Text Styling String
 
 
-type Inline data
-    = Inline
-        { converter : List Text -> List InlineAttribute -> Outcome Error.AstError (Uncertain (List data)) (List data)
-        , expect : InlineExpectation
-        , name : String
-        }
+
+-- type Inline data
+--     = Inline
+--         { converter : List Text -> List InlineAttribute -> Outcome Error.AstError (Uncertain (List data)) (List data)
+--         , expect : InlineExpectation
+--         , name : String
+--         }
 
 
 type alias Styling =
@@ -336,26 +337,24 @@ type alias Styling =
     }
 
 
-{-| -}
-type InlineAttribute
-    = AttrString
-        { name : String
-        , range : Range
-        , value : String
-        }
-    | AttrInt
-        { name : String
-        , range : Range
-        , value : Int
-        }
-    | AttrFloat
-        { name : String
-        , range : Range
-        , value : ( String, Float )
-        }
 
-
-
+-- {-| -}
+-- type InlineAttribute
+--     = AttrString
+--         { name : String
+--         , range : Range
+--         , value : String
+--         }
+--     | AttrInt
+--         { name : String
+--         , range : Range
+--         , value : Int
+--         }
+--     | AttrFloat
+--         { name : String
+--         , range : Range
+--         , value : ( String, Float )
+--         }
 {- EXPECTATIONS -}
 
 
@@ -411,38 +410,35 @@ noInlineAttributes expect =
             True
 
 
-expectationToAttr : AttrExpectation -> InlineAttribute
-expectationToAttr exp =
-    case exp of
-        ExpectAttrString name default ->
-            AttrString
-                { name = name
-                , range = emptyRange
-                , value = default
-                }
 
-        ExpectAttrFloat name default ->
-            AttrFloat
-                { name = name
-                , range = emptyRange
-                , value = default
-                }
-
-        ExpectAttrInt name default ->
-            AttrInt
-                { name = name
-                , range = emptyRange
-                , value = default
-                }
-
-
-{-| -}
-type
-    AttrExpectation
-    --                 name   default
-    = ExpectAttrString String String
-    | ExpectAttrFloat String ( String, Float )
-    | ExpectAttrInt String Int
+-- expectationToAttr : AttrExpectation -> InlineAttribute
+-- expectationToAttr exp =
+--     case exp of
+--         ExpectAttrString name default ->
+--             AttrString
+--                 { name = name
+--                 , range = emptyRange
+--                 , value = default
+--                 }
+--         ExpectAttrFloat name default ->
+--             AttrFloat
+--                 { name = name
+--                 , range = emptyRange
+--                 , value = default
+--                 }
+--         ExpectAttrInt name default ->
+--             AttrInt
+--                 { name = name
+--                 , range = emptyRange
+--                 , value = default
+--                 }
+-- {-| -}
+-- type
+--     AttrExpectation
+--     --                 name   default
+--     = ExpectAttrString String String
+--     | ExpectAttrFloat String ( String, Float )
+--     | ExpectAttrInt String Int
 
 
 {-| -}
@@ -1122,39 +1118,6 @@ isPrimitive description =
             False
 
 
-
--- {-|-}
--- descriptionSize description =
---     case description of
---         DescribeBlock _ ->
---             False
---         Record _ ->
---             False
---         OneOf _ ->
---             False
---         ManyOf _ ->
---             False
---         StartsWith _ ->
---             False
---         DescribeTree details ->
---             False
---         -- Primitives
---         DescribeBoolean found ->
---             True
---         DescribeInteger found ->
---             True
---         DescribeFloat found ->
---             True
---         DescribeText _ ->
---             True
---         DescribeString _ _ _ ->
---             True
---         DescribeMultiline _ _ _ ->
---             True
---         DescribeNothing _ ->
---             False
-
-
 {-| -}
 getContainingDescriptions : Description -> { start : Int, end : Int } -> List Description
 getContainingDescriptions description offset =
@@ -1590,17 +1553,16 @@ textDescriptionToString existingStyles txt =
                         ("`" ++ str ++ "`" ++ inlineRecord)
 
 
-inlineDescToString : InlineAttribute -> String
-inlineDescToString inlineDesc =
-    case inlineDesc of
-        AttrString { name, range, value } ->
-            name ++ " = " ++ value
 
-        AttrFloat { name, range, value } ->
-            name ++ " = " ++ Tuple.first value
-
-        AttrInt { name, range, value } ->
-            name ++ " = " ++ String.fromInt value
+-- inlineDescToString : InlineAttribute -> String
+-- inlineDescToString inlineDesc =
+--     case inlineDesc of
+--         AttrString { name, range, value } ->
+--             name ++ " = " ++ value
+--         AttrFloat { name, range, value } ->
+--             name ++ " = " ++ Tuple.first value
+--         AttrInt { name, range, value } ->
+--             name ++ " = " ++ String.fromInt value
 
 
 writeTextDescription desc cursorAndStyles =
@@ -1895,29 +1857,24 @@ inlineExpectationToDesc exp cursor =
 --             }
 --             :: cursor.text
 --     }
-
-
-attributesLength : List AttrExpectation -> Int
-attributesLength attrs =
-    let
-        sumLength attr count =
-            case attr of
-                ExpectAttrString name val ->
-                    --       2 for a space and a comma
-                    count + String.length name + String.length val + 2
-
-                ExpectAttrFloat name ( flStr, _ ) ->
-                    count + String.length name + String.length flStr + 2
-
-                ExpectAttrInt name i ->
-                    count + String.length name + String.length (String.fromInt i) + 2
-    in
-    case attrs of
-        [] ->
-            0
-
-        _ ->
-            List.foldl sumLength 0 attrs - 2
+-- attributesLength : List AttrExpectation -> Int
+-- attributesLength attrs =
+--     let
+--         sumLength attr count =
+--             case attr of
+--                 ExpectAttrString name val ->
+--                     --       2 for a space and a comma
+--                     count + String.length name + String.length val + 2
+--                 ExpectAttrFloat name ( flStr, _ ) ->
+--                     count + String.length name + String.length flStr + 2
+--                 ExpectAttrInt name i ->
+--                     count + String.length name + String.length (String.fromInt i) + 2
+--     in
+--     case attrs of
+--         [] ->
+--             0
+--         _ ->
+--             List.foldl sumLength 0 attrs - 2
 
 
 {-|
@@ -2005,23 +1962,45 @@ create current =
             , seed = newSeed
             }
 
-        ExpectTree content _ ->
+        ExpectTree content branches ->
             let
                 range =
                     { start = current.base
-                    , end = current.base
+                    , end = lastPos
                     }
-
-                items =
-                    []
 
                 ( parentId, newSeed ) =
                     Id.step current.seed
+
+                ( finalSeed, lastPos, children ) =
+                    List.foldl
+                        (\branch ( seed, newBase, result ) ->
+                            let
+                                new =
+                                    createTree
+                                        branch
+                                        { indent = current.indent
+                                        , base = newBase
+                                        , seed = seed
+                                        }
+                            in
+                            ( new.seed
+                            , new.pos
+                                |> moveNewline
+                                |> moveNewline
+                                |> moveColumn (current.indent * 4)
+                            , new.desc
+                                :: result
+                            )
+                        )
+                        ( newSeed, current.base, [] )
+                        branches
+                        |> (\( s, p, c ) -> ( s, p, List.reverse c ))
             in
             { pos = moveNewline current.base
             , desc =
                 DescribeTree
-                    { children = items
+                    { children = children
                     , id = parentId
                     , range = range
                     , expected = current.expectation
@@ -2315,6 +2294,82 @@ create current =
             , desc = DescribeNothing newId
             , seed = newSeed
             }
+
+
+createTree :
+    TreeExpectation
+    ->
+        { seed : Id.Seed
+        , indent : Int
+        , base : Position
+        }
+    ->
+        { pos : Position
+        , desc : Nested Description
+        , seed : Id.Seed
+        }
+createTree (TreeExpectation details) cursor =
+    let
+        -- create content first
+        ( contentSeed, contentLastPos, content ) =
+            List.foldl
+                (\choice ( seed, newBase, result ) ->
+                    let
+                        new =
+                            create
+                                { indent = cursor.indent
+                                , base = newBase
+                                , expectation = choice
+                                , seed = seed
+                                }
+                    in
+                    ( new.seed
+                    , new.pos
+                        |> moveNewline
+                        |> moveNewline
+                        |> moveColumn (cursor.indent * 4)
+                    , new.desc :: result
+                    )
+                )
+                ( cursor.seed, cursor.base, [] )
+                details.content
+                |> (\( s, p, c ) -> ( s, p, List.reverse c ))
+
+        -- Then create children
+        ( finalSeed, lastPos, children ) =
+            List.foldl
+                (\branch ( seed, newBase, result ) ->
+                    let
+                        new =
+                            createTree
+                                branch
+                                { indent = cursor.indent
+                                , base = newBase
+                                , seed = seed
+                                }
+                    in
+                    ( new.seed
+                    , new.pos
+                        |> moveNewline
+                        |> moveNewline
+                        |> moveColumn (cursor.indent * 4)
+                    , new.desc :: result
+                    )
+                )
+                ( contentSeed, contentLastPos, [] )
+                details.children
+                |> (\( s, p, c ) -> ( s, p, List.reverse c ))
+    in
+    { desc =
+        Nested
+            { icon = details.icon
+            , content = content
+            , children =
+                children
+            }
+    , pos = lastPos
+    , seed = finalSeed
+    }
 
 
 type alias CreateFieldCursor =
