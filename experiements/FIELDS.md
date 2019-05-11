@@ -10,7 +10,7 @@ Mark.record "Test"
     |> Mark.field "one" Mark.string
     |> Mark.field "two" Mark.string
     |> Mark.field "three" Mark.string
-    |> Mark.close
+    |> Mark.toBlock
 ```
 
 It shows up because we can't make a field function that adds a field to any given `Mark.Block`.  If that block was an `int` and you added a field to it, what would that actually mean?
@@ -31,4 +31,4 @@ Mark.record3 "Test"
 
 This approach is actually pretty nice.  It gives better error messages than  the `Mark.close` version.
 
-However, the library only provided constructors up to `10`, with no way to extend that number.
+However, the library only provided constructors up to `10`, with no way to extend that number, which seemed arbitrary.
