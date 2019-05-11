@@ -184,6 +184,7 @@ type Block data
 type ParseContext
     = ParseBlock
     | ParseInline
+    | ParseInTree
 
 
 type BlockKind

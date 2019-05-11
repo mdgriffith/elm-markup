@@ -452,12 +452,13 @@ styledText :
     { inlines : List (Block a)
     , replacements : List Replacement
     }
+    -> ParseContext
     -> Id.Seed
     -> Position
     -> Styling
     -> List Char
     -> Parser Context Problem Description
-styledText options seed startingPos inheritedStyles until =
+styledText options context seed startingPos inheritedStyles until =
     let
         vacantText =
             textCursor inheritedStyles startingPos
@@ -466,7 +467,7 @@ styledText options seed startingPos inheritedStyles until =
             List.map String.fromChar until
 
         meaningful =
-            '\\' :: '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
+            '1' :: '\\' :: '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
 
         ( newId, newSeed ) =
             Id.step seed
@@ -474,13 +475,7 @@ styledText options seed startingPos inheritedStyles until =
         -- TODO: return new seed!
     in
     Parser.oneOf
-        [ -- Parser.chompIf (\c -> c == ' ') CantStartTextWithSpace
-          -- -- TODO: return error description
-          -- |> Parser.andThen
-          --     (\_ ->
-          --         Parser.problem CantStartTextWithSpace
-          --     )
-          Parser.map
+        [ Parser.map
             (\( pos, textNodes ) ->
                 DescribeText
                     { id = newId
@@ -490,10 +485,33 @@ styledText options seed startingPos inheritedStyles until =
             )
             (withRange
                 (Parser.loop vacantText
-                    (styledTextLoop options meaningful untilStrings)
+                    (styledTextLoop options context meaningful untilStrings)
                 )
             )
         ]
+
+
+getTextStr (Text _ str) =
+    str
+
+
+{-| -}
+textString : TextDescription -> String
+textString inlineEl =
+    case inlineEl of
+        Styled _ txt ->
+            getTextStr txt
+
+        InlineBlock details ->
+            case details.kind of
+                EmptyAnnotation ->
+                    ""
+
+                SelectString str ->
+                    str
+
+                SelectText txts ->
+                    String.join ":" (List.map getTextStr txts)
 
 
 {-| -}
@@ -501,11 +519,12 @@ styledTextLoop :
     { inlines : List (Block a)
     , replacements : List Replacement
     }
+    -> ParseContext
     -> List Char
     -> List String
     -> TextCursor
     -> Parser Context Problem (Parser.Step TextCursor (List TextDescription))
-styledTextLoop options meaningful untilStrings found =
+styledTextLoop options context meaningful untilStrings found =
     Parser.oneOf
         [ Parser.oneOf (replace options.replacements found)
             |> Parser.map Parser.Loop
@@ -525,7 +544,6 @@ styledTextLoop options meaningful untilStrings found =
                 , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
                 ]
 
-        {- WORKING -}
         -- Parse Selection
         -- depending on selection type, capture attributes if applicable.
         , Parser.succeed
@@ -622,11 +640,7 @@ styledTextLoop options meaningful untilStrings found =
                                         Text s _ ->
                                             s
                             in
-                            -- TODO: What to do on unclosed styling?
-                            -- if List.isEmpty styling then
                             Parser.Done (List.reverse txt.found)
-                    -- else
-                    -- Parser.problem (UnclosedStyles styling)
 
                 else
                     Parser.Loop (addText new found)
@@ -641,18 +655,36 @@ styledTextLoop options meaningful untilStrings found =
                                     (\indentation ->
                                         Parser.succeed
                                             (\finished ->
-                                                if finished then
-                                                    ( str, True )
+                                                case finished of
+                                                    StopWith add ->
+                                                        ( str ++ add, True )
 
-                                                else
-                                                    ( str ++ "\n", False )
+                                                    ContinueWith add ->
+                                                        ( str ++ add, False )
                                             )
-                                            |. Parser.token (Parser.Token ("\n" ++ String.repeat indentation " ") Newline)
+                                            |. Parser.backtrackable (Parser.token (Parser.Token ("\n" ++ String.repeat indentation " ") Newline))
                                             |= Parser.oneOf
-                                                [ Parser.map (always True) (Parser.end End)
-                                                , Parser.map (always True) newline
-                                                , Parser.succeed False
-                                                ]
+                                                ([ Parser.map (always (StopWith "")) (Parser.end End)
+                                                 , Parser.map (always (StopWith "")) newline
+                                                 ]
+                                                    ++ (case context of
+                                                            -- in a list context, fail and backtrack if we parse
+                                                            --indentation followed by `-` or `1.`
+                                                            ParseInTree ->
+                                                                [ Parser.backtrackable (Parser.token (Parser.Token "-" Newline))
+                                                                    |> Parser.andThen (always (Parser.problem (Expecting "---")))
+                                                                , Parser.backtrackable (Parser.token (Parser.Token "1." Newline))
+                                                                    |> Parser.andThen (always (Parser.problem (Expecting "1.")))
+                                                                , Parser.map (\c -> ContinueWith ("\n" ++ c))
+                                                                    (Parser.chompIf (\c -> c /= '-' && c /= '1' && c /= ' ') (Expecting "char")
+                                                                        |> Parser.getChompedString
+                                                                    )
+                                                                ]
+
+                                                            _ ->
+                                                                [ Parser.succeed (ContinueWith "\n") ]
+                                                       )
+                                                )
                                      -- TODO do we need to check that this isn't just a completely blank line?
                                     )
                                 , Parser.succeed ( str, True )
@@ -664,6 +696,11 @@ styledTextLoop options meaningful untilStrings found =
                         )
                )
         ]
+
+
+type TextChompResult
+    = StopWith String
+    | ContinueWith String
 
 
 {-| -}
@@ -689,7 +726,7 @@ almostReplacement replacements existing =
         allFirstChars =
             List.filterMap first replacements
     in
-    List.map captureChar allFirstChars
+    List.map captureChar ('1' :: allFirstChars)
 
 
 textSelection replacements found =
@@ -1718,11 +1755,12 @@ type alias FlatCursor =
 
 -}
 indentedBlocksOrNewlines :
-    Id.Seed
+    ParseContext
+    -> Id.Seed
     -> Block thing
     -> ( NestedIndex, List FlatCursor )
     -> Parser Context Problem (Parser.Step ( NestedIndex, List FlatCursor ) (List FlatCursor))
-indentedBlocksOrNewlines seed item ( indentation, existing ) =
+indentedBlocksOrNewlines context seed item ( indentation, existing ) =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -1739,7 +1777,7 @@ indentedBlocksOrNewlines seed item ( indentation, existing ) =
                     (\newIndent ->
                         let
                             ( itemSeed, itemParser ) =
-                                getParser ParseBlock seed item
+                                getParser context seed item
                         in
                         -- If the indent has changed, then the delimiter is required
                         Parser.withIndent newIndent <|
@@ -1762,7 +1800,7 @@ indentedBlocksOrNewlines seed item ( indentation, existing ) =
                                             )
                                     )
                                     |= iconParser
-                                    |= itemParser
+                                    |= Parser.withIndent (newIndent + 4) itemParser
                                  )
                                     :: (if newIndent - 4 == indentation.prev then
                                             [ itemParser

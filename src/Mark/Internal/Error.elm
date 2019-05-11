@@ -216,8 +216,7 @@ renderParsingErrors source issues =
                     }
         , message =
             List.concat
-                [ [ Format.text "I ran into an issue parsing your document.\n\n" ]
-                , renderParserIssue issues
+                [ renderParserIssue issues
                 , [ Format.text "\n\n" ]
                 ]
         }
@@ -700,12 +699,10 @@ similarity source target =
 
 -}
 renderParserIssue deadends =
-    List.map
-        (Format.yellow
-            << Format.text
-            << addIndent 4
-            << parsingProblemToString
-            << .problem
+    List.concatMap
+        (\dead ->
+            renderParsingProblem dead.problem
+                ++ [ Format.text "\n" ]
         )
         deadends
 
@@ -714,55 +711,69 @@ addIndent x str =
     String.repeat x " " ++ str
 
 
-parsingProblemToString prob =
+renderParsingProblem prob =
     case prob of
         ExpectingIndentation i ->
-            "ExpectingIndent i" ++ "\n"
+            [ Format.text ("I was expecting an indent of " ++ String.fromInt i ++ " spaces") ]
 
         InlineStart ->
-            "InlineStart\n"
+            [ Format.text "InlineStart" ]
 
         InlineEnd ->
-            "InlineEnd\n"
+            [ Format.text "I was expecting the end of an inline: "
+            , Format.yellow (Format.text "}")
+            ]
 
         BlockStart ->
-            "BlockStart\n"
+            [ Format.text "I was expecting the start of a block: "
+            , Format.yellow (Format.text "|>")
+            ]
 
         Expecting str ->
-            "Expecting " ++ str ++ "\n"
+            [ Format.text ("I was expecting \"" ++ str ++ "\"") ]
 
         ExpectingBlockName name ->
-            "ExpectingBlockName " ++ name ++ "\n"
+            [ Format.text "I was expecting a block named "
+            , Format.yellow (Format.text name)
+            ]
 
         ExpectingInlineName name ->
-            "ExpectingInlineName " ++ name ++ "\n"
+            [ Format.text "I was expecting an inline named "
+            , Format.yellow (Format.text name)
+            ]
 
         ExpectingFieldName name ->
-            "ExpectingFieldName " ++ name ++ "\n"
+            [ Format.text "I was expecting a field named "
+            , Format.yellow (Format.text name)
+            ]
 
         Escape ->
-            "Escape\n"
+            [ Format.text "I was expectng a backslash" ]
 
         EscapedChar ->
-            "EscapedChar\n"
+            [ Format.text "I was expecting an escaped character" ]
 
         Newline ->
-            "Newline\n"
+            [ Format.text "I was expecting a newline" ]
 
         Space ->
-            "Space\n"
+            [ Format.text "I was expecting a space" ]
 
         End ->
-            "End\n"
+            [ Format.text "I was expecting the end of a document." ]
 
         Integer ->
-            "Integer\n"
+            [ Format.text "I was expecting an "
+            , Format.yellow (Format.text "Int")
+            ]
 
         FloatingPoint ->
-            "FloatingPoint\n"
+            [ Format.text "I was expecting a "
+            , Format.yellow (Format.text "Float")
+            ]
 
         InvalidNumber ->
-            "InvalidNumber\n"
+            [ Format.text "I ran into an invalid number." ]
 
 
 formatNewline =

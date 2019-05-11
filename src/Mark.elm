@@ -7,7 +7,7 @@ module Mark exposing
     , annotation, verbatim
     , Record, record, field, toBlock
     , oneOf, manyOf
-    , tree
+    , tree, Enumerated(..), Item(..), Icon(..)
     , Outcome(..), Partial
     , compile, parse, Parsed, toString, render
     , map, verify, onError, withId
@@ -57,7 +57,7 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 # Trees
 
-@docs tree
+@docs tree, Enumerated, Item, Icon
 
 
 # Rendering
@@ -159,6 +159,7 @@ render doc ((Parsed parsedDetails) as parsed) =
 compile : Document data -> String -> Outcome (List Error) (Partial data) data
 compile doc source =
     Desc.compile doc source
+        |> Debug.log "outcome"
         |> flattenErrors
         |> rewrapOutcome
 
@@ -818,13 +819,6 @@ block name view child =
         }
 
 
-blockNameParser name =
-    Parser.succeed identity
-        |. Parser.keyword (Parser.Token name (ExpectingBlockName name))
-        |. Parser.chompWhile (\c -> c == ' ')
-        |. Parser.chompIf (\c -> c == '\n') Newline
-
-
 {-| -}
 startWith :
     (start -> rest -> result)
@@ -1244,6 +1238,7 @@ tree name view contentBlock =
                                         , []
                                         )
                                         (Parse.indentedBlocksOrNewlines
+                                            ParseInTree
                                             seed
                                             contentBlock
                                         )
@@ -1488,6 +1483,7 @@ textWith options =
                                 { inlines = List.map (\x -> x Desc.EmptyAnnotation) inlineRecords
                                 , replacements = options.replacements
                                 }
+                                context
                                 newSeed
                                 pos
                                 emptyStyles
@@ -1907,6 +1903,19 @@ string =
                             |= Parse.getPosition
 
                     ParseBlock ->
+                        Parser.map
+                            (\( pos, str ) ->
+                                DescribeString id pos str
+                            )
+                            (Parse.withRange
+                                (Parse.withIndent
+                                    (\indentation ->
+                                        Parser.loop "" (Parse.indentedString indentation)
+                                    )
+                                )
+                            )
+
+                    ParseInTree ->
                         Parser.map
                             (\( pos, str ) ->
                                 DescribeString id pos str

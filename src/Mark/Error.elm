@@ -101,7 +101,7 @@ type Theme
 
 
 {-| -}
-toHtml : Theme -> Error -> List (Html.Html msg)
+toHtml : Theme -> Error -> Html.Html msg
 toHtml theme error =
     case error of
         Error.Rendered details ->
@@ -117,14 +117,26 @@ toHtml theme error =
                 }
 
 
+monospaceFonts =
+    "\"SFMono-Regular\",Consolas,\"Liberation Mono\",Menlo,Courier,monospace"
+
+
 formatErrorHtml theme error =
-    Html.span [ Html.Attributes.style "color" (foregroundClr theme) ]
-        [ Html.text
-            (String.toUpper error.title
-                ++ "\n\n"
-            )
+    Html.div
+        [ Html.Attributes.style "color" (foregroundClr theme)
+        , Html.Attributes.style "white-space" "pre"
+        , Html.Attributes.style "font-family" monospaceFonts
         ]
-        :: List.map (renderMessageHtml theme) error.message
+        [ Html.div
+            [ Html.Attributes.style "font-size" "1.4em"
+            , Html.Attributes.style "line-height" "2.1em"
+            ]
+            [ Html.text
+                (String.toUpper error.title)
+            ]
+        , Html.div [ Html.Attributes.style "line-height" "1.4" ]
+            (List.map (renderMessageHtml theme) error.message)
+        ]
 
 
 foregroundClr theme =
