@@ -11,7 +11,7 @@ module Mark.Internal.Description exposing
     , Block(..), BlockKind(..), Document(..)
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
-    , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection
+    , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length
     )
 
 {-|
@@ -40,7 +40,7 @@ module Mark.Internal.Description exposing
 
 @docs resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
 
-@docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext, blockKindToSelection
+@docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext, blockKindToSelection, length
 
 -}
 
@@ -319,6 +319,30 @@ type TextDescription
 -}
 type Text
     = Text Styling String
+
+
+{-| -}
+length : TextDescription -> Int
+length inlineEl =
+    case inlineEl of
+        Styled _ txt ->
+            textLength txt
+
+        InlineBlock details ->
+            case details.kind of
+                EmptyAnnotation ->
+                    0
+
+                SelectString str ->
+                    String.length str
+
+                SelectText txts ->
+                    List.sum (List.map textLength txts)
+
+
+textLength : Text -> Int
+textLength (Text _ str) =
+    String.length str
 
 
 

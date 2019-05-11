@@ -10,7 +10,7 @@ module Mark exposing
     , tree
     , Outcome(..), Partial
     , compile, parse, Parsed, toString, render
-    , map, verify, onError
+    , map, verify, onError, withId
     )
 
 {-|
@@ -69,7 +69,7 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 # Constraining and Recovering Blocks
 
-@docs map, verify, onError
+@docs map, verify, onError, withId
 
 -}
 
@@ -80,6 +80,7 @@ import Mark.Error
 import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error exposing (AstError(..), Context(..), Problem(..))
 import Mark.Internal.Id as Id exposing (..)
+import Mark.Internal.Index as Index
 import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
@@ -534,11 +535,14 @@ type alias CustomError =
 
 Let's say you don't just want a `Mark.string`, you actually want a date.
 
-So, you install the [`ISO8601`](https://package.elm-lang.org/packages/rtfeldman/elm-iso8601-date-strings/latest/) and you write something that looks like the follwing:
+So, you install the [`ISO8601`](https://package.elm-lang.org/packages/rtfeldman/elm-iso8601-date-strings/latest/) and you write something that looks like:
 
     import Iso8601
+    import Mark
     import Mark.Error
+    import Time
 
+    date : Mark.Block Time.Posix
     date =
         Mark.verify
             (\str ->
@@ -569,7 +573,7 @@ You could use it to
 
   - add units to numbers
   - parse a custom format, like [Latex mathematical equations](https://en.wikibooks.org/wiki/LaTeX/Mathematics#Operators)
-  - ensure that numbers are between a range, or are always positive.
+  - ensure that numbers are between a range or are always positive.
 
 How exciting! Seriously, I think this is pretty cool.
 
@@ -612,6 +616,35 @@ verify fn (Block details) =
 
                     Outcome.Failure f ->
                         Outcome.Failure f
+        }
+
+
+{-| Get an `Id` associated with a `Block`, which can be used to make updates through `Mark.Edit`.
+
+    Mark.withId
+        (\id str ->
+            Html.span
+                [ onClick (Mark.Edit.delete id) ]
+                [ Html.text str ]
+        )
+        Mark.string
+
+-}
+withId : (Id -> a -> b) -> Block a -> Block b
+withId fn (Block details) =
+    Block
+        { kind = details.kind
+        , converter =
+            \desc ->
+                let
+                    id =
+                        Desc.getId desc
+                in
+                mapSuccessAndRecovered
+                    (fn id)
+                    (details.converter desc)
+        , parser = details.parser
+        , expect = details.expect
         }
 
 
@@ -986,6 +1019,58 @@ manyOf blocks =
         }
 
 
+{-| -}
+type Icon
+    = Bullet
+    | Number
+
+
+{-| -}
+type Enumerated item
+    = Enumerated
+        { icon : Icon
+        , items : List (Item item)
+        }
+
+
+{-| **Note** `index` is our position within the nested list.
+
+The first `Int` in the tuple is our current position in the current sub list.
+
+The `List Int` that follows are the indices for the parent list.
+
+For example, given this list
+
+```markup
+|> List
+    1. First element
+    -- Second Element
+        1. Element #2.1
+            -- Element #2.1.1
+        -- Element #2.2
+    -- Third Element
+```
+
+here are the indices:
+
+```markup
+1. (1, [])
+-- (2, [])
+    1. (1, [2])
+        -- (1, [1,2])
+    -- (2, [2])
+-- (3, [])
+```
+
+-}
+type Item item
+    = Item
+        { index : ( Int, List Int )
+        , content : List item
+        , children : Enumerated item
+        }
+
+
 {-| Would you believe that a markdown list is actually a tree?
 
 Here's an example of a nested list in `elm-markup`:
@@ -1041,7 +1126,6 @@ is a bulleted list with a numbered list inside of it.
 Here's how to render the above list:
 
     import Mark
-    import Mark.Edit
 
     myTree =
         Mark.tree "List" renderList text
@@ -1051,7 +1135,7 @@ Here's how to render the above list:
     -- `Items` and `Node` are a pair of mutually recursive data structures.
     -- It's easiest to render them using two separate functions:
     -- renderList and renderItem
-    renderList (Mark.Edit.Enumerated list) =
+    renderList (Mark.Enumerated list) =
         let
             group =
                 case list.icon of
@@ -1064,7 +1148,7 @@ Here's how to render the above list:
         group []
             (List.map renderItem list.items)
 
-    renderItem (Mark.Edit.Item item) =
+    renderItem (Mark.Item item) =
         Html.li []
             [ Html.div [] item.content
             , renderList item.children
@@ -1073,15 +1157,206 @@ Here's how to render the above list:
 -}
 tree :
     String
-    -> (Mark.Edit.Enumerated item -> result)
+    -> (Enumerated item -> result)
     -> Block item
     -> Block result
 tree name view contentBlock =
-    Mark.Edit.tree name
-        (\meta items ->
-            view items
+    let
+        blockExpectation =
+            getBlockExpectation contentBlock
+
+        expectation =
+            ExpectTree
+                (getBlockExpectation contentBlock)
+                [ TreeExpectation
+                    { icon = Desc.Bullet
+                    , content = [ blockExpectation ]
+                    , children = []
+                    }
+                ]
+    in
+    Block
+        { kind = Named name
+        , expect = expectation
+        , converter =
+            \description ->
+                case description of
+                    DescribeTree details ->
+                        details.children
+                            |> reduceRender Index.zero
+                                getNestedIcon
+                                (renderTreeNodeSmall contentBlock)
+                            |> (\( _, icon, outcome ) ->
+                                    mapSuccessAndRecovered
+                                        (\nodes ->
+                                            view
+                                                --details.id
+                                                (Enumerated
+                                                    { icon =
+                                                        case icon of
+                                                            Desc.Bullet ->
+                                                                Bullet
+
+                                                            Desc.AutoNumber _ ->
+                                                                Number
+                                                    , items = nodes
+                                                    }
+                                                )
+                                        )
+                                        outcome
+                               )
+
+                    _ ->
+                        Outcome.Failure Error.NoMatch
+        , parser =
+            \context seed ->
+                let
+                    ( newId, newSeed ) =
+                        Id.step seed
+
+                    reseeded =
+                        Id.reseed newSeed
+                in
+                ( reseeded
+                , Parse.withIndent
+                    (\baseIndent ->
+                        Parser.succeed identity
+                            |. Parser.keyword
+                                (Parser.Token name
+                                    (Error.ExpectingBlockName name)
+                                )
+                            |. Parser.chompWhile (\c -> c == ' ')
+                            |. Parse.skipBlankLineWith ()
+                            |= Parser.map
+                                (\( pos, result ) ->
+                                    DescribeTree
+                                        { id = newId
+                                        , children = Parse.buildTree (baseIndent + 4) result
+                                        , range = pos
+                                        , expected = expectation
+                                        }
+                                )
+                                (Parse.withRange
+                                    (Parser.loop
+                                        ( { base = baseIndent + 4
+                                          , prev = baseIndent + 4
+                                          }
+                                        , []
+                                        )
+                                        (Parse.indentedBlocksOrNewlines
+                                            seed
+                                            contentBlock
+                                        )
+                                    )
+                                )
+                    )
+                )
+        }
+
+
+getNestedIcon (Nested cursor) =
+    cursor.icon
+
+
+{-| -}
+renderTreeNodeSmall :
+    Block item
+    -> Desc.Icon
+    -> Index.Index
+    -> Nested Description
+    -> Outcome.Outcome Error.AstError (Uncertain (Item item)) (Item item)
+renderTreeNodeSmall contentBlock icon index (Nested cursor) =
+    let
+        ( newIndex, childrenIcon, renderedChildren ) =
+            reduceRender (Index.indent index)
+                getNestedIcon
+                (renderTreeNodeSmall contentBlock)
+                cursor.children
+
+        ( _, _, renderedContent ) =
+            reduceRender (Index.dedent newIndex)
+                (always Desc.Bullet)
+                (\icon_ i content ->
+                    renderBlock contentBlock content
+                )
+                cursor.content
+    in
+    mergeWith
+        (\content children ->
+            Item
+                { index = Index.toList index
+                , content = content
+                , children =
+                    Enumerated
+                        { icon =
+                            case childrenIcon of
+                                Desc.Bullet ->
+                                    Bullet
+
+                                Desc.AutoNumber _ ->
+                                    Number
+                        , items =
+                            children
+                        }
+                }
         )
-        contentBlock
+        renderedContent
+        renderedChildren
+
+
+reduceRender :
+    Index.Index
+    -> (thing -> Desc.Icon)
+    -> (Desc.Icon -> Index.Index -> thing -> Outcome.Outcome Error.AstError (Uncertain other) other)
+    -> List thing
+    -> ( Index.Index, Desc.Icon, Outcome.Outcome Error.AstError (Uncertain (List other)) (List other) )
+reduceRender index getIcon fn list =
+    list
+        |> List.foldl
+            (\item ( i, existingIcon, gathered ) ->
+                let
+                    icon =
+                        if Index.top i == 0 then
+                            getIcon item
+
+                        else
+                            existingIcon
+
+                    newItem =
+                        case gathered of
+                            Outcome.Success remain ->
+                                case fn icon i item of
+                                    Outcome.Success newThing ->
+                                        Outcome.Success (newThing :: remain)
+
+                                    Outcome.Almost (Uncertain err) ->
+                                        Outcome.Almost (Uncertain err)
+
+                                    Outcome.Almost (Recovered err data) ->
+                                        Outcome.Almost
+                                            (Recovered err
+                                                (data :: remain)
+                                            )
+
+                                    Outcome.Failure f ->
+                                        Outcome.Failure f
+
+                            almostOrfailure ->
+                                almostOrfailure
+                in
+                ( Index.increment i
+                , icon
+                , newItem
+                )
+            )
+            ( index, Desc.Bullet, Outcome.Success [] )
+        |> (\( i, ic, outcome ) ->
+                ( i, ic, Outcome.mapSuccess List.reverse outcome )
+           )
+
+
+errorToList ( x, xs ) =
+    x :: xs
 
 
 {-| -}
@@ -1139,27 +1414,297 @@ text view =
         }
 
 
-{-| Handling formatted text is a little more involved than may be initially apparent.
+{-| -}
+type alias Selection =
+    { anchor : Offset
+    , focus : Offset
+    }
 
-But `textWith` is where a lot of things come together. Let's check out what these fields actually mean.
 
-  - `view` is the function to render an individual fragment of text. This is mostly what [`Mark.text`](#text) does, so it should seem familiar.
-  - `replacements` will replace characters before rendering. For example, we can replace `...` with the real ellipses unicode character, `…`.
+{-| -}
+type alias Offset =
+    Int
+
+
+{-| Handling formatted text is a little more involved than may be initially apparent, but have no fear!
+
+`textWith` is where a lot of things come together. Let's check out what these fields actually mean.
+
+  - `view` is the function to render an individual fragment of text.
+      - This is mostly what [`Mark.text`](#text) does, so it should seem familiar.
+  - `replacements` will replace characters before rendering.
+      - For example, we can replace `...` with the real ellipses unicode character, `…`.
   - `inlines` are custom inline blocks. You can use these to render things like links or emojis :D.
 
 -}
 textWith :
-    { view : Styles -> String -> rendered
+    { view :
+        Styles
+        -> String
+        -> rendered
     , replacements : List Replacement
     , inlines : List (Record rendered)
     }
     -> Block (List rendered)
 textWith options =
-    Mark.Edit.text
-        { view = always options.view
-        , inlines = options.inlines
-        , replacements = options.replacements
+    let
+        inlineRecords =
+            List.map recordToInlineBlock options.inlines
+
+        inlineExpectations =
+            List.map
+                (\(ProtoRecord rec) ->
+                    ExpectInlineBlock
+                        { name = rec.name
+                        , kind =
+                            blockKindToSelection rec.blockKind
+                        , fields = rec.expectations
+                        }
+                )
+                options.inlines
+    in
+    Block
+        { kind = Value
+        , expect = ExpectTextBlock inlineExpectations
+        , converter =
+            renderText
+                { view = always options.view
+                , inlines = inlineRecords
+                }
+        , parser =
+            \context seed ->
+                let
+                    ( _, newSeed ) =
+                        Id.step seed
+
+                    ( _, returnSeed ) =
+                        Id.step newSeed
+                in
+                ( returnSeed
+                , Parse.getPosition
+                    |> Parser.andThen
+                        (\pos ->
+                            Parse.styledText
+                                { inlines = List.map (\x -> x Desc.EmptyAnnotation) inlineRecords
+                                , replacements = options.replacements
+                                }
+                                newSeed
+                                pos
+                                emptyStyles
+                                []
+                        )
+                )
         }
+
+
+recordToInlineBlock (Desc.ProtoRecord details) annotationType =
+    let
+        expectations =
+            Desc.ExpectRecord details.name
+                details.expectations
+    in
+    Desc.Block
+        { kind = details.blockKind
+        , expect = expectations
+        , converter =
+            \desc ->
+                case details.fieldConverter desc annotationType of
+                    Outcome.Success ( pos, fieldDescriptions, rendered ) ->
+                        Outcome.Success rendered
+
+                    Outcome.Failure fail ->
+                        Outcome.Failure fail
+
+                    Outcome.Almost (Desc.Uncertain e) ->
+                        Outcome.Almost (Desc.Uncertain e)
+
+                    Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
+                        Outcome.Almost (Desc.Recovered e rendered)
+        , parser =
+            \context seed ->
+                let
+                    ( parentId, parentSeed ) =
+                        Id.step seed
+
+                    ( newSeed, fields ) =
+                        Id.thread parentSeed (List.reverse details.fields)
+                in
+                ( newSeed
+                , Parse.record Parse.InlineRecord
+                    parentId
+                    details.name
+                    expectations
+                    fields
+                )
+        }
+
+
+type alias Cursor data =
+    { outcome : Outcome.Outcome Error.AstError (Uncertain data) data
+    , lastOffset : Int
+    }
+
+
+type alias TextOutcome data =
+    Outcome.Outcome Error.AstError (Uncertain data) data
+
+
+renderText :
+    { view :
+        { id : Id
+        , selection : Selection
+        }
+        -> Styles
+        -> String
+        -> rendered
+    , inlines : List (Desc.AnnotationType -> Block rendered)
+    }
+    -> Description
+    -> TextOutcome (List rendered)
+renderText options description =
+    case description of
+        DescribeText details ->
+            details.text
+                |> List.foldl (convertTextDescription details.id options)
+                    { outcome = Outcome.Success []
+                    , lastOffset = 0
+                    }
+                |> .outcome
+                |> mapSuccessAndRecovered List.reverse
+
+        _ ->
+            Outcome.Failure Error.NoMatch
+
+
+textToText (Desc.Text styling txt) =
+    Text styling txt
+
+
+emptySelection =
+    { anchor = 0
+    , focus = 0
+    }
+
+
+convertTextDescription :
+    Id
+    ->
+        { view :
+            { id : Id
+            , selection : Selection
+            }
+            -> Styles
+            -> String
+            -> rendered
+        , inlines : List (Desc.AnnotationType -> Block rendered)
+        }
+    -> TextDescription
+    -> Cursor (List rendered)
+    -> Cursor (List rendered)
+convertTextDescription id options comp cursor =
+    let
+        blockLength =
+            length comp
+    in
+    case comp of
+        Styled range (Desc.Text styling str) ->
+            { outcome =
+                mergeWith (::)
+                    (Outcome.Success
+                        (options.view
+                            { id = id
+                            , selection =
+                                { anchor = cursor.lastOffset
+                                , focus = cursor.lastOffset + blockLength
+                                }
+                            }
+                            styling
+                            str
+                        )
+                    )
+                    cursor.outcome
+            , lastOffset =
+                cursor.lastOffset + blockLength
+            }
+
+        InlineBlock details ->
+            let
+                recordName =
+                    Desc.recordName details.record
+                        |> Maybe.withDefault ""
+
+                matchInlineName name almostInlineBlock maybeFound =
+                    case maybeFound of
+                        Nothing ->
+                            let
+                                (Block inlineDetails) =
+                                    almostInlineBlock details.kind
+                            in
+                            if matchKinds details inlineDetails.kind then
+                                Just inlineDetails
+
+                            else
+                                Nothing
+
+                        _ ->
+                            maybeFound
+
+                maybeMatched =
+                    List.foldl
+                        (matchInlineName recordName)
+                        Nothing
+                        options.inlines
+            in
+            case maybeMatched of
+                Nothing ->
+                    { outcome =
+                        uncertain
+                            { range = details.range
+                            , problem =
+                                Error.UnknownInline
+                                    (List.map
+                                        (\inline ->
+                                            inline Desc.EmptyAnnotation
+                                                |> getBlockExpectation
+                                                |> Desc.inlineExample details.kind
+                                        )
+                                        options.inlines
+                                    )
+                            }
+                    , lastOffset = cursor.lastOffset + blockLength
+                    }
+
+                Just matched ->
+                    { outcome =
+                        mergeWith (::)
+                            (matched.converter details.record)
+                            cursor.outcome
+                    , lastOffset = cursor.lastOffset + blockLength
+                    }
+
+
+matchKinds inline blockKind =
+    let
+        recordName =
+            case inline.record of
+                Record rec ->
+                    Just rec.name
+
+                _ ->
+                    Nothing
+    in
+    case ( recordName, inline.kind, blockKind ) of
+        ( Just inlineName, SelectString str, VerbatimNamed vertName ) ->
+            inlineName == vertName
+
+        ( Just inlineName, SelectText _, AnnotationNamed annName ) ->
+            inlineName == annName
+
+        ( Just inlineName, EmptyAnnotation, Named name ) ->
+            inlineName == name
+
+        _ ->
+            False
 
 
 {-| -}
