@@ -8,7 +8,7 @@ module Mark.Edit exposing
     , Id
     , bool, int, float, string, oneOf, manyOf
     , text, Replacement
-    , Tree(..), Icon(..), tree
+    , Enumerated(..), Item(..), Icon(..), tree
     )
 
 {-| This module allows you to make **edits** to `Parsed`, that intermediate data structure we talked about in [`Mark`](Mark).
@@ -51,7 +51,7 @@ These blocks can be used just like the blocks in [`Mark`](Mark) except you also 
 
 @docs text, Replacement
 
-@docs Tree, Icon, tree
+@docs Enumerated, Item, Icon, tree
 
 -}
 
@@ -2378,30 +2378,61 @@ manyOf view blocks =
 
 
 {-| -}
-type Tree item
-    = Tree
-        { index : List Int
-        , icon : Icon
-        , content : List item
-        , children :
-            List (Tree item)
-        }
-
-
-{-| -}
 type Icon
     = Bullet
     | Number
 
 
 {-| -}
+type Enumerated item
+    = Enumerated
+        { icon : Icon
+        , items : List (Item item)
+        }
+
+
+{-| **Note** `index` is our position within the nested list.
+
+The first `Int` in the tuple is our current position in the current sub list.
+
+The `List Int` that follows are the indices for the parent list.
+
+For example, given this list
+
+```markup
+|> List
+    1. First element
+    -- Second Element
+        1. Element #2.1
+            -- Element #2.1.1
+        -- Element #2.2
+    -- Third Element
+```
+
+here are the indices:
+
+```markup
+1. (1, [])
+-- (2, [])
+    1. (1, [2])
+        -- (1, [1,2])
+    -- (2, [2])
+-- (3, [])
+```
+
+-}
+type Item item
+    = Item
+        { index : ( Int, List Int )
+        , content : List item
+        , children : Enumerated item
+        }
+
+
+{-| -}
 tree :
     String
-    ->
-        (Id
-         -> List (Tree item)
-         -> result
-        )
+    -> (Id -> Enumerated item -> result)
     -> Block item
     -> Block result
 tree name view contentBlock =
@@ -2430,9 +2461,24 @@ tree name view contentBlock =
                             |> reduceRender Index.zero
                                 getNestedIcon
                                 (renderTreeNodeSmall contentBlock)
-                            |> Tuple.second
-                            |> mapSuccessAndRecovered
-                                (view details.id)
+                            |> (\( _, icon, outcome ) ->
+                                    mapSuccessAndRecovered
+                                        (\nodes ->
+                                            view details.id
+                                                (Enumerated
+                                                    { icon =
+                                                        case icon of
+                                                            Desc.Bullet ->
+                                                                Bullet
+
+                                                            Desc.AutoNumber _ ->
+                                                                Number
+                                                    , items = nodes
+                                                    }
+                                                )
+                                        )
+                                        outcome
+                               )
 
                     _ ->
                         Outcome.Failure Error.NoMatch
@@ -2492,16 +2538,16 @@ renderTreeNodeSmall :
     -> Desc.Icon
     -> Index.Index
     -> Nested Description
-    -> Outcome.Outcome Error.AstError (Uncertain (Tree item)) (Tree item)
+    -> Outcome.Outcome Error.AstError (Uncertain (Item item)) (Item item)
 renderTreeNodeSmall contentBlock icon index (Nested cursor) =
     let
-        ( newIndex, renderedChildren ) =
+        ( newIndex, childrenIcon, renderedChildren ) =
             reduceRender (Index.indent index)
                 getNestedIcon
                 (renderTreeNodeSmall contentBlock)
                 cursor.children
 
-        ( _, renderedContent ) =
+        ( _, _, renderedContent ) =
             reduceRender (Index.dedent newIndex)
                 (always Desc.Bullet)
                 (\icon_ i content ->
@@ -2511,17 +2557,21 @@ renderTreeNodeSmall contentBlock icon index (Nested cursor) =
     in
     mergeWith
         (\content children ->
-            Tree
-                { icon =
-                    case icon of
-                        Desc.Bullet ->
-                            Bullet
-
-                        Desc.AutoNumber _ ->
-                            Number
-                , index = Index.toList index
+            Item
+                { index = Index.toList index
                 , content = content
-                , children = children
+                , children =
+                    Enumerated
+                        { icon =
+                            case childrenIcon of
+                                Desc.Bullet ->
+                                    Bullet
+
+                                Desc.AutoNumber _ ->
+                                    Number
+                        , items =
+                            children
+                        }
                 }
         )
         renderedContent
@@ -2533,7 +2583,7 @@ reduceRender :
     -> (thing -> Desc.Icon)
     -> (Desc.Icon -> Index.Index -> thing -> Outcome.Outcome Error.AstError (Uncertain other) other)
     -> List thing
-    -> ( Index.Index, Outcome.Outcome Error.AstError (Uncertain (List other)) (List other) )
+    -> ( Index.Index, Desc.Icon, Outcome.Outcome Error.AstError (Uncertain (List other)) (List other) )
 reduceRender index getIcon fn list =
     list
         |> List.foldl
@@ -2574,8 +2624,8 @@ reduceRender index getIcon fn list =
                 )
             )
             ( index, Desc.Bullet, Outcome.Success [] )
-        |> (\( i, _, outcome ) ->
-                ( i, Outcome.mapSuccess List.reverse outcome )
+        |> (\( i, ic, outcome ) ->
+                ( i, ic, Outcome.mapSuccess List.reverse outcome )
            )
 
 

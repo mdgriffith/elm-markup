@@ -46,6 +46,6 @@ indent (Index i base) =
     Index 0 (i :: base)
 
 
-toList : Index -> List Int
+toList : Index -> ( Int, List Int )
 toList (Index i base) =
-    i :: base
+    ( i, base )

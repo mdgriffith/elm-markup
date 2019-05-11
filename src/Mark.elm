@@ -986,37 +986,100 @@ manyOf blocks =
         }
 
 
-{-| It can be useful to parse a tree structure. For example, here's a nested list.
+{-| Would you believe that a markdown list is actually a tree?
 
-    |> List
-        - item one
-        - item two
-            - nested item two
+Here's an example of a nested list in `elm-markup`:
 
-            additional text for nested item two
-        - item three
-            - nested item three
+```markup
+|> List
+    1.  This is definitely the first thing.
 
-In order to parse the above, you could define a block as
+        With some additional content.
 
-    Mark.tree "List"
-        ((Mark.Tree node) ->
-        -- Do something with node.content and node.children
-        )
-        text
+    --- Another thing.
 
-**Note** the indentation is always a multiple of 4.
+        And some more content
+
+        1.  A sublist
+
+            With it's content
+
+            And some other content
+
+        --- Second item
+```
+
+**Note** As before, the indentation is always a multiple of 4.
+
+In `elm-markup` you can make a nested section either `Bulleted` or `Numbered` by having the first element of the section start with `-` or `1.`.
+
+The rest of the icons at that level are ignored. So this:
+
+```markup
+|> List
+    1. First
+    -- Second
+    -- Third
+```
+
+Is a numbered list. And this:
+
+```markup
+|> List
+    -- First
+        1. sublist one
+        -- sublist two
+        -- sublist three
+    -- Second
+    -- Third
+```
+
+is a bulleted list with a numbered list inside of it.
+
+**Note** You can use as many dashes(`-`) as you want to start an item. This can be useful to make the indentation match up. Similarly, you can also use spaces after the dash or number.
+
+Here's how to render the above list:
+
+    import Mark
+    import Mark.Edit
+
+    myTree =
+        Mark.tree "List" renderList text
+
+
+    -- Note: we have to define this as a separate function because
+    -- `Items` and `Node` are a pair of mutually recursive data structures.
+    -- It's easiest to render them using two separate functions:
+    -- renderList and renderItem
+    renderList (Mark.Edit.Enumerated list) =
+        let
+            group =
+                case list.icon of
+                    Mark.Bullet ->
+                        Html.ul
+
+                    Mark.Number ->
+                        Html.ol
+        in
+        group []
+            (List.map renderItem list.items)
+
+    renderItem (Mark.Edit.Item item) =
+        Html.li []
+            [ Html.div [] item.content
+            , renderList item.children
+            ]
 
 -}
 tree :
     String
-    -> (Mark.Edit.Tree item -> result)
+    -> (Mark.Edit.Enumerated item -> result)
     -> Block item
-    -> Block (List result)
+    -> Block result
 tree name view contentBlock =
     Mark.Edit.tree name
         (\meta items ->
-            List.map view items
+            view items
         )
         contentBlock
 
