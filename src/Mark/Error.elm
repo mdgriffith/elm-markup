@@ -1,6 +1,6 @@
 module Mark.Error exposing
     ( Error
-    , toString, toDetails, Details, Range, Position, toHtml, Theme(..)
+    , toString, toHtml, Theme(..), toDetails, Details, Text, Range, Position
     , Custom
     )
 
@@ -11,7 +11,7 @@ module Mark.Error exposing
 
 # Rendering Errors
 
-@docs toString, toDetails, Details, Range, Position, toHtml, Theme
+@docs toString, toHtml, Theme, toDetails, Details, Text, Range, Position
 
 
 # Creating Custom Errors
@@ -40,6 +40,15 @@ type alias Position =
 
 
 {-| -}
+type alias Text =
+    { text : String
+    , bold : Bool
+    , underline : Bool
+    , color : Maybe String
+    }
+
+
+{-| -}
 type alias Range =
     { start : Position
     , end : Position
@@ -49,7 +58,7 @@ type alias Range =
 {-| -}
 type alias Details =
     { title : String
-    , message : String
+    , message : List Text
     , region : Maybe Range
     }
 
@@ -83,13 +92,13 @@ toDetails error =
     case error of
         Error.Rendered details ->
             { title = details.title
-            , message = String.join "" (List.map .text details.message)
+            , message = details.message
             , region = Just details.region
             }
 
         Error.Global global ->
             { title = global.title
-            , message = String.join "" (List.map .text global.message)
+            , message = global.message
             , region = Nothing
             }
 
@@ -201,14 +210,3 @@ type alias Custom =
     { title : String
     , message : List String
     }
-
-
-
--- {-| -}
--- custom :
---     { title : String
---     , message : List String
---     }
---     -> Custom
--- custom =
---     Custom
