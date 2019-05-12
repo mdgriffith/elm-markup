@@ -6,15 +6,10 @@ This is to get you started.
 
 -}
 
-import Element
-import Element.Background as Background
-import Element.Border as Border
-import Element.Font as Font
 import Html exposing (Html)
 import Html.Attributes as Attr
 import Mark
 import Mark.Error
-import Parser
 
 
 main =

@@ -12,8 +12,7 @@
             "elm/html": "1.0.0",
             "elm/parser": "1.1.0",
             "elm/time": "1.0.0",
-            "mdgriffith/elm-ui": "1.1.0",
-            "rtfeldman/elm-iso8601-date-strings": "1.1.2"
+            "mdgriffith/elm-ui": "1.1.0"
         },
         "indirect": {
             "elm/json": "1.0.0",
