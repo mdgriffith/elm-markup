@@ -16,7 +16,6 @@ module Mark.Internal.Parser exposing
     , newlineWith
     , oneOf
     , parseInlineFields
-    , peek
     , raggedIndentedStringAbove
     , record
     , skipBlankLineWith
@@ -1472,34 +1471,6 @@ word : Parser Context Problem String
 word =
     Parser.chompWhile Char.isAlphaNum
         |> Parser.getChompedString
-
-
-peek : String -> Parser c p thing -> Parser c p thing
-peek name parser =
-    Parser.succeed
-        (\start val end src ->
-            let
-                highlightParsed =
-                    String.repeat (start.column - 1) " " ++ String.repeat (max 0 (end.column - start.column)) "^"
-
-                fullLine =
-                    String.slice (max 0 (start.offset - start.column)) end.offset src
-
-                _ =
-                    Debug.log name
-                        -- fullLine
-                        (String.slice start.offset end.offset src)
-
-                -- _ =
-                --     Debug.log name
-                --         highlightParsed
-            in
-            val
-        )
-        |= getPosition
-        |= parser
-        |= getPosition
-        |= Parser.getSource
 
 
 getPosition : Parser c p Position
