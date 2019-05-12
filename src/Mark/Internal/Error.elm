@@ -216,8 +216,8 @@ renderParsingErrors source issues =
                     }
         , message =
             List.concat
-                [ renderParserIssue issues
-                , [ Format.text "\n\n" ]
+                [ [ Format.text "\n" ]
+                , renderParserIssue issues
                 ]
         }
 
