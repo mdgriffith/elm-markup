@@ -159,7 +159,6 @@ render doc ((Parsed parsedDetails) as parsed) =
 compile : Document data -> String -> Outcome (List Error) (Partial data) data
 compile doc source =
     Desc.compile doc source
-        |> Debug.log "outcome"
         |> flattenErrors
         |> rewrapOutcome
 
