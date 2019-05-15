@@ -9,6 +9,7 @@ This will allow you to
 1. Render Elm views in the middle of a markup document.
 2. Parse a markup document to any data type you see fit. Markdown requires CSS to be styled because it parses to HTML.  However if you want to use `elm-ui` with `elm-markup`, just parse to `Element msg`!  Or to WebGL!  Or whatever!
 
+
 In that way, this isn't really a replacement for Markdown or Asciidoc.  You define documents, meaning you can add blocks as you see fit, and you'll then have a parser for that document.
 
 Let's check out an example.  Here's a `Mark.Document` which results in `Html msg`, and parses a `Title`, `Image`s, and `Text`.
@@ -43,13 +44,13 @@ document =
 Then we can write a document that matches:
 
 ```elm-markup
-| Title
+|> Title
     My fancy cat blog article
 
 
 Welcome!  Have you heard about /cats/?  They're great.
 
-| Image
+|> Image
     src = http://placekitten/200/500
     description = Here's a great picture of my cat, pookie.
 
