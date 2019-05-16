@@ -16,3 +16,7 @@ elm-live src/Main.elm --open
 ```
 
 The Elm application will make a `GET` request for the source of the article, and parse it when it arrives.
+
+# Integration with VS Code
+
+If you install the [VS Code Elm Markup extension](https://github.com/mdgriffith/elm-markup-vscode), you'll also get syntax highlighting and inline error reporting.
