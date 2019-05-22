@@ -1,0 +1,118 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Elm Markup Editor</title>
+    <script src="assets/editor.js" type="text/javascript"></script>
+</head>
+<style>
+@import url('https://fonts.googleapis.com/css?family=EB+Garamond');
+.italic {
+    font-style: italic;
+}
+.bold {
+    font-weight: bold;
+}
+.strike {
+    text-decoration: line-through;
+}
+body {
+    font-family: 'EB Garamond', serif;
+    font-size: 20px;
+    width: 600px;
+    margin-left:auto;
+    margin-right:auto;
+    padding: 48px 0;
+}
+.drop-capital {
+    font-size: 2.95em;
+    line-height: 0.89em;
+    float:left;
+    margin-right: 8px;
+}
+.lede {
+    font-variant: small-caps;
+    margin-left: -15px;
+}
+#cursor {
+    position:absolute;
+    left:0;
+    top:0;
+    width:3px;
+    height:24px;
+    background-color: red;
+    animation: blink 0.8s infinite;
+}
+
+@keyframes blink {
+    0% { opacity: 1 }
+    50% { opacity: 1 }
+    55% { opacity: 0 }
+    85% {opacity: 0}
+    100% { opacity: 1 }
+}
+
+
+</style>
+
+<body id="root"></body>
+
+<script type="text/javascript">
+
+    var node = document.getElementById('root');
+    var app = Elm.Main.init({ node: node });
+
+    
+    document.onselectionchange = (event) => {
+        var selection = window.getSelection();
+        console.log(selection)
+        if (selection.isCollapsed){
+            // Single selection, i.e. caret position
+            if (app.ports.infoForElm) {
+                var range = selection.getRangeAt(0)
+                var box = range.getBoundingClientRect()
+                app.ports.infoForElm.send({
+                    tag: "Selection",
+                    data: { tag: "Cursor", 
+                            data:
+                              { box:{ x: box.x + window.scrollX, 
+                                      y: box.y + window.scrollY,
+                                      height: box.height,
+                                      width: box.width
+                                    },
+                                id: "test",
+                                offset: 0
+                              }
+                        }
+                })
+            }
+        } else {
+            if (app.ports.infoForElm) {
+                var range = selection.getRangeAt(0)
+                var box = range.getBoundingClientRect()
+                app.ports.infoForElm.send({
+                    tag: "Selection",
+                    data: { tag: "Range", 
+                            data:
+                              { box:{ x: box.x + window.scrollX, 
+                                      y: box.y + window.scrollY,
+                                      height: box.height,
+                                      width: box.width
+                                    },
+                                startId: "test",
+                                startOffset: 0,
+                                endId: "test",
+                                endOffset: 0
+                              }
+                        }
+                })
+                
+            }
+        }
+    };
+
+
+</script>
+
+</html>
