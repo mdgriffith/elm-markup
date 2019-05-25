@@ -149,6 +149,18 @@ toKey string =
                     Control string
 
 
+syncCursor layout cursor =
+    case cursor of
+        Caret char ->
+            Caret (Selection.resync layout char)
+
+        Range start middle end ->
+            Range
+                (Selection.resync layout start)
+                (List.map (Selection.resync layout) middle)
+                (Selection.resync layout end)
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
@@ -162,7 +174,10 @@ update msg model =
         EditorSent incoming ->
             case incoming of
                 Ports.NewCharLayout layout ->
-                    ( { model | characterLayout = Just layout }
+                    ( { model
+                        | characterLayout = Just layout
+                        , cursor = Maybe.map (syncCursor layout) model.cursor
+                      }
                     , Cmd.none
                     )
 
@@ -247,9 +262,12 @@ update msg model =
                             in
                             ( model, Cmd.none )
 
-                        Ok newDoc ->
-                            ( { model | parsed = Just newDoc }
-                            , Cmd.none
+                        Ok ( newCursor, newDoc ) ->
+                            ( { model
+                                | parsed = Just newDoc
+                                , cursor = Just newCursor
+                              }
+                            , Ports.send Ports.Rescan
                             )
 
                 _ ->
@@ -291,31 +309,46 @@ update msg model =
                     ( model, Cmd.none )
 
 
+updateDocument :
+    Mark.Parsed
+    -> Cursor
+    -> Key
+    -> Result (List Mark.Edit.Error) ( Cursor, Mark.Parsed )
 updateDocument parsed cursor key =
     case Debug.log "key" key of
         Character char ->
             Err []
 
         Delete ->
-            -- case cursor of
-            --     Ports.Cursor curs ->
-            --         -- TODO: what if offset is 0?
-            --         Mark.Edit.update document
-            --             (Mark.Edit.deleteText
-            --                 curs.id
-            --                 curs.offset
-            --                 (curs.offset - 1)
-            --             )
-            --             parsed
-            --     Ports.Range selection ->
-            --         Mark.Edit.update document
-            --             (Mark.Edit.deleteText
-            --                 selection.startId
-            --                 selection.startOffset
-            --                 selection.endOffset
-            --             )
-            --             parsed
-            Err []
+            case cursor of
+                Caret caret ->
+                    -- TODO: what if offset is 0?
+                    let
+                        newCursor =
+                            Caret (Selection.back 1 caret)
+                    in
+                    Mark.Edit.update document
+                        (Mark.Edit.deleteText
+                            caret.id
+                            caret.offset
+                            (caret.offset - 1)
+                        )
+                        parsed
+                        |> Result.map (Tuple.pair newCursor)
+
+                Range start middle end ->
+                    let
+                        newCursor =
+                            Caret (Selection.back 1 start)
+                    in
+                    Mark.Edit.update document
+                        (Mark.Edit.deleteText
+                            start.id
+                            start.offset
+                            end.offset
+                        )
+                        parsed
+                        |> Result.map (Tuple.pair newCursor)
 
         Control ctrl ->
             -- These are as yet uncaptured control characters.

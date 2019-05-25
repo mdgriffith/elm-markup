@@ -31,15 +31,15 @@ type Incoming
 
 
 type Outgoing
-    = NoOp
+    = Rescan
 
 
 send : Outgoing -> Cmd msg
 send out =
     case out of
-        NoOp ->
+        Rescan ->
             infoForWorld
-                { tag = "NoOp"
+                { tag = "Rescan"
                 , data = Encode.bool True
                 }
 

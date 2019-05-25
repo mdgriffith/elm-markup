@@ -4,8 +4,10 @@ module Selection exposing
     , CharLayout
     , Offset
     , Selection(..)
+    , back
     , decode
     , nearest
+    , resync
     , select
     , selectMany
     )
@@ -70,6 +72,15 @@ type alias CharBox =
     }
 
 
+{-| -}
+back : Int -> CharBox -> CharBox
+back i charBox =
+    { id = charBox.id
+    , offset = charBox.offset - i
+    , box = charBox.box
+    }
+
+
 type alias Offset =
     Int
 
@@ -109,6 +120,36 @@ select : ( Float, Float ) -> CharLayout -> Maybe CharBox
 select coords (CharLayout layout) =
     List.foldl (find coords) NoMatch layout
         |> matchToMaybe
+
+
+type Synced x
+    = Unsynced x
+    | Synced x
+
+
+{-| Update a bounding boxed based on id and offset match.
+-}
+resync : CharLayout -> CharBox -> CharBox
+resync (CharLayout layout) charBox =
+    case List.foldl sync (Unsynced charBox) layout of
+        Synced x ->
+            x
+
+        Unsynced x ->
+            x
+
+
+sync charBox synced =
+    case synced of
+        Synced _ ->
+            synced
+
+        Unsynced unsynced ->
+            if unsynced.id == charBox.id && unsynced.offset == charBox.offset then
+                Synced charBox
+
+            else
+                synced
 
 
 {-| -}

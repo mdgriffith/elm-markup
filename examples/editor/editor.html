@@ -111,35 +111,32 @@ body {
 
     var node = document.getElementById('root');
     var app = Elm.Main.init({ node: node });
+    var range = document.createRange();
 
     function targeting_systems_online(id) {
         var t0 = performance.now();
         var target = document.getElementById("root");
-        let range = document.createRange();
         // https://developer.mozilla.org/en-US/docs/Web/API/Range
-        // range.selectNode(target);
         
-
-
         var overlay = document.getElementById("overlay");
         // For every child of a node
         // Capture the coordinates of every rendered character within a node
         // Skip those within a node with class `skip`
-        var layout = scan(target, "overlay", range)
+        var scanned = scan(target, "root", 0, range)
 
         var t1 = performance.now();
         console.log("Call to scan sizes took " + (t1 - t0) + " milliseconds.")
         
         app.ports.infoForElm.send({
                 tag: "CharLayout",
-                data: layout
+                data: scanned.layout
             })
     }
     var charCount = 0;
     var elemCount = 0;
     const draw = false;
 
-    function scan(node, id, range) {
+    function scan(node, id, offset, range) {
         var layout = []
         if (node.nodeType == 3){
             // Text node, scan every character
@@ -155,7 +152,8 @@ body {
 
                 var box = range.getBoundingClientRect()
                 if (id.startsWith("m")) {
-                    layout.push({ id: id, offset: c, box: box})
+                    layout.push({ id: id, offset: offset, box: box})
+                    offset = offset + 1
                 }
                
 
@@ -175,16 +173,36 @@ body {
             if (node.hasChildNodes() && !node.classList.contains("skip")) {
                 if (node.id) {
                     id = node.id
+                    offset = 0
                 }
 
                 var children = node.childNodes;
                 for (var i = 0; i < children.length; i++) {
-                    var layout = layout.concat(scan(children[i], id, range))
+                    var scanned = scan(children[i], id, offset, range)
+
+                    layout = layout.concat(scanned.layout)
+                    offset = scanned.offset
                 }
             }
         }
-        return layout
+        return {offset: offset, layout: layout}
     }
+
+    app.ports.infoForWorld.subscribe(function(newInfo){
+        switch (newInfo.tag) {
+            case 'Rescan':
+                var target = document.getElementById("root");
+                var scanned = scan(target, "root", 0, range)
+
+                app.ports.infoForElm.send({
+                        tag: "CharLayout",
+                        data: scanned.layout
+                    })
+                break;
+        }
+    })
+
+
 
     window.setTimeout(targeting_systems_online, 600)
 
