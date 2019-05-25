@@ -192,19 +192,23 @@ body {
         switch (newInfo.tag) {
             case 'Rescan':
                 var target = document.getElementById("root");
-                var scanned = scan(target, "root", 0, range)
+                if (!target) {
+                    // Need to wait for initial render.
+                    window.setTimeout(targeting_systems_online, 100)
+                } else {
+                    var scanned = scan(target, "root", 0, range)
 
-                app.ports.infoForElm.send({
-                        tag: "CharLayout",
-                        data: scanned.layout
-                    })
+                    app.ports.infoForElm.send({
+                            tag: "CharLayout",
+                            data: scanned.layout
+                        })
+
+                }
+                
                 break;
         }
     })
 
-
-
-    window.setTimeout(targeting_systems_online, 600)
 
     function get_selection(){
         

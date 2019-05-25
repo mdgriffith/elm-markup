@@ -8,11 +8,13 @@ import Html exposing (Html)
 import Html.Attributes as Attr
 import Html.Events as Events
 import Html.Keyed
+import Html.Lazy
 import Http
 import Json.Decode as Decode
 import Mark
 import Mark.Edit
 import Mark.Error
+import Mark.New
 import Ports
 import Selection
 
@@ -280,7 +282,7 @@ update msg model =
                     case Mark.parse document src of
                         Mark.Success parsed ->
                             ( { model | parsed = Just parsed }
-                            , Cmd.none
+                            , Ports.send Ports.Rescan
                             )
 
                         Mark.Almost partial ->
@@ -293,7 +295,7 @@ update msg model =
                                 | parsed = Just partial.result
                                 , errors = partial.errors
                               }
-                            , Cmd.none
+                            , Ports.send Ports.Rescan
                             )
 
                         Mark.Failure errors ->
@@ -317,7 +319,27 @@ updateDocument :
 updateDocument parsed cursor key =
     case Debug.log "key" key of
         Character char ->
-            Err []
+            case cursor of
+                Caret caret ->
+                    -- TODO: what if offset is 0?
+                    Mark.Edit.update document
+                        (Mark.Edit.insertText
+                            caret.id
+                            caret.offset
+                            [ Mark.New.unstyled (String.fromChar char) ]
+                        )
+                        parsed
+                        |> Result.map (Tuple.pair (Caret (Selection.move 1 caret)))
+
+                Range start middle end ->
+                    Mark.Edit.update document
+                        (Mark.Edit.insertText
+                            start.id
+                            start.offset
+                            [ Mark.New.unstyled (String.fromChar char) ]
+                        )
+                        parsed
+                        |> Result.map (Tuple.pair (Caret (Selection.move 1 start)))
 
         Delete ->
             case cursor of
@@ -325,7 +347,7 @@ updateDocument parsed cursor key =
                     -- TODO: what if offset is 0?
                     let
                         newCursor =
-                            Caret (Selection.back 1 caret)
+                            Caret (Selection.move -1 caret)
                     in
                     Mark.Edit.update document
                         (Mark.Edit.deleteText
@@ -339,7 +361,7 @@ updateDocument parsed cursor key =
                 Range start middle end ->
                     let
                         newCursor =
-                            Caret (Selection.back 1 start)
+                            Caret (Selection.move -1 start)
                     in
                     Mark.Edit.update document
                         (Mark.Edit.deleteText
@@ -368,27 +390,31 @@ view model =
     Html.div []
         [ Maybe.map viewCursor model.cursor
             |> Maybe.withDefault (Html.text "")
-        , case model.parsed of
-            Nothing ->
-                Html.text "Source not received yet"
-
-            Just source ->
-                case Mark.render document source of
-                    Mark.Success html ->
-                        Html.div (Attr.id "root" :: editEvents) html.body
-
-                    Mark.Almost { result, errors } ->
-                        -- This is the case where there has been an error,
-                        -- but it has been caught by `Mark.onError` and is still rendereable.
-                        Html.div []
-                            [ Html.div [] (viewErrors errors)
-                            , Html.div (Attr.id "root" :: editEvents) result.body
-                            ]
-
-                    Mark.Failure errors ->
-                        Html.div []
-                            (viewErrors errors)
+        , Html.Lazy.lazy viewDocument model.parsed
         ]
+
+
+viewDocument parsed =
+    case parsed of
+        Nothing ->
+            Html.text "Source not received yet"
+
+        Just source ->
+            case Mark.render document source of
+                Mark.Success html ->
+                    Html.div (Attr.id "root" :: editEvents) html.body
+
+                Mark.Almost { result, errors } ->
+                    -- This is the case where there has been an error,
+                    -- but it has been caught by `Mark.onError` and is still rendereable.
+                    Html.div []
+                        [ Html.div [] (viewErrors errors)
+                        , Html.div (Attr.id "root" :: editEvents) result.body
+                        ]
+
+                Mark.Failure errors ->
+                    Html.div []
+                        (viewErrors errors)
 
 
 viewCursor cursor =

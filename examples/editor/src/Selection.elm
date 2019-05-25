@@ -4,8 +4,8 @@ module Selection exposing
     , CharLayout
     , Offset
     , Selection(..)
-    , back
     , decode
+    , move
     , nearest
     , resync
     , select
@@ -17,46 +17,6 @@ module Selection exposing
 import Json.Decode as Decode
 import Mark
 import Mark.Edit
-
-
-decode =
-    Decode.map CharLayout
-        (Decode.list decodeCharBox)
-
-
-decodeCharBox =
-    Decode.map3 CharBox
-        (Decode.field "id" decodeId)
-        (Decode.field "offset" decodeOffset)
-        (Decode.field "box" decodeBox)
-
-
-decodeId : Decode.Decoder Mark.Edit.Id
-decodeId =
-    Decode.string
-        |> Decode.andThen
-            (\str ->
-                case Mark.stringToId str of
-                    Nothing ->
-                        Decode.fail "Invalid Id"
-
-                    Just id ->
-                        Decode.succeed id
-            )
-
-
-decodeOffset : Decode.Decoder Offset
-decodeOffset =
-    Decode.int
-
-
-decodeBox : Decode.Decoder Box
-decodeBox =
-    Decode.map4 Box
-        (Decode.field "x" Decode.float)
-        (Decode.field "y" Decode.float)
-        (Decode.field "height" Decode.float)
-        (Decode.field "width" Decode.float)
 
 
 {-| A Layout should be an ordered list in the source order that the characters appear in the html.
@@ -72,15 +32,6 @@ type alias CharBox =
     }
 
 
-{-| -}
-back : Int -> CharBox -> CharBox
-back i charBox =
-    { id = charBox.id
-    , offset = charBox.offset - i
-    , box = charBox.box
-    }
-
-
 type alias Offset =
     Int
 
@@ -92,6 +43,19 @@ type alias Box =
     , y : Float
     , height : Float
     , width : Float
+    }
+
+
+
+{- CharBox operations -}
+
+
+{-| -}
+move : Int -> CharBox -> CharBox
+move i charBox =
+    { id = charBox.id
+    , offset = charBox.offset + i
+    , box = charBox.box
     }
 
 
@@ -285,3 +249,47 @@ find coords charBox maybeFound =
 
         _ ->
             maybeFound
+
+
+
+{- Decoding -}
+
+
+decode =
+    Decode.map CharLayout
+        (Decode.list decodeCharBox)
+
+
+decodeCharBox =
+    Decode.map3 CharBox
+        (Decode.field "id" decodeId)
+        (Decode.field "offset" decodeOffset)
+        (Decode.field "box" decodeBox)
+
+
+decodeId : Decode.Decoder Mark.Edit.Id
+decodeId =
+    Decode.string
+        |> Decode.andThen
+            (\str ->
+                case Mark.stringToId str of
+                    Nothing ->
+                        Decode.fail "Invalid Id"
+
+                    Just id ->
+                        Decode.succeed id
+            )
+
+
+decodeOffset : Decode.Decoder Offset
+decodeOffset =
+    Decode.int
+
+
+decodeBox : Decode.Decoder Box
+decodeBox =
+    Decode.map4 Box
+        (Decode.field "x" Decode.float)
+        (Decode.field "y" Decode.float)
+        (Decode.field "height" Decode.float)
+        (Decode.field "width" Decode.float)
