@@ -39,11 +39,29 @@ body {
     position:absolute;
     left:0;
     top:0;
-    width:3px;
+    width:2px;
     height:24px;
     background-color: red;
     animation: blink 0.8s infinite;
 }
+
+#cursor-box {
+    position:absolute;
+    left:0;
+    top:0;
+   
+    background-color: red;
+    opacity: 0.2;
+}
+#start-cursor {
+    position:absolute;
+    left:0;
+    top:0;
+    width:2px;
+    height:24px;
+    background-color: grey;
+}
+
 
 @keyframes blink {
     0% { opacity: 1 }
@@ -52,19 +70,126 @@ body {
     85% {opacity: 0}
     100% { opacity: 1 }
 }
+#overlay {
+    position:absolute;
+    left: 0;
+    top:0;
+    background-color: blue;
+    opacity: 0.3;
+}
+.box {
+    position:absolute;
+    left: 0;
+    top:0;
+    background-color: blue;
+    border: 2px solid blue;
+    opacity: 0.3;
+    box-sizing: border-box;
+}
+#root {
+    cursor: text;
+    -webkit-touch-callout: none; /* iOS Safari */
+    -webkit-user-select: none; /* Safari */
+     -khtml-user-select: none; /* Konqueror HTML */
+       -moz-user-select: none; /* Firefox */
+        -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none; /* Non-prefixed version, currently
+                                  supported by Chrome and Opera */
+}
 
 
 </style>
 
-<body id="root"></body>
+<body>
+    <div id="overlay"></div>
+    <div id="root"></div>
+
+</body>
+
 
 <script type="text/javascript">
 
     var node = document.getElementById('root');
     var app = Elm.Main.init({ node: node });
 
-    
-    document.onselectionchange = (event) => {
+    function targeting_systems_online(id) {
+        var t0 = performance.now();
+        var target = document.getElementById("root");
+        let range = document.createRange();
+        // https://developer.mozilla.org/en-US/docs/Web/API/Range
+        // range.selectNode(target);
+        
+
+
+        var overlay = document.getElementById("overlay");
+        // For every child of a node
+        // Capture the coordinates of every rendered character within a node
+        // Skip those within a node with class `skip`
+        var layout = scan(target, "overlay", range)
+
+        var t1 = performance.now();
+        console.log("Call to scan sizes took " + (t1 - t0) + " milliseconds.")
+        
+        app.ports.infoForElm.send({
+                tag: "CharLayout",
+                data: layout
+            })
+    }
+    var charCount = 0;
+    var elemCount = 0;
+    const draw = false;
+
+    function scan(node, id, range) {
+        var layout = []
+        if (node.nodeType == 3){
+            // Text node, scan every character
+            
+            range.selectNodeContents(node);
+            // console.log(range);
+
+            const len = range.endOffset;
+            for (var c = 0; c < len; c++) {
+                range.setStart(node, c)
+                range.setEnd(node, c + 1)
+                // console.log(range)
+
+                var box = range.getBoundingClientRect()
+                if (id.startsWith("m")) {
+                    layout.push({ id: id, offset: c, box: box})
+                }
+               
+
+                if (draw){
+                    var div = document.createElement("div");
+                    div.className = "box"
+                    div.style.top = box.y + "px";
+                    div.style.left = box.x + "px";
+                    div.style.width = box.width + "px";
+                    div.style.height = box.height + "px";
+                    div.style.opacity = "0.3";
+                    div.style.backgroundColor = "blue";
+                    overlay.appendChild(div);
+                }
+            }
+        } else {
+            if (node.hasChildNodes() && !node.classList.contains("skip")) {
+                if (node.id) {
+                    id = node.id
+                }
+
+                var children = node.childNodes;
+                for (var i = 0; i < children.length; i++) {
+                    var layout = layout.concat(scan(children[i], id, range))
+                }
+            }
+        }
+        return layout
+    }
+
+    window.setTimeout(targeting_systems_online, 600)
+
+    function get_selection(){
+        
         var selection = window.getSelection();
         console.log(selection)
         if (selection.isCollapsed){
@@ -72,45 +197,56 @@ body {
             if (app.ports.infoForElm) {
                 var range = selection.getRangeAt(0)
                 var box = range.getBoundingClientRect()
-                app.ports.infoForElm.send({
-                    tag: "Selection",
-                    data: { tag: "Cursor", 
-                            data:
-                              { box:{ x: box.x + window.scrollX, 
-                                      y: box.y + window.scrollY,
-                                      height: box.height,
-                                      width: box.width
-                                    },
-                                id: "test",
-                                offset: 0
-                              }
-                        }
-                })
+
+
+                if (selection.anchorNode.parentNode && selection.anchorNode.parentNode.id.startsWith("m-")){
+                    app.ports.infoForElm.send({
+                        tag: "Selection",
+                        data: { tag: "Cursor", 
+                                data:
+                                { box:{ x: box.x + window.scrollX, 
+                                        y: box.y + window.scrollY,
+                                        height: box.height,
+                                        width: box.width
+                                        },
+                                    id: selection.anchorNode.parentNode.id,
+                                    offset: selection.anchorOffset
+                                }
+                            }
+                    })
+                }
             }
         } else {
             if (app.ports.infoForElm) {
                 var range = selection.getRangeAt(0)
                 var box = range.getBoundingClientRect()
-                app.ports.infoForElm.send({
-                    tag: "Selection",
-                    data: { tag: "Range", 
-                            data:
-                              { box:{ x: box.x + window.scrollX, 
-                                      y: box.y + window.scrollY,
-                                      height: box.height,
-                                      width: box.width
-                                    },
-                                startId: "test",
-                                startOffset: 0,
-                                endId: "test",
-                                endOffset: 0
-                              }
-                        }
-                })
-                
+                if (selection.anchorNode.parentNode && selection.anchorNode.parentNode.id.startsWith("m-")){
+                    app.ports.infoForElm.send({
+                        tag: "Selection",
+                        data: { tag: "Range", 
+                                data:
+                                { box:{ x: box.x + window.scrollX, 
+                                        y: box.y + window.scrollY,
+                                        height: box.height,
+                                        width: box.width
+                                        },
+                                    startId: selection.anchorNode.parentNode.id,
+                                    startOffset: selection.anchorOffset,
+                                    endId: selection.focusNode.parentNode.id,
+                                    endOffset: selection.focusOffset
+                                }
+                            }
+                    })
+                }
             }
         }
-    };
+    }
+
+
+
+    //document.onselectionchange = (event) => { get_selection() }
+      
+    //document.onclick = (event) => { get_selection() }
 
 
 </script>

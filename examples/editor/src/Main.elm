@@ -3,21 +3,29 @@ module Main exposing (document, main)
 {-| -}
 
 import Browser
+import Browser.Events
 import Html exposing (Html)
 import Html.Attributes as Attr
+import Html.Events as Events
+import Html.Keyed
 import Http
+import Json.Decode as Decode
 import Mark
+import Mark.Edit
 import Mark.Error
 import Ports
+import Selection
 
 
 main =
-    Browser.document
+    Browser.element
         { init =
             \() ->
                 ( { parsed = Nothing
                   , errors = []
                   , cursor = Nothing
+                  , characterLayout = Nothing
+                  , selecting = Nothing
                   }
                 , Http.get
                     { url = "/articles/Ipsum.emu"
@@ -27,9 +35,22 @@ main =
         , view = view
         , update = update
         , subscriptions =
-            \_ ->
+            \model ->
                 Sub.batch
                     [ Ports.receive EditorSent EditorMsgError
+                    , Browser.Events.onMouseDown (Decode.map SelectTo decodeCoords)
+                    , if model.selecting /= Nothing then
+                        Sub.batch
+                            [ Browser.Events.onMouseMove (Decode.map SelectTo decodeCoords)
+                            , Browser.Events.onMouseUp (Decode.succeed StopSelection)
+                            , Browser.Events.onVisibilityChange (always StopSelection)
+                            ]
+
+                      else
+                        Sub.none
+
+                    -- , Browser.Events.onKeyPress (Decode.map KeyPressed keyDecoder)
+                    -- , Browser.Events.onKeyDown (Decode.map KeyPressed controlDecoder)
                     ]
         }
 
@@ -40,14 +61,92 @@ type alias Model =
     -- which is a data structure representing the document
     { parsed : Maybe Mark.Parsed
     , errors : List Mark.Error
-    , cursor : Maybe Ports.Cursor
+    , cursor : Maybe Cursor
+    , characterLayout : Maybe Selection.CharLayout
+    , selecting : Maybe ( Float, Float )
     }
+
+
+type Cursor
+    = Caret Selection.CharBox
+    | Range Selection.CharBox (List Selection.CharBox) Selection.CharBox
 
 
 type Msg
     = GotSrc (Result Http.Error String)
     | EditorMsgError String
     | EditorSent Ports.Incoming
+    | KeyPressed Key
+    | MouseClicked ( Float, Float )
+    | SelectTo ( Float, Float )
+    | StopSelection
+    | ClearSelection
+
+
+type Key
+    = Character Char
+    | Control String
+    | Enter
+    | Space
+    | Delete
+
+
+{-| We dont use Browser events because we need to prevent defaults.
+
+Specifically for spacebar, but likely for others as well.
+
+-}
+editEvents =
+    [ Attr.tabindex 1
+    , Events.preventDefaultOn "keypress" (Decode.map (\key -> ( KeyPressed key, True )) keyDecoder)
+    , Events.preventDefaultOn "keydown" (Decode.map (\key -> ( KeyPressed key, True )) controlDecoder)
+
+    -- , Events.on "click"
+    --     (Decode.map MouseClicked decodeCoords)
+    ]
+
+
+decodeCoords =
+    Decode.map2 Tuple.pair
+        (Decode.field "pageX" Decode.float)
+        (Decode.field "pageY" Decode.float)
+
+
+controlDecoder : Decode.Decoder Key
+controlDecoder =
+    Decode.field "key" Decode.string
+        |> Decode.andThen
+            (\str ->
+                case str of
+                    "Backspace" ->
+                        Decode.succeed Delete
+
+                    _ ->
+                        Decode.fail "Unknown"
+            )
+
+
+keyDecoder : Decode.Decoder Key
+keyDecoder =
+    Decode.map toKey (Decode.field "key" Decode.string)
+
+
+toKey : String -> Key
+toKey string =
+    case String.uncons string of
+        Just ( char, "" ) ->
+            Character char
+
+        _ ->
+            case string of
+                "Enter" ->
+                    Enter
+
+                " " ->
+                    Space
+
+                _ ->
+                    Control string
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -62,10 +161,100 @@ update msg model =
 
         EditorSent incoming ->
             case incoming of
-                Ports.Select cursor ->
-                    ( { model | cursor = Just cursor }
+                Ports.NewCharLayout layout ->
+                    ( { model | characterLayout = Just layout }
                     , Cmd.none
                     )
+
+        MouseClicked coords ->
+            case model.characterLayout of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just layout ->
+                    case Selection.select coords layout of
+                        Just caret ->
+                            ( { model | cursor = Just (Caret caret) }
+                            , Cmd.none
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none )
+
+        SelectTo coords ->
+            case model.characterLayout of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just layout ->
+                    case model.selecting of
+                        Just base ->
+                            case Selection.selectMany base coords layout of
+                                Nothing ->
+                                    ( model, Cmd.none )
+
+                                Just (Selection.Single caret) ->
+                                    ( { model
+                                        | selecting = Just coords
+                                        , cursor = Just (Caret caret)
+                                      }
+                                    , Cmd.none
+                                    )
+
+                                Just (Selection.Many start middle end) ->
+                                    ( { model
+                                        | cursor = Just (Range start middle end)
+                                      }
+                                    , Cmd.none
+                                    )
+
+                        Nothing ->
+                            case Selection.select coords layout of
+                                Just caret ->
+                                    ( { model
+                                        | selecting = Just coords
+                                        , cursor = Just (Caret caret)
+                                      }
+                                    , Cmd.none
+                                    )
+
+                                Nothing ->
+                                    ( model
+                                    , Cmd.none
+                                    )
+
+        StopSelection ->
+            ( { model | selecting = Nothing }
+            , Cmd.none
+            )
+
+        ClearSelection ->
+            ( { model
+                | selecting = Nothing
+                , cursor = Nothing
+              }
+            , Cmd.none
+            )
+
+        KeyPressed key ->
+            case ( model.parsed, model.cursor ) of
+                ( Just parsed, Just cursor ) ->
+                    case updateDocument parsed cursor key of
+                        Err errors ->
+                            let
+                                _ =
+                                    Debug.log "err" errors
+                            in
+                            ( model, Cmd.none )
+
+                        Ok newDoc ->
+                            ( { model | parsed = Just newDoc }
+                            , Cmd.none
+                            )
+
+                _ ->
+                    -- no parsed document or cursor, then edits dont make sense
+                    ( model, Cmd.none )
 
         GotSrc result ->
             case result of
@@ -102,9 +291,48 @@ update msg model =
                     ( model, Cmd.none )
 
 
+updateDocument parsed cursor key =
+    case Debug.log "key" key of
+        Character char ->
+            Err []
+
+        Delete ->
+            -- case cursor of
+            --     Ports.Cursor curs ->
+            --         -- TODO: what if offset is 0?
+            --         Mark.Edit.update document
+            --             (Mark.Edit.deleteText
+            --                 curs.id
+            --                 curs.offset
+            --                 (curs.offset - 1)
+            --             )
+            --             parsed
+            --     Ports.Range selection ->
+            --         Mark.Edit.update document
+            --             (Mark.Edit.deleteText
+            --                 selection.startId
+            --                 selection.startOffset
+            --                 selection.endOffset
+            --             )
+            --             parsed
+            Err []
+
+        Control ctrl ->
+            -- These are as yet uncaptured control characters.
+            -- We still capture them here incase we want to extend in the future.
+            -- Here's what's available:
+            -- https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values
+            Err []
+
+        Enter ->
+            Err []
+
+        Space ->
+            Err []
+
+
 view model =
-    { title = "Elm Markup Editor"
-    , body =
+    Html.div []
         [ Maybe.map viewCursor model.cursor
             |> Maybe.withDefault (Html.text "")
         , case model.parsed of
@@ -114,38 +342,112 @@ view model =
             Just source ->
                 case Mark.render document source of
                     Mark.Success html ->
-                        Html.div [] html.body
+                        Html.div (Attr.id "root" :: editEvents) html.body
 
                     Mark.Almost { result, errors } ->
                         -- This is the case where there has been an error,
                         -- but it has been caught by `Mark.onError` and is still rendereable.
                         Html.div []
                             [ Html.div [] (viewErrors errors)
-                            , Html.div [] result.body
+                            , Html.div (Attr.id "root" :: editEvents) result.body
                             ]
 
                     Mark.Failure errors ->
                         Html.div []
                             (viewErrors errors)
         ]
-    }
 
 
 viewCursor cursor =
     case cursor of
-        Ports.Cursor curs ->
-            Html.div
-                [ Attr.id "cursor"
-                , Attr.style "height" (String.fromFloat curs.box.height ++ "px")
-                , Attr.style "left" (String.fromFloat (curs.box.x - 2) ++ "px")
-                , Attr.style "top" (String.fromFloat curs.box.y ++ "px")
-                , Attr.style "pointer-events" "none"
-                ]
-                []
+        Caret curs ->
+            viewCharBoxLeft curs.box
 
-        Ports.Range sel ->
-            -- A selection cursor is alrady rendered by the browser
-            Html.text ""
+        Range start middle end ->
+            Html.div []
+                [ viewCharBoxLeft start.box
+                , Html.div []
+                    -- *note* middle is in reversed order
+                    (viewHighlightFromBoxes middle)
+                , viewCharBoxRight end.box
+                ]
+
+
+viewHighlightFromBoxes boxes =
+    -- It would be super cool to calculate something
+    -- like an Svg polyline from all these boxes
+    -- List.foldl addBox (boxToPoints start) boxes
+    List.map (viewCharBox << .box) boxes
+
+
+{-| We expect
+-}
+addBox points new =
+    []
+
+
+boxToPoints box =
+    [ ( box.x, box.y )
+    , ( box.x + box.width, box.y )
+    , ( box.x + box.width, box.y + box.height )
+    , ( box.x, box.y + box.height )
+    ]
+
+
+viewCharBoxLeft box =
+    Html.div []
+        [ Html.div
+            [ Attr.id "cursor"
+            , Attr.style "height" (String.fromInt (floor box.height) ++ "px")
+            , Attr.style "left" (String.fromInt (floor box.x - 1) ++ "px")
+            , Attr.style "top" (String.fromInt (floor box.y) ++ "px")
+            , Attr.style "pointer-events" "none"
+            ]
+            []
+        , Html.div
+            [ Attr.id "cursor-box"
+            , Attr.style "height" (String.fromInt (floor box.height) ++ "px")
+            , Attr.style "left" (String.fromInt (floor box.x) ++ "px")
+            , Attr.style "width" (String.fromInt (floor box.width) ++ "px")
+            , Attr.style "top" (String.fromInt (floor box.y) ++ "px")
+            , Attr.style "pointer-events" "none"
+            ]
+            []
+        ]
+
+
+viewCharBox box =
+    Html.div
+        [ Attr.id "cursor-box"
+        , Attr.style "height" (String.fromInt (floor box.height) ++ "px")
+        , Attr.style "left" (String.fromInt (floor box.x) ++ "px")
+        , Attr.style "width" (String.fromInt (floor box.width) ++ "px")
+        , Attr.style "top" (String.fromInt (floor box.y) ++ "px")
+        , Attr.style "pointer-events" "none"
+        ]
+        []
+
+
+viewCharBoxRight box =
+    Html.div []
+        [ Html.div
+            [ Attr.id "cursor"
+            , Attr.style "height" (String.fromInt (floor box.height) ++ "px")
+            , Attr.style "left" (String.fromInt (floor (box.x + box.width - 1)) ++ "px")
+            , Attr.style "top" (String.fromInt (floor box.y) ++ "px")
+            , Attr.style "pointer-events" "none"
+            ]
+            []
+        , Html.div
+            [ Attr.id "cursor-box"
+            , Attr.style "height" (String.fromInt (floor box.height) ++ "px")
+            , Attr.style "left" (String.fromInt (floor box.x) ++ "px")
+            , Attr.style "width" (String.fromInt (floor box.width) ++ "px")
+            , Attr.style "top" (String.fromInt (floor box.y) ++ "px")
+            , Attr.style "pointer-events" "none"
+            ]
+            []
+        ]
 
 
 viewErrors errors =
@@ -175,7 +477,11 @@ document =
                 , image
                 , list
                 , code
-                , Mark.map (Html.p []) text
+                , Mark.withId
+                    (\id els ->
+                        Html.p [ Attr.id (Mark.idToString id) ] els
+                    )
+                    text
                 ]
         }
 

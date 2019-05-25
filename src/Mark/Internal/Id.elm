@@ -1,11 +1,13 @@
 module Mark.Internal.Id exposing
     ( Id(..)
     , Seed
+    , fromString
     , initialSeed
     , reseed
     , step
     , thread
     , threadThrough
+    , toString
     )
 
 {-| -}
@@ -35,6 +37,30 @@ Is there a performance issue with allocating a bunch of lists intead of base Int
 -}
 type Seed
     = Seed (List Int)
+
+
+toString (Id ids) =
+    ids
+        |> List.map String.fromInt
+        |> String.join "-"
+        |> (\x -> "m-" ++ x)
+
+
+fromString str =
+    case String.split "-" str of
+        "m" :: remain ->
+            let
+                parsed =
+                    List.filterMap String.toInt remain
+            in
+            if List.length parsed == List.length remain then
+                Just (Id parsed)
+
+            else
+                Nothing
+
+        _ ->
+            Nothing
 
 
 {-| -}

@@ -1,5 +1,5 @@
 module Mark.Edit exposing
-    ( update, Edit, Error
+    ( update, Id, Edit, Error
     , Selection, Offset
     , deleteText, insertText
     , Styles, restyle, addStyles, removeStyles
@@ -18,7 +18,7 @@ Once you have those you can [`update`](#update) your document, which can succeed
 
 # Updating `Parsed`
 
-@docs update, Edit, Error
+@docs update, Id, Edit, Error
 
 
 # Text Edits

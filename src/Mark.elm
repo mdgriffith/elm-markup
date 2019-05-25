@@ -8,9 +8,11 @@ module Mark exposing
     , Record, record, field, toBlock
     , oneOf, manyOf
     , tree, Enumerated(..), Item(..), Icon(..)
-    , Outcome(..), Partial
+    , Outcome(..), Partial, Error
     , compile, parse, Parsed, toString, render
-    , map, verify, onError, withId
+    , map, verify, onError
+    , withId, idToString
+    , stringToId
     )
 
 {-|
@@ -62,14 +64,16 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 # Rendering
 
-@docs Outcome, Partial
+@docs Outcome, Partial, Error
 
 @docs compile, parse, Parsed, toString, render
 
 
 # Constraining and Recovering Blocks
 
-@docs map, verify, onError, withId
+@docs map, verify, onError
+
+@docs withId, idToString
 
 -}
 
@@ -630,7 +634,7 @@ verify fn (Block details) =
         Mark.string
 
 -}
-withId : (Id -> a -> b) -> Block a -> Block b
+withId : (Mark.Edit.Id -> a -> b) -> Block a -> Block b
 withId fn (Block details) =
     Block
         { kind = details.kind
@@ -646,6 +650,18 @@ withId fn (Block details) =
         , parser = details.parser
         , expect = details.expect
         }
+
+
+{-| -}
+idToString : Mark.Edit.Id -> String
+idToString =
+    Id.toString
+
+
+{-| -}
+stringToId : String -> Maybe Mark.Edit.Id
+stringToId =
+    Id.fromString
 
 
 {-| Parsing any given `Block` can fail.
