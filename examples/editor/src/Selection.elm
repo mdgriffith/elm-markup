@@ -6,7 +6,8 @@ module Selection exposing
     , Selection(..)
     , decode
     , move
-    , nearest
+    , moveDown
+    , moveUp
     , resync
     , select
     , selectMany
@@ -57,6 +58,40 @@ move i charBox =
     , offset = charBox.offset + i
     , box = charBox.box
     }
+
+
+{-| Move the cursor up one line
+-}
+moveUp : CharLayout -> CharBox -> CharBox
+moveUp (CharLayout layout) charBox =
+    let
+        yTarget =
+            charBox.box.y - 10
+
+        xTarget =
+            charBox.box.x
+
+        --+ (charBox.box.width / 2)
+    in
+    List.foldl (find ( xTarget, yTarget )) NoMatch layout
+        |> matchToMaybe
+        |> Maybe.withDefault charBox
+
+
+{-| Move the cursor up one line
+-}
+moveDown : CharLayout -> CharBox -> CharBox
+moveDown (CharLayout layout) charBox =
+    let
+        yTarget =
+            charBox.box.y + charBox.box.height + 10
+
+        xTarget =
+            charBox.box.x + (charBox.box.width / 2)
+    in
+    List.foldl (find ( xTarget, yTarget )) NoMatch layout
+        |> matchToMaybe
+        |> Maybe.withDefault charBox
 
 
 within ( x, y ) box =
@@ -114,12 +149,6 @@ sync charBox synced =
 
             else
                 synced
-
-
-{-| -}
-nearest : ( Float, Float ) -> CharLayout -> CharBox
-nearest ( x, y ) layout =
-    Debug.todo "ohno"
 
 
 type Selection

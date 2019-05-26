@@ -101,6 +101,14 @@ type Key
     | Enter
     | Space
     | Delete
+    | Arrow Direction
+
+
+type Direction
+    = Up
+    | Right
+    | Down
+    | Left
 
 
 {-| We dont use Browser events because we need to prevent defaults.
@@ -134,6 +142,18 @@ controlDecoder =
                     "Backspace" ->
                         Decode.succeed Delete
 
+                    "ArrowDown" ->
+                        Decode.succeed (Arrow Down)
+
+                    "ArrowUp" ->
+                        Decode.succeed (Arrow Up)
+
+                    "ArrowRight" ->
+                        Decode.succeed (Arrow Right)
+
+                    "ArrowLeft" ->
+                        Decode.succeed (Arrow Left)
+
                     _ ->
                         Decode.fail "Unknown"
             )
@@ -151,6 +171,7 @@ toKey string =
             Character char
 
         _ ->
+            -- https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values
             case string of
                 "Enter" ->
                     Enter
@@ -317,9 +338,9 @@ update msg model =
                     ( model, Cmd.none )
 
         KeyPressed key ->
-            case ( model.parsed, model.cursor ) of
-                ( Just parsed, Just cursor ) ->
-                    case updateDocument parsed cursor key of
+            case ( model.parsed, model.cursor, model.characterLayout ) of
+                ( Just parsed, Just cursor, Just charLayout ) ->
+                    case updateDocument charLayout parsed cursor key of
                         Err errors ->
                             let
                                 _ =
@@ -377,11 +398,12 @@ update msg model =
 
 
 updateDocument :
-    Mark.Parsed
+    Selection.CharLayout
+    -> Mark.Parsed
     -> Cursor
     -> Key
     -> Result (List Mark.Edit.Error) ( Cursor, Mark.Parsed )
-updateDocument parsed cursor key =
+updateDocument charLayout parsed cursor key =
     case Debug.log "key" key of
         Character char ->
             case cursor of
@@ -436,6 +458,41 @@ updateDocument parsed cursor key =
                         )
                         parsed
                         |> Result.map (Tuple.pair newCursor)
+
+        Arrow dir ->
+            let
+                collapsed =
+                    case cursor of
+                        Caret caret ->
+                            caret
+
+                        Range start _ _ ->
+                            start
+            in
+            case dir of
+                Up ->
+                    Ok
+                        ( Caret (Selection.moveUp charLayout collapsed)
+                        , parsed
+                        )
+
+                Down ->
+                    Ok
+                        ( Caret (Selection.moveDown charLayout collapsed)
+                        , parsed
+                        )
+
+                Left ->
+                    Ok
+                        ( Caret (Selection.move -1 collapsed)
+                        , parsed
+                        )
+
+                Right ->
+                    Ok
+                        ( Caret (Selection.move 1 collapsed)
+                        , parsed
+                        )
 
         Control ctrl ->
             -- These are as yet uncaptured control characters.
