@@ -17,6 +17,7 @@ import Mark.Error
 import Mark.New
 import Ports
 import Selection
+import Time
 
 
 main =
@@ -40,7 +41,6 @@ main =
             \model ->
                 Sub.batch
                     [ Ports.receive EditorSent EditorMsgError
-                    , Browser.Events.onMouseDown (Decode.map SelectTo decodeCoords)
                     , if model.selecting /= Nothing then
                         Sub.batch
                             [ Browser.Events.onMouseMove (Decode.map SelectTo decodeCoords)
@@ -51,6 +51,8 @@ main =
                       else
                         Sub.none
 
+                    -- We're disabling global events because they seem to override /everything/
+                    -- , Browser.Events.onMouseDown (Decode.map SelectTo decodeCoords)
                     -- , Browser.Events.onKeyPress (Decode.map KeyPressed keyDecoder)
                     -- , Browser.Events.onKeyDown (Decode.map KeyPressed controlDecoder)
                     ]
@@ -83,6 +85,14 @@ type Msg
     | SelectTo ( Float, Float )
     | StopSelection
     | ClearSelection
+    | StyleSelection Style
+
+
+type Style
+    = Bold
+    | Italic
+    | Strike
+    | Normal
 
 
 type Key
@@ -105,6 +115,7 @@ editEvents =
 
     -- , Events.on "click"
     --     (Decode.map MouseClicked decodeCoords)
+    , Events.on "mousedown" (Decode.map SelectTo decodeCoords)
     ]
 
 
@@ -253,6 +264,58 @@ update msg model =
             , Cmd.none
             )
 
+        StyleSelection style ->
+            case ( model.parsed, model.cursor ) of
+                ( Just parsed, Just (Range start middle end) ) ->
+                    let
+                        updatedDocument =
+                            Mark.Edit.update document
+                                (case style of
+                                    Normal ->
+                                        Mark.Edit.restyle
+                                            start.id
+                                            { anchor = start.offset
+                                            , focus = end.offset
+                                            }
+                                            { bold = False
+                                            , italic = False
+                                            , strike = False
+                                            }
+
+                                    _ ->
+                                        Mark.Edit.addStyles
+                                            start.id
+                                            { anchor = start.offset
+                                            , focus = end.offset
+                                            }
+                                            { bold = style == Bold
+                                            , italic = style == Italic
+                                            , strike = style == Strike
+                                            }
+                                )
+                                parsed
+                    in
+                    case updatedDocument of
+                        Err errors ->
+                            let
+                                _ =
+                                    Debug.log "err" errors
+                            in
+                            ( model, Cmd.none )
+
+                        Ok newDoc ->
+                            ( { model
+                                | parsed = Just newDoc
+
+                                -- , renderCmds = Just Rescan
+                              }
+                            , Ports.send Ports.Rescan
+                            )
+
+                _ ->
+                    -- no parsed document or cursor, then edits dont make sense
+                    ( model, Cmd.none )
+
         KeyPressed key ->
             case ( model.parsed, model.cursor ) of
                 ( Just parsed, Just cursor ) ->
@@ -281,7 +344,9 @@ update msg model =
                 Ok src ->
                     case Mark.parse document src of
                         Mark.Success parsed ->
-                            ( { model | parsed = Just parsed }
+                            ( { model
+                                | parsed = Just parsed
+                              }
                             , Ports.send Ports.Rescan
                             )
 
@@ -420,11 +485,14 @@ viewDocument parsed =
 viewCursor cursor =
     case cursor of
         Caret curs ->
-            viewCharBoxLeft curs.box
+            Html.div []
+                [ viewCharBoxLeft curs.box
+                ]
 
         Range start middle end ->
             Html.div []
-                [ viewCharBoxLeft start.box
+                [ viewControlsAbove start.box
+                , viewCharBoxLeft start.box
                 , Html.div []
                     -- *note* middle is in reversed order
                     (viewHighlightFromBoxes middle)
@@ -432,17 +500,24 @@ viewCursor cursor =
                 ]
 
 
+viewControlsAbove box =
+    Html.div
+        [ Attr.id "controls"
+        , Attr.style "left" (String.fromInt (floor box.x) ++ "px")
+        , Attr.style "top" (String.fromInt (floor (box.y - 50)) ++ "px")
+        ]
+        [ Html.span [ Events.onClick (StyleSelection Normal) ] [ Html.text "A" ]
+        , Html.span [ Attr.class "bold", Events.onClick (StyleSelection Bold) ] [ Html.text "B" ]
+        , Html.span [ Attr.class "italic", Events.onClick (StyleSelection Italic) ] [ Html.text "I" ]
+        , Html.span [ Attr.class "strike", Events.onClick (StyleSelection Strike) ] [ Html.text "S" ]
+        ]
+
+
 viewHighlightFromBoxes boxes =
-    -- It would be super cool to calculate something
-    -- like an Svg polyline from all these boxes
+    -- It would be super cool and likely more performant
+    --- to calculate something like an Svg polyline from all these boxes
     -- List.foldl addBox (boxToPoints start) boxes
     List.map (viewCharBox << .box) boxes
-
-
-{-| We expect
--}
-addBox points new =
-    []
 
 
 boxToPoints box =

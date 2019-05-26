@@ -97,6 +97,24 @@ body {
                                   supported by Chrome and Opera */
 }
 
+#controls {
+    position:absolute;
+    padding: 4px 16px;
+    display:flex;
+    border-radius: 2px;
+    background-color:#111;
+    color: #EEE;
+    left:0px;
+    top:0px;
+}
+#controls > * {
+    padding-right: 16px;
+    cursor: pointer;
+}
+#controls > span:last-child {
+    padding-right: 0px;
+}
+
 
 </style>
 
@@ -171,7 +189,7 @@ body {
             }
         } else {
             if (node.hasChildNodes() && !node.classList.contains("skip")) {
-                if (node.id) {
+                if (node.id && node.id.startsWith("m")) {
                     id = node.id
                     offset = 0
                 }
@@ -191,20 +209,15 @@ body {
     app.ports.infoForWorld.subscribe(function(newInfo){
         switch (newInfo.tag) {
             case 'Rescan':
-                var target = document.getElementById("root");
-                if (!target) {
-                    // Need to wait for initial render.
-                    window.setTimeout(targeting_systems_online, 100)
-                } else {
+                window.requestAnimationFrame(function(time){
+                    var target = document.getElementById("root");
                     var scanned = scan(target, "root", 0, range)
 
                     app.ports.infoForElm.send({
                             tag: "CharLayout",
                             data: scanned.layout
                         })
-
-                }
-                
+                });
                 break;
         }
     })
