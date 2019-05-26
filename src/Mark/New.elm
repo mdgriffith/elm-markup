@@ -6,7 +6,7 @@ module Mark.New exposing
     , annotation, verbatim
     )
 
-{-| Create a new `Mark.Block` that can be added to your document using `Mark.Edit.replace` or `Mark.insertAt`.
+{-| Create a new `Mark.Block` that can be added to your document using `Mark.Edit.replace` or `Mark.Edit.insertAt`.
 
 Let's say we are capturing a basic diagram in our document and we want to dynamically insert a circle.
 
@@ -29,6 +29,8 @@ We can make a new circle by writing the following function
             ]
 
 And then insert our newly made circle using `Mark.Edit.insertAt`.
+
+**Note:** The document will only accept edits which are valid.
 
 @docs Block
 

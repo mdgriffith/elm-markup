@@ -22,13 +22,12 @@ module Mark.Error exposing
 
 import Html
 import Html.Attributes
-import Mark.Edit
 import Mark.Internal.Error as Error
 
 
 {-| -}
 type alias Error =
-    Mark.Edit.Error
+    Error.Rendered
 
 
 {-| -}
@@ -205,7 +204,8 @@ yellowClr theme =
             "#c4a000"
 
 
-{-| -}
+{-| Create a custom error message to use with [`Mark.verify`](Mark#verify)
+-}
 type alias Custom =
     { title : String
     , message : List String

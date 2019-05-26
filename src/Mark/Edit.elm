@@ -1,9 +1,9 @@
 module Mark.Edit exposing
-    ( update, Id, Edit, Error
-    , Selection, Offset
-    , deleteText, insertText
+    ( update, Id, Edit
+    , Offset
+    , insertText, deleteText
     , Styles, restyle, addStyles, removeStyles
-    , annotate, verbatim, verbatimWith
+    , annotate, verbatim
     , replace, delete, insertAt
     )
 
@@ -18,18 +18,18 @@ Once you have those you can [`update`](#update) your document, which can succeed
 
 # Updating `Parsed`
 
-@docs update, Id, Edit, Error
+@docs update, Id, Edit
 
 
 # Text Edits
 
-@docs Selection, Offset
+@docs Offset
 
-@docs deleteText, insertText
+@docs insertText, deleteText
 
 @docs Styles, restyle, addStyles, removeStyles
 
-@docs annotate, verbatim, verbatimWith
+@docs annotate, verbatim
 
 
 # General Edits
@@ -38,6 +38,7 @@ Once you have those you can [`update`](#update) your document, which can succeed
 
 -}
 
+import Mark.Error
 import Mark.Internal.Description as Desc exposing (..)
 import Mark.Internal.Error as Error
 import Mark.Internal.Format as Format
@@ -49,12 +50,8 @@ import Mark.New
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
-{-| -}
-type alias Error =
-    Error.Rendered
-
-
-{-| -}
+{-| Every block has an `Id`. You can retrieve the `Id` for a block using [`Mark.withId`](Mark#withId)
+-}
 type alias Id =
     Id.Id
 
@@ -88,9 +85,9 @@ type Edit
     | InsertAt Id Int Mark.New.Block
     | Delete Id Int
       -- Text Editing
-    | StyleText Id Selection Restyle
-    | Annotate Id Selection Annotation
-    | ReplaceSelection Id Selection (List Mark.New.Text)
+    | StyleText Id Offset Offset Restyle
+    | Annotate Id Offset Offset Annotation
+    | ReplaceSelection Id Offset Offset (List Mark.New.Text)
 
 
 type Annotation
@@ -99,73 +96,94 @@ type Annotation
 
 
 {-| -}
-deleteText : Id -> Int -> Int -> Edit
-deleteText id anchor focus =
+deleteText : Id -> Offset -> Offset -> Edit
+deleteText id start end =
     ReplaceSelection id
-        { anchor = anchor
-        , focus = focus
-        }
+        start
+        end
         []
 
 
 {-| -}
-insertText : Id -> Int -> List Mark.New.Text -> Edit
+insertText : Id -> Offset -> List Mark.New.Text -> Edit
 insertText id at els =
-    ReplaceSelection id { anchor = at, focus = at } els
+    ReplaceSelection id at at els
 
 
-{-| -}
+{-| The `Block` mentioned here is actually a `Mark.New.Block`. Use [`Mark.New`](/Mark-New) to create the new block you'd like.
+-}
 replace : Id -> Mark.New.Block -> Edit
 replace =
     Replace
 
 
-{-| -}
+{-| Delete a block at an index within a `Mark.manyOf`.
+-}
 delete : Id -> Int -> Edit
 delete =
     Delete
 
 
-{-| -}
+{-| Insert a block at an index within a `Mark.manyOf`.
+-}
 insertAt : Id -> Int -> Mark.New.Block -> Edit
 insertAt =
     InsertAt
 
 
-{-| -}
-annotate : Id -> Selection -> String -> List ( String, Mark.New.Block ) -> Edit
-annotate id selection name attrs =
-    Annotate id selection (Annotation name attrs)
+{-| Put the current text selection within an `annotation` with some attributes.
+
+Here's an example that would turn the selection into a `link`.
+
+    Mark.Edit.annotate id
+        start
+        end
+        "link"
+        [ ( "url", Mark.New.string "https://guide.elm-lang.org/" ) ]
+
+**Note** existing annotations within the selection are removed.
+
+-}
+annotate : Id -> Offset -> Offset -> String -> List ( String, Mark.New.Block ) -> Edit
+annotate id start end name attrs =
+    Annotate id start end (Annotation name attrs)
 
 
-{-| -}
-verbatim : Id -> Selection -> String -> Edit
-verbatim id selection name =
-    Annotate id selection (Verbatim name [])
+{-| Same as `annotate`, but creates a `verbatim` instead.
+
+**Note** existing annotations within the selection are removed.
+
+-}
+verbatim : Id -> Offset -> Offset -> String -> List ( String, Mark.New.Block ) -> Edit
+verbatim id start end name attrs =
+    Annotate id start end (Verbatim name attrs)
 
 
-{-| -}
-verbatimWith : Id -> Selection -> String -> List ( String, Mark.New.Block ) -> Edit
-verbatimWith id selection name attrs =
-    Annotate id selection (Verbatim name attrs)
+{-| Remove all styling on the text selection and replace with the given styling.
+-}
+restyle : Id -> Offset -> Offset -> Styles -> Edit
+restyle id start end styles =
+    StyleText id start end (Restyle styles)
 
 
-{-| -}
-restyle : Id -> Selection -> Styles -> Edit
-restyle id selection styles =
-    StyleText id selection (Restyle styles)
+{-| Remove the given styles if they are present in the text selection.
+
+**Note:** Other styling is unaffected.
+
+-}
+removeStyles : Id -> Offset -> Offset -> Styles -> Edit
+removeStyles id start end styles =
+    StyleText id start end (RemoveStyle styles)
 
 
-{-| -}
-removeStyles : Id -> Selection -> Styles -> Edit
-removeStyles id selection styles =
-    StyleText id selection (RemoveStyle styles)
+{-| Add the given styles if they are not present in the text selection.
 
+**Note:** Other styling is unaffected.
 
-{-| -}
-addStyles : Id -> Selection -> Styles -> Edit
-addStyles id selection styles =
-    StyleText id selection (AddStyle styles)
+-}
+addStyles : Id -> Offset -> Offset -> Styles -> Edit
+addStyles id start end styles =
+    StyleText id start end (AddStyle styles)
 
 
 prepareResults doc original ( edited, newDescription ) =
@@ -266,7 +284,7 @@ makeDeleteBlock id index indentation pos desc =
 
 
 {-| -}
-update : Document data -> Edit -> Parsed -> Result (List Error) Parsed
+update : Document data -> Edit -> Parsed -> Result (List Mark.Error.Error) Parsed
 update doc edit (Parsed original) =
     let
         editFn =
@@ -317,7 +335,7 @@ update doc edit (Parsed original) =
                     editAtId id
                         (makeDeleteBlock id index)
 
-                StyleText id selection restyleAction ->
+                StyleText id start end restyleAction ->
                     editAtId id
                         (\indent pos desc ->
                             case desc of
@@ -326,7 +344,8 @@ update doc edit (Parsed original) =
                                         newTexts =
                                             details.text
                                                 |> List.foldl
-                                                    (doTextEdit selection
+                                                    (doTextEdit start
+                                                        end
                                                         (List.map (applyStyles restyleAction))
                                                     )
                                                     emptySelectionEdit
@@ -343,7 +362,7 @@ update doc edit (Parsed original) =
                                     Nothing
                         )
 
-                Annotate id selection wrapper ->
+                Annotate id start end wrapper ->
                     editAtId id
                         (\indent pos desc ->
                             case desc of
@@ -352,7 +371,8 @@ update doc edit (Parsed original) =
                                         newTexts =
                                             details.text
                                                 |> List.foldl
-                                                    (doTextEdit selection
+                                                    (doTextEdit start
+                                                        end
                                                         (\els ->
                                                             let
                                                                 textStart =
@@ -382,7 +402,7 @@ update doc edit (Parsed original) =
                                                                                 , fields = attrs
                                                                                 }
 
-                                                                ( end, newText ) =
+                                                                ( end_, newText ) =
                                                                     createInline
                                                                         textStart
                                                                         [ wrapped ]
@@ -404,7 +424,7 @@ update doc edit (Parsed original) =
                                     Nothing
                         )
 
-                ReplaceSelection id selection newTextEls ->
+                ReplaceSelection id start end newTextEls ->
                     editAtId id
                         (\indent pos desc ->
                             case desc of
@@ -418,7 +438,8 @@ update doc edit (Parsed original) =
                                         newTexts =
                                             details.text
                                                 |> List.foldl
-                                                    (doTextEdit selection
+                                                    (doTextEdit start
+                                                        end
                                                         makeNewText
                                                     )
                                                     emptySelectionEdit
@@ -1888,9 +1909,6 @@ getContainingDescriptions description offset =
 
 
 getWithinNested offset (Nested nest) =
-    -- case nest.content of
-    --     ( desc, items ) ->
-    --         getContainingDescriptions desc offset
     List.concatMap
         (\item ->
             getContainingDescriptions item offset
@@ -1915,21 +1933,6 @@ type alias Styles =
     }
 
 
-
--- {-|-}
--- at : Int -> Selection
--- at i =
---     { anchor = 1
---     , focus = i
---     }
--- {-|-}
--- between : Int -> Int -> Selection
--- between anchor focus =
---     { anchor = anchor
---     , focus = focus
---     }
-
-
 {-| -}
 type alias Selection =
     { anchor : Offset
@@ -1937,7 +1940,29 @@ type alias Selection =
     }
 
 
-{-| -}
+{-| The index of the rendered `String`. Let's say you have this string in your markup source.
+
+```markup
+Here is *my string*.
+```
+
+When you're rendering this, it's broken into three segments.
+
+  - `Here is`
+  - `my string` (which is bold)
+  - `.`
+
+The `Offset` is character position where those three strings are considered as one big one.
+
+Here are some lookups:
+
+  - `0  -> H`
+  - `8  -> m`
+  - `17 -> .`
+
+We're not counting control characters from our markup source.
+
+-}
 type alias Offset =
     Int
 
@@ -2066,7 +2091,8 @@ emptySelectionEdit =
 
 
 doTextEdit :
-    Selection
+    Offset
+    -> Offset
     -> (List TextDescription -> List TextDescription)
     -> TextDescription
     ->
@@ -2079,7 +2105,7 @@ doTextEdit :
         , offset : Int
         , selection : Maybe (List TextDescription)
         }
-doTextEdit { anchor, focus } editFn current cursor =
+doTextEdit anchor focus editFn current cursor =
     let
         start =
             min anchor focus

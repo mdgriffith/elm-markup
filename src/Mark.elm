@@ -8,11 +8,10 @@ module Mark exposing
     , Record, record, field, toBlock
     , oneOf, manyOf
     , tree, Enumerated(..), Item(..), Icon(..)
-    , Outcome(..), Partial, Error
+    , Outcome(..), Partial
     , compile, parse, Parsed, toString, render
     , map, verify, onError
-    , withId, idToString
-    , stringToId
+    , withId, idToString, stringToId
     )
 
 {-|
@@ -64,7 +63,7 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 # Rendering
 
-@docs Outcome, Partial, Error
+@docs Outcome, Partial
 
 @docs compile, parse, Parsed, toString, render
 
@@ -73,7 +72,7 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 @docs map, verify, onError
 
-@docs withId, idToString
+@docs withId, idToString, stringToId
 
 -}
 
@@ -106,7 +105,7 @@ toString =
 
 
 {-| -}
-parse : Document data -> String -> Outcome (List Error) (Partial Parsed) Parsed
+parse : Document data -> String -> Outcome (List Mark.Error.Error) (Partial Parsed) Parsed
 parse doc source =
     Desc.compile doc source
         |> moveParsedToResult
@@ -127,7 +126,7 @@ moveParsedToResult :
             }
             data
         )
-    -> Outcome (List Error) (Partial Parsed) Parsed
+    -> Outcome (List Mark.Error.Error) (Partial Parsed) Parsed
 moveParsedToResult result =
     case result of
         Ok ( parsed, Outcome.Success success ) ->
@@ -153,14 +152,14 @@ moveParsedToResult result =
 
 
 {-| -}
-render : Document data -> Parsed -> Outcome (List Error) (Partial data) data
+render : Document data -> Parsed -> Outcome (List Mark.Error.Error) (Partial data) data
 render doc ((Parsed parsedDetails) as parsed) =
     Desc.render doc parsed
         |> rewrapOutcome
 
 
 {-| -}
-compile : Document data -> String -> Outcome (List Error) (Partial data) data
+compile : Document data -> String -> Outcome (List Mark.Error.Error) (Partial data) data
 compile doc source =
     Desc.compile doc source
         |> flattenErrors
@@ -191,7 +190,7 @@ rewrapOutcome outcome =
 
 {-| -}
 type alias Partial data =
-    { errors : List Error
+    { errors : List Mark.Error.Error
     , result : data
     }
 
@@ -341,11 +340,6 @@ unexpectedFromFound found =
 
         Unexpected unexpected ->
             [ unexpected ]
-
-
-{-| -}
-type alias Error =
-    Mark.Edit.Error
 
 
 {-| -}
@@ -535,7 +529,7 @@ type alias CustomError =
     }
 
 
-{-| `Mark.verify` lets you put whatever constraints you want on a block.
+{-| `Mark.verify` lets you put constraints on a block.
 
 Let's say you don't just want a `Mark.string`, you actually want a date.
 
@@ -1412,6 +1406,8 @@ Though you might be thinking that `bold`, `italic`, and `strike` are not nearly 
 
 And you're right, this is just to get you started. Your next stop is [`Mark.textWith`](#textWith), which is more involved to use but can represent everything you're used to having in a markup language.
 
+**Note:** Text blocks stop when two consecutive newline characters are encountered.
+
 -}
 text :
     (Styles -> String -> text)
@@ -1725,12 +1721,6 @@ type alias Replacement =
 
 {-| An annotation is some **text**, a **name**, and zero or more **attributes**.
 
-Here's what it looks like in markup.
-
-```markup
-[ My / styled / text ] { name | attr1 = 5, attr5 = yes }
-```
-
 So, we can make a `link` that looks like this in markup:
 
 ```markup
@@ -1877,7 +1867,7 @@ Where `str` in the above function will be
     He will not see me stopping here
     To watch his woods fill up with snow."""
 
-**Note** If you're looking for styled text, you probably want [`Mark.text`](#text) or [`Mark.textWith`](#textWith) instead.
+**Note** If you're looking for styled text, you probably want [`Mark.text`](#text) or [`Mark.textWith`](#textWith).
 
 -}
 string : Block String
