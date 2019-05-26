@@ -43,3 +43,6 @@ I've tried ranking the estimated difficulty.
    - Just rescan what's needed.
    - Incrementally update `model.characterLayout`.
 6. `?` - Expand the UI of the editor to allow inserting `Mark.Block`s, such as images. 
+
+
+I'm sure there's a bunch of other stuff.
