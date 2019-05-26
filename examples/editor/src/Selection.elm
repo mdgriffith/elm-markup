@@ -70,8 +70,6 @@ moveUp (CharLayout layout) charBox =
 
         xTarget =
             charBox.box.x
-
-        --+ (charBox.box.width / 2)
     in
     List.foldl (find ( xTarget, yTarget )) NoMatch layout
         |> matchToMaybe
@@ -87,7 +85,7 @@ moveDown (CharLayout layout) charBox =
             charBox.box.y + charBox.box.height + 10
 
         xTarget =
-            charBox.box.x + (charBox.box.width / 2)
+            charBox.box.x
     in
     List.foldl (find ( xTarget, yTarget )) NoMatch layout
         |> matchToMaybe
