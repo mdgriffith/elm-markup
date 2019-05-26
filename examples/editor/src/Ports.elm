@@ -49,12 +49,6 @@ receive onSuccess onError =
     infoForElm
         (\payload ->
             case payload.tag of
-                -- "Selection" ->
-                --     case Decode.decodeValue decodeCursor payload.data of
-                --         Ok cursor ->
-                --             onSuccess (Select cursor)
-                --         Err e ->
-                --             onError (Decode.errorToString e)
                 "CharLayout" ->
                     case Decode.decodeValue Selection.decode payload.data of
                         Ok cursor ->

@@ -43,6 +43,7 @@ I've tried ranking the estimated difficulty.
    - Just rescan what's needed.
    - Incrementally update `model.characterLayout`.
 6. `?` - Expand the UI of the editor to allow inserting `Mark.Block`s, such as images. 
+7. `?` - Use more `Html.Lazy` in document rendering if possible.  `Mark.Parsed` might make that a bit difficult, so we'll need to double check that we're getting the benefit beyond just sprinkling lazy everywhere.
 
 
 I'm sure there's a bunch of other stuff.

@@ -67,6 +67,8 @@ type alias Model =
     , errors : List Mark.Error
     , cursor : Maybe Cursor
     , characterLayout : Maybe Selection.CharLayout
+
+    -- If a selection has been started, this is the starting coord.
     , selecting : Maybe ( Float, Float )
     }
 
@@ -81,7 +83,6 @@ type Msg
     | EditorMsgError String
     | EditorSent Ports.Incoming
     | KeyPressed Key
-    | MouseClicked ( Float, Float )
     | SelectTo ( Float, Float )
     | StopSelection
     | ClearSelection
@@ -120,9 +121,6 @@ editEvents =
     [ Attr.tabindex 1
     , Events.preventDefaultOn "keypress" (Decode.map (\key -> ( KeyPressed key, True )) keyDecoder)
     , Events.preventDefaultOn "keydown" (Decode.map (\key -> ( KeyPressed key, True )) controlDecoder)
-
-    -- , Events.on "click"
-    --     (Decode.map MouseClicked decodeCoords)
     , Events.on "mousedown" (Decode.map SelectTo decodeCoords)
     ]
 
@@ -214,21 +212,6 @@ update msg model =
                       }
                     , Cmd.none
                     )
-
-        MouseClicked coords ->
-            case model.characterLayout of
-                Nothing ->
-                    ( model, Cmd.none )
-
-                Just layout ->
-                    case Selection.select coords layout of
-                        Just caret ->
-                            ( { model | cursor = Just (Caret caret) }
-                            , Cmd.none
-                            )
-
-                        Nothing ->
-                            ( model, Cmd.none )
 
         SelectTo coords ->
             case model.characterLayout of
@@ -404,7 +387,7 @@ updateDocument :
     -> Key
     -> Result (List Mark.Edit.Error) ( Cursor, Mark.Parsed )
 updateDocument charLayout parsed cursor key =
-    case Debug.log "key" key of
+    case key of
         Character char ->
             case cursor of
                 Caret caret ->
