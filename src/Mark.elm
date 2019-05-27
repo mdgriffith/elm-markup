@@ -646,7 +646,13 @@ withId fn (Block details) =
         }
 
 
-{-| -}
+{-| It may be necessary to convert an `Id` to a `String` and back in order attach it as an `Html.Attributes.id` and read it back.
+
+See the editor example for more details.
+
+**Note** be aware that the actual string format of an `Id` is an implementation detail and may change even on patch releases of a library.
+
+-}
 idToString : Mark.Edit.Id -> String
 idToString =
     Id.toString
@@ -1796,19 +1802,30 @@ selectedString sel =
 
 {-| A `verbatim` annotation is denoted by backticks(\`) and allows you to capture a literal string.
 
-Just like `token` and `annotation`, a `verbatim` can have a name and attributes attached to it as well via:
+Just like `token` and `annotation`, a `verbatim` can have a name and attributes attached to it.
+
+Let's say we wanted to embed an inline piece of elm code.  We could write
+
+    inlineElm =
+        Mark.verbatim "elm"
+            (\str ->
+                Html.span 
+                    [ Html.Attributes.class "elm-code" ]
+                    [ Html.text str ]
+            )
+
+Which would capture the following
 
 ```markup
 Here's an inline function: `\you -> Awesome`{elm}.
 ```
 
-**Note** A verbatim can be written without a name or attributes. So, the following is potentially valid:
+**Note** A verbatim can be written without a name or attributes and will capture the contents as a literal string, ignoring any special characters.
 
 ```markup
 Let's take a look at `http://elm-lang.com`.
 ```
 
-It will match the first `verbatim` definition listed in `textWith` that has no attributes.
 
 -}
 verbatim : String -> (String -> result) -> Record result
