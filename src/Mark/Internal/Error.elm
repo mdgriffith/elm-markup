@@ -810,7 +810,7 @@ highlight range source =
                             ""
 
                         else
-                            "|>"
+                            "|"
                        )
         in
         [ Format.text (lineNumber ++ line ++ "\n")
