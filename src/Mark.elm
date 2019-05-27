@@ -211,10 +211,6 @@ startDocRange =
     }
 
 
-errorsToList ( fst, remain ) =
-    fst :: remain
-
-
 {-| -}
 type alias Document data =
     Desc.Document data
@@ -230,34 +226,6 @@ type Outcome failure almost success
 {-| -}
 type alias Block data =
     Desc.Block data
-
-
-
-{-
-
-
-       CREATION : Expectation -> Description
-       MOVEMENT :
-
-
-
-   Move Within List -> y
-   Move From one List to another -> y
-
-   Add List to Subsection ->
-       ExpectManyOf -> Description -> replace content
-
-
-
--}
-
-
-within rangeOne rangeTwo =
-    withinOffsetRange { start = rangeOne.start.offset, end = rangeOne.end.offset } rangeTwo
-
-
-withinOffsetRange offset range =
-    range.start.offset <= offset.start && range.end.offset >= offset.end
 
 
 getUnexpecteds : Description -> List Error.UnexpectedDetails
@@ -307,21 +275,8 @@ getUnexpecteds description =
         DescribeString rng _ str ->
             []
 
-        DescribeMultiline rng _ str ->
-            []
-
         DescribeNothing _ ->
             []
-
-
-
--- getNestedUnexpecteds (Nested nest) =
---     case nest.content of
---         ( desc, items ) ->
---             getUnexpecteds desc
---                 ++ List.concatMap
---                     getUnexpecteds
---                     nest.content
 
 
 spelunkUnexpectedsFromFound found =
@@ -702,10 +657,6 @@ onError newValue (Block details) =
                     Outcome.Failure f ->
                         Outcome.Failure f
         }
-
-
-skipSeed parser seed =
-    ( seed, parser )
 
 
 {-| A named block.
@@ -1139,7 +1090,6 @@ Here's how to render the above list:
     myTree =
         Mark.tree "List" renderList text
 
-
     -- Note: we have to define this as a separate function because
     -- `Items` and `Node` are a pair of mutually recursive data structures.
     -- It's easiest to render them using two separate functions:
@@ -1365,10 +1315,6 @@ reduceRender index getIcon fn list =
            )
 
 
-errorToList ( x, xs ) =
-    x :: xs
-
-
 {-| -}
 type alias Index =
     List Int
@@ -1589,16 +1535,6 @@ renderText options description =
             Outcome.Failure Error.NoMatch
 
 
-textToText (Desc.Text styling txt) =
-    Text styling txt
-
-
-emptySelection =
-    { anchor = 0
-    , focus = 0
-    }
-
-
 convertTextDescription :
     Id
     ->
@@ -1804,12 +1740,12 @@ selectedString sel =
 
 Just like `token` and `annotation`, a `verbatim` can have a name and attributes attached to it.
 
-Let's say we wanted to embed an inline piece of elm code.  We could write
+Let's say we wanted to embed an inline piece of elm code. We could write
 
     inlineElm =
         Mark.verbatim "elm"
             (\str ->
-                Html.span 
+                Html.span
                     [ Html.Attributes.class "elm-code" ]
                     [ Html.text str ]
             )
@@ -1825,7 +1761,6 @@ Here's an inline function: `\you -> Awesome`{elm}.
 ```markup
 Let's take a look at `http://elm-lang.com`.
 ```
-
 
 -}
 verbatim : String -> (String -> result) -> Record result
@@ -1951,15 +1886,6 @@ string =
                             )
                 )
         }
-
-
-foundToResult found err =
-    case found of
-        Found _ b ->
-            Ok b
-
-        _ ->
-            Err err
 
 
 {-| Capture either `True` or `False`.
@@ -2099,28 +2025,6 @@ type alias BlockOrNewlineCursor thing =
     , found : List thing
     , seed : Id.Seed
     }
-
-
-
-{- PARSER HELPERS -}
-{- RECORD HELPERS -}
-{- RECORD RENDERER HELPERS -}
-
-
-{-| -}
-applyField : Found a -> Result Error.UnexpectedDetails (a -> b) -> Result Error.UnexpectedDetails b
-applyField foundField possiblyFn =
-    case possiblyFn of
-        Err err ->
-            Err err
-
-        Ok fn ->
-            case foundField of
-                Found pos desc ->
-                    Ok (fn desc)
-
-                Unexpected unexpected ->
-                    Err unexpected
 
 
 {-| This is a set of common character replacements with some typographical niceties.

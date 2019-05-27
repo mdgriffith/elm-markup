@@ -45,20 +45,9 @@ type Error
         , italic : Bool
         , strike : Bool
         }
-    | BadDate String
     | BadFloat
     | BadInt
     | BadBool
-    | IntOutOfRange
-        { found : Int
-        , min : Int
-        , max : Int
-        }
-    | FloatOutOfRange
-        { found : Float
-        , min : Float
-        , max : Float
-        }
     | Custom
         { title : String
         , message : List String
@@ -397,23 +386,6 @@ render source current =
                         ]
                 }
 
-        BadDate found ->
-            Rendered
-                { title = "BAD DATE"
-                , problem = current.problem
-                , region =
-                    current.range
-                , message =
-                    List.concat
-                        [ [ Format.text "I was trying to parse a date, but this format looks off.\n\n" ]
-                        , highlight current.range source
-                        , [ Format.text "Dates should be in ISO 8601 format:\n\n"
-                          , Format.text (addIndent 4 "YYYY-MM-DDTHH:mm:ss.SSSZ")
-                                |> Format.yellow
-                          ]
-                        ]
-                }
-
         BadFloat ->
             Rendered
                 { title = "BAD FLOAT"
@@ -449,50 +421,6 @@ render source current =
                 , message =
                     List.concat
                         [ [ Format.text "I was trying to parse a boolean, but this format looks off.\n\n" ]
-                        , highlight current.range source
-                        ]
-                }
-
-        IntOutOfRange found ->
-            Rendered
-                { title = "INTEGER OUT OF RANGE"
-                , problem = current.problem
-                , region =
-                    current.range
-                , message =
-                    List.concat
-                        [ [ Format.text "I was expecting an "
-                          , Format.yellow (Format.text "Int")
-                          , Format.text " between "
-                          , Format.text (String.fromInt found.min)
-                                |> Format.yellow
-                          , Format.text " and "
-                          , Format.text (String.fromInt found.max)
-                                |> Format.yellow
-                          , Format.text ", but found:\n\n"
-                          ]
-                        , highlight current.range source
-                        ]
-                }
-
-        FloatOutOfRange found ->
-            Rendered
-                { title = "FLOAT OUT OF RANGE"
-                , problem = current.problem
-                , region =
-                    current.range
-                , message =
-                    List.concat
-                        [ [ Format.text "I was expecting a "
-                          , Format.yellow (Format.text "Float")
-                          , Format.text " between "
-                          , Format.text (String.fromFloat found.min)
-                                |> Format.yellow
-                          , Format.text " and "
-                          , Format.text (String.fromFloat found.max)
-                                |> Format.yellow
-                          , Format.text ", but found:\n\n"
-                          ]
                         , highlight current.range source
                         ]
                 }
@@ -774,14 +702,6 @@ renderParsingProblem prob =
 
         InvalidNumber ->
             [ Format.text "I ran into an invalid number." ]
-
-
-formatNewline =
-    { text = "\n"
-    , color = Nothing
-    , underline = False
-    , bold = False
-    }
 
 
 hint str =

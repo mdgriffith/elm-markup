@@ -134,13 +134,6 @@ type Uncertain data
     | Recovered ( Error.UnexpectedDetails, List Error.UnexpectedDetails ) data
 
 
-
--- {-| -}
--- uncertain : Error.UnexpectedDetails -> Outcome.Outcome AstError (Uncertain data) data2
--- uncertain err =
---     Outcome.Almost (Uncertain ( err, [] ))
-
-
 {-|
 
     A `Block data` is just a parser that results in `data`.
@@ -296,7 +289,6 @@ type Description
         , text : List TextDescription
         }
     | DescribeString Id Range String
-    | DescribeMultiline Id Range String
     | DescribeNothing Id
 
 
@@ -346,15 +338,6 @@ textLength (Text _ str) =
     String.length str
 
 
-
--- type Inline data
---     = Inline
---         { converter : List Text -> List InlineAttribute -> Outcome Error.AstError (Uncertain (List data)) (List data)
---         , expect : InlineExpectation
---         , name : String
---         }
-
-
 type alias Styling =
     { bold : Bool
     , italic : Bool
@@ -363,23 +346,6 @@ type alias Styling =
 
 
 
--- {-| -}
--- type InlineAttribute
---     = AttrString
---         { name : String
---         , range : Range
---         , value : String
---         }
---     | AttrInt
---         { name : String
---         , range : Range
---         , value : Int
---         }
---     | AttrFloat
---         { name : String
---         , range : Range
---         , value : ( String, Float )
---         }
 {- EXPECTATIONS -}
 
 
@@ -402,7 +368,6 @@ type Expectation
     | ExpectFloat Float
     | ExpectTextBlock (List InlineExpectation)
     | ExpectString String
-    | ExpectMultiline String
     | ExpectTree Expectation (List TreeExpectation)
     | ExpectNothing
 
@@ -585,9 +550,6 @@ getId description =
         DescribeString id _ _ ->
             id
 
-        DescribeMultiline id _ _ ->
-            id
-
         DescribeNothing id ->
             id
 
@@ -653,9 +615,6 @@ getSize description =
             sizeFromRange details.range
 
         DescribeString _ range _ ->
-            sizeFromRange range
-
-        DescribeMultiline _ range _ ->
             sizeFromRange range
 
         DescribeNothing id ->
@@ -916,14 +875,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeMultiline _ _ _ ->
-            case exp of
-                ExpectMultiline _ ->
-                    True
-
-                _ ->
-                    False
-
 
 {-| Is the first expectation a subset of the second?
 -}
@@ -959,9 +910,6 @@ matchExpected subExp expected =
             True
 
         ( ExpectString _, ExpectString _ ) ->
-            True
-
-        ( ExpectMultiline _, ExpectMultiline _ ) ->
             True
 
         ( ExpectTree oneContent _, ExpectTree twoContent _ ) ->
@@ -1136,9 +1084,6 @@ isPrimitive description =
         DescribeString _ _ _ ->
             True
 
-        DescribeMultiline _ _ _ ->
-            True
-
         DescribeNothing _ ->
             False
 
@@ -1217,13 +1162,6 @@ getContainingDescriptions description offset =
                 []
 
         DescribeString id range str ->
-            if withinOffsetRange offset range then
-                [ description ]
-
-            else
-                []
-
-        DescribeMultiline id range str ->
             if withinOffsetRange offset range then
                 [ description ]
 
@@ -1466,11 +1404,6 @@ writeDescription description cursor =
                    )
 
         DescribeString id range str ->
-            cursor
-                |> advanceTo range
-                |> write str
-
-        DescribeMultiline id range str ->
             let
                 indented =
                     String.lines str
@@ -2240,24 +2173,6 @@ create current =
                 end =
                     moveColumn (String.length str) current.base
 
-                pos =
-                    { start = current.base
-                    , end = end
-                    }
-
-                ( newId, newSeed ) =
-                    Id.step current.seed
-            in
-            { pos = end
-            , desc = DescribeString newId pos str
-            , seed = newSeed
-            }
-
-        ExpectMultiline str ->
-            let
-                end =
-                    moveColumn (String.length str) current.base
-
                 walk line ( isStart, at ) =
                     at
                         |> (if isStart then
@@ -2285,7 +2200,7 @@ create current =
                     Id.step current.seed
             in
             { pos = end
-            , desc = DescribeMultiline newId pos str
+            , desc = DescribeString newId pos str
             , seed = newSeed
             }
 
@@ -2708,9 +2623,6 @@ humanReadableExpectations expect =
 
         ExpectString _ ->
             "A String"
-
-        ExpectMultiline _ ->
-            "A Multiline String"
 
         ExpectTree content _ ->
             "A tree starting of "

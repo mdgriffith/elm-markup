@@ -1,7 +1,7 @@
 module Mark.Internal.Parser exposing
     ( RecordType(..)
     , Replacement(..)
-    , addToChildren
+    
     , backtrackCharacters
     , blocksOrNewlines
     , buildTree
@@ -433,10 +433,6 @@ type Replacement
         }
 
 
-empty : Text
-empty =
-    Text emptyStyles ""
-
 
 textCursor inheritedStyles startingPos =
     TextCursor
@@ -490,27 +486,7 @@ styledText options context seed startingPos inheritedStyles until =
         ]
 
 
-getTextStr (Text _ str) =
-    str
 
-
-{-| -}
-textString : TextDescription -> String
-textString inlineEl =
-    case inlineEl of
-        Styled _ txt ->
-            getTextStr txt
-
-        InlineBlock details ->
-            case details.kind of
-                EmptyAnnotation ->
-                    ""
-
-                SelectString str ->
-                    str
-
-                SelectText txts ->
-                    String.join ":" (List.map getTextStr txts)
 
 
 {-| -}
@@ -1295,13 +1271,6 @@ removeBalance id (TextCursor cursor) =
         { cursor | balancedReplacements = List.filter ((/=) id) cursor.balancedReplacements }
 
 
-addTextToText newString textNodes =
-    case textNodes of
-        [] ->
-            [ Text emptyStyles newString ]
-
-        (Text styles txt) :: remaining ->
-            Text styles (txt ++ newString) :: remaining
 
 
 addText newTxt (TextCursor cursor) =
@@ -2494,9 +2463,6 @@ addToLevel index brandNewItem (Nested parent) =
                     }
 
 
-addToChildren : Nested Description -> Nested Description -> Nested Description
-addToChildren child (Nested parent) =
-    Nested { parent | children = child :: parent.children }
 
 
 

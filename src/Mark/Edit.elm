@@ -610,14 +610,6 @@ match description exp =
                 _ ->
                     False
 
-        DescribeMultiline _ _ _ ->
-            case exp of
-                ExpectMultiline _ ->
-                    True
-
-                _ ->
-                    False
-
         DescribeNothing _ ->
             False
 
@@ -656,9 +648,6 @@ matchExpected subExp expected =
             True
 
         ( ExpectString _, ExpectString _ ) ->
-            True
-
-        ( ExpectMultiline _, ExpectMultiline _ ) ->
             True
 
         ( ExpectTree oneContent _, ExpectTree twoContent _ ) ->
@@ -951,9 +940,6 @@ makeEdit cursor desc =
             replacePrimitive cursor (.start txt.range) desc
 
         DescribeString id range str ->
-            replacePrimitive cursor range.start desc
-
-        DescribeMultiline id range str ->
             replacePrimitive cursor range.start desc
 
         DescribeNothing _ ->
@@ -1410,12 +1396,6 @@ pushDescription to desc =
         DescribeString id range str ->
             DescribeString id (pushRange to range) str
 
-        DescribeMultiline id range str ->
-            DescribeMultiline
-                id
-                (pushRange to range)
-                str
-
         DescribeTree myTree ->
             DescribeTree
                 { myTree
@@ -1616,122 +1596,6 @@ getFoundRange found =
             unexp.range
 
 
-updateFoundBool id newBool desc =
-    case desc of
-        DescribeBoolean details ->
-            if details.id == id then
-                case details.found of
-                    Found boolRng fl ->
-                        Just
-                            (DescribeBoolean
-                                { id = details.id
-                                , found =
-                                    Found boolRng
-                                        newBool
-                                }
-                            )
-
-                    Unexpected unexpected ->
-                        Just
-                            (DescribeBoolean
-                                { id = details.id
-                                , found =
-                                    Found unexpected.range
-                                        newBool
-                                }
-                            )
-
-            else
-                Nothing
-
-        _ ->
-            Nothing
-
-
-updateFoundFloat id newFloat desc =
-    case desc of
-        DescribeFloat details ->
-            if details.id == id then
-                case details.found of
-                    Found floatRng fl ->
-                        Just
-                            (DescribeFloat
-                                { id = details.id
-                                , found =
-                                    Found floatRng
-                                        ( String.fromFloat newFloat, newFloat )
-                                }
-                            )
-
-                    Unexpected unexpected ->
-                        Just
-                            (DescribeFloat
-                                { id = details.id
-                                , found =
-                                    Found unexpected.range
-                                        ( String.fromFloat newFloat, newFloat )
-                                }
-                            )
-
-            else
-                Nothing
-
-        _ ->
-            Nothing
-
-
-updateFoundString id newString desc =
-    case desc of
-        DescribeString strId range _ ->
-            if strId == id then
-                Just (DescribeString strId range newString)
-
-            else
-                Nothing
-
-        DescribeMultiline strId range _ ->
-            if strId == id then
-                Just (DescribeMultiline strId range newString)
-
-            else
-                Nothing
-
-        _ ->
-            Nothing
-
-
-updateFoundInt id newInt desc =
-    case desc of
-        DescribeInteger details ->
-            if details.id == id then
-                case details.found of
-                    Found floatRng fl ->
-                        Just
-                            (DescribeInteger
-                                { id = details.id
-                                , found =
-                                    Found floatRng
-                                        newInt
-                                }
-                            )
-
-                    Unexpected unexpected ->
-                        Just
-                            (DescribeInteger
-                                { id = details.id
-                                , found =
-                                    Found unexpected.range
-                                        newInt
-                                }
-                            )
-
-            else
-                Nothing
-
-        _ ->
-            Nothing
-
-
 {-| -}
 getDescription : Parsed -> Found Description
 getDescription (Parsed parsed) =
@@ -1808,9 +1672,6 @@ isPrimitive description =
             True
 
         DescribeString _ _ _ ->
-            True
-
-        DescribeMultiline _ _ _ ->
             True
 
         DescribeNothing _ ->
@@ -1894,13 +1755,6 @@ getContainingDescriptions description offset =
                 []
 
         DescribeString id range str ->
-            if withinOffsetRange offset range then
-                [ description ]
-
-            else
-                []
-
-        DescribeMultiline id range str ->
             if withinOffsetRange offset range then
                 [ description ]
 
