@@ -64,7 +64,7 @@ type alias Model =
     -- we're storing `Mark.Parsed`,
     -- which is a data structure representing the document
     { parsed : Maybe Mark.Parsed
-    , errors : List Mark.Error
+    , errors : List Mark.Error.Error
     , cursor : Maybe Cursor
     , characterLayout : Maybe Selection.CharLayout
 
@@ -278,9 +278,8 @@ update msg model =
                                     Normal ->
                                         Mark.Edit.restyle
                                             start.id
-                                            { anchor = start.offset
-                                            , focus = end.offset
-                                            }
+                                            start.offset
+                                            end.offset
                                             { bold = False
                                             , italic = False
                                             , strike = False
@@ -289,9 +288,8 @@ update msg model =
                                     _ ->
                                         Mark.Edit.addStyles
                                             start.id
-                                            { anchor = start.offset
-                                            , focus = end.offset
-                                            }
+                                            start.offset
+                                            end.offset
                                             { bold = style == Bold
                                             , italic = style == Italic
                                             , strike = style == Strike
@@ -385,7 +383,7 @@ updateDocument :
     -> Mark.Parsed
     -> Cursor
     -> Key
-    -> Result (List Mark.Edit.Error) ( Cursor, Mark.Parsed )
+    -> Result (List Mark.Error.Error) ( Cursor, Mark.Parsed )
 updateDocument charLayout parsed cursor key =
     case key of
         Character char ->
