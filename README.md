@@ -1,10 +1,14 @@
 # A Markup for Elm!
 
-Elm Markup is about describing the structure you want for a document, and then having a parser that can parse that document or generate nice error messages.
+Elm Markup is a markup language that integrates closely with Elm.
+
+You describe your document and then having a parser that can parse that document or hand you nice error messages.
 
 ![Syntax Highlighted Elm Markup](https://github.com/mdgriffith/elm-markup/blob/master/examples/highlighted-code-small.png?raw=true)
 
-For further detail, I gave a talk at [Oslo Elm Day](https://www.youtube.com/watch?v=8Zd3ocr9Di8) which covers some of these ideas. Or just [read the v3 release article](https://github.com/mdgriffith/elm-markup/blob/master/design-decisions/WHY-ELM-MARKUP-V3.md), it gives more detail on why this project is maybe more than is obvious.
+![Example Error Message](https://github.com/mdgriffith/elm-markup/blob/master/examples/example-error-small.png?raw=true)
+
+Check out the talk I gave at [Oslo Elm Day](https://www.youtube.com/watch?v=8Zd3ocr9Di8). Or just [read the v3 release article](https://github.com/mdgriffith/elm-markup/blob/master/design-decisions/WHY-ELM-MARKUP-V3.md), it gives more detail on why this project might be more than it seems.
 
 ## Getting Started
 
