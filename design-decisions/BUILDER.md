@@ -1,6 +1,6 @@
 # Building New Blocks
 
-One of the challenges in making a compiled markup language is that I want their to be some ability to construct new, valid blocks programattically and insert them into a document.
+One of the challenges in making a compiled markup language is that I want there to be some ability to construct new, valid blocks programattically and insert them into a document.
 
 
 One way to do this is to construct these new blocks manually such as:

@@ -1,8 +1,9 @@
+
 Hello!
 
 It's finally come time to release [v3.0 of `elm-markup`](https://package.elm-lang.org/packages/mdgriffith/elm-markup/latest/)!  I'm very excited, this has been quite the endeavor.
 
-I got really interested creating a markup language for two reasons.
+I got really interested in this project for two reasons.
 
 1. Markdown doesn't play nicely with `elm-ui` or interactive views written in Elm.
 2. I wanted to write interactive fiction for a video game I'm designing, which means intermingling styled text and structured data.  ...or just realizing everything should be structured/known data, but also lightweight and easy to write.
@@ -21,11 +22,11 @@ But to give a brief-ish summary:
 
 That's the basic functionality for a markup language, but you can go further.
 
-Because we know the structure that the document should be, we can get nice Elm-esque errors:
+Because we know the structure that the document should be, we can get nice Elmish errors:
 
 ![Example Error Message](https://github.com/mdgriffith/elm-markup/blob/master/examples/example-error.png?raw=true)
 
-Beyond this, I wanted some other capabilities I didn't usually associate with a markup language:
+Beyond this, I wanted some other capabilities we don't usually associate with a markup language or tooling:
 
 - To parse your markup into an intermediate data structure called a `Mark.Parsed` (basically an [AST](https://en.wikipedia.org/wiki/Abstract_syntax_tree))
 - Make edits to `Parsed` through `Mark.Edit.update`.  (They will be checked to ensure they are valid edits)
