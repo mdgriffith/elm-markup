@@ -194,3 +194,300 @@ More on this once it's finished.  Suffice to say you'll be able to send updates 
 It's actually not possible to write because parsing and rendering are now separate.  So, we can't change parsing based on a rendered piece of data because we dont have it yet.
 
 I'm not sure there was a strong usecase for it anyway, I think we just wanted `Mark.verify` instead.
+
+
+
+
+
+
+
+## 2 -> 3 Diff:
+
+```
+This is a MAJOR change.
+
+---- ADDED MODULES - MINOR ----
+
+    Mark.Edit
+    Mark.Error
+    Mark.New
+
+
+---- REMOVED MODULES - MAJOR ----
+
+    Mark.Default
+
+
+---- Mark - MAJOR ----
+
+    Added:
+        type Enumerated item
+            = Enumerated
+                  { icon : Mark.Icon, items : List.List (Mark.Item item) }
+        type Icon  = Bullet | Number
+        type Item item
+            = Item
+                  { index : ( Basics.Int, List.List Basics.Int )
+                  , content : List.List item
+                  , children : Mark.Enumerated item
+                  }
+        type Outcome failure almost success
+            = Success success
+            | Almost almost
+            | Failure failure
+        type alias Block data = Mark.Internal.Description.Block data
+        type alias Document data = Mark.Internal.Description.Document data
+        type alias Parsed = Mark.Internal.Description.Parsed
+        type alias Partial data =
+            { errors : List.List Mark.Error.Error, result : data }
+        type alias Record a = Mark.Internal.Description.Record a
+        type alias Replacement = Mark.Internal.Parser.Replacement
+        type alias Styles =
+            { bold : Basics.Bool, italic : Basics.Bool, strike : Basics.Bool }
+        annotation :
+            String.String
+            -> (List.List ( Mark.Styles, String.String ) -> result)
+            -> Mark.Record result
+        commonReplacements : List.List Mark.Replacement
+        compile :
+            Mark.Document data
+            -> String.String
+            -> Mark.Outcome
+                   (List.List Mark.Error.Error)
+                   (Mark.Partial data)
+                   data
+        documentWith :
+            (metadata -> body -> document)
+            -> { metadata : Mark.Block metadata, body : Mark.Block body }
+            -> Mark.Document document
+        idToString : Mark.Edit.Id -> String.String
+        onError : a -> Mark.Block a -> Mark.Block a
+        record : String.String -> data -> Mark.Record data
+        render :
+            Mark.Document data
+            -> Mark.Parsed
+            -> Mark.Outcome
+                   (List.List Mark.Error.Error)
+                   (Mark.Partial data)
+                   data
+        stringToId : String.String -> Maybe.Maybe Mark.Edit.Id
+        textWith :
+            { view : Mark.Styles -> String.String -> rendered
+            , replacements : List.List Mark.Replacement
+            , inlines : List.List (Mark.Record rendered)
+            }
+            -> Mark.Block (List.List rendered)
+        toBlock : Mark.Record a -> Mark.Block a
+        toString : Mark.Parsed -> String.String
+        tree :
+            String.String
+            -> (Mark.Enumerated item -> result)
+            -> Mark.Block item
+            -> Mark.Block result
+        verbatim :
+            String.String -> (String.String -> result) -> Mark.Record result
+        verify :
+            (a -> Result.Result Mark.Error.Custom b)
+            -> Mark.Block a
+            -> Mark.Block b
+        withId : (Mark.Edit.Id -> a -> b) -> Mark.Block a -> Mark.Block b
+
+    Removed:
+        type Block data
+        type Context  = InBlock String | InInline String | InRecordField String
+        type Document result
+        type Field value
+        type Inline result
+        type Nested item
+            = Nested { content : item, children : List (Nested item) }
+        type Problem
+            = ExpectingIndent Int
+            | InlineStart
+            | InlineEnd
+            | BlockStart
+            | Expecting String
+            | ExpectingBlockName String
+            | ExpectingInlineName String
+            | ExpectingFieldName String
+            | NonMatchingFields { expecting : List String, found : List String }
+            | MissingField String
+            | RecordError
+            | Escape
+            | EscapedChar
+            | Newline
+            | Space
+            | End
+            | Integer
+            | FloatingPoint
+            | InvalidNumber
+            | UnexpectedEnd
+            | CantStartTextWithSpace
+            | UnclosedStyles (List Style)
+            | UnexpectedField
+                  { found : String, options : List String, recordName : String }
+        type Replacement
+        type Style  = Bold | Italic | Strike
+        type Text  = Text (List Style) String
+        advanced : Parser Context Problem result -> Block result
+        andThen : (a -> Block b) -> Block a -> Block b
+        exactly : String -> value -> Block value
+        inline : String -> result -> Inline result
+        inlineString : String -> Inline (String -> result) -> Inline result
+        inlineText : Inline (List Text -> result) -> Inline result
+        multiline : Block String
+        nested :
+            { item : Block item, start : Block icon }
+            -> Block (List (Nested ( icon, List item )))
+        record10 :
+            String
+            -> (
+            one
+            -> two
+            -> three
+            -> four
+            -> five
+            -> six
+            -> seven
+            -> eight
+            -> nine
+            -> ten
+            -> data
+            )
+            -> Field one
+            -> Field two
+            -> Field three
+            -> Field four
+            -> Field five
+            -> Field six
+            -> Field seven
+            -> Field eight
+            -> Field nine
+            -> Field ten
+            -> Block data
+        record2 :
+            String
+            -> (one -> two -> data)
+            -> Field one
+            -> Field two
+            -> Block data
+        record3 :
+            String
+            -> (one -> two -> three -> data)
+            -> Field one
+            -> Field two
+            -> Field three
+            -> Block data
+        record4 :
+            String
+            -> (one -> two -> three -> four -> data)
+            -> Field one
+            -> Field two
+            -> Field three
+            -> Field four
+            -> Block data
+        record5 :
+            String
+            -> (one -> two -> three -> four -> five -> data)
+            -> Field one
+            -> Field two
+            -> Field three
+            -> Field four
+            -> Field five
+            -> Block data
+        record6 :
+            String
+            -> (one -> two -> three -> four -> five -> six -> data)
+            -> Field one
+            -> Field two
+            -> Field three
+            -> Field four
+            -> Field five
+            -> Field six
+            -> Block data
+        record7 :
+            String
+            -> (one -> two -> three -> four -> five -> six -> seven -> data)
+            -> Field one
+            -> Field two
+            -> Field three
+            -> Field four
+            -> Field five
+            -> Field six
+            -> Field seven
+            -> Block data
+        record8 :
+            String
+            -> (
+            one -> two -> three -> four -> five -> six -> seven -> eight -> data
+            )
+            -> Field one
+            -> Field two
+            -> Field three
+            -> Field four
+            -> Field five
+            -> Field six
+            -> Field seven
+            -> Field eight
+            -> Block data
+        record9 :
+            String
+            -> (
+            one
+            -> two
+            -> three
+            -> four
+            -> five
+            -> six
+            -> seven
+            -> eight
+            -> nine
+            -> data
+            )
+            -> Field one
+            -> Field two
+            -> Field three
+            -> Field four
+            -> Field five
+            -> Field six
+            -> Field seven
+            -> Field eight
+            -> Field nine
+            -> Block data
+        startWith :
+            (start -> rest -> result)
+            -> Block start
+            -> Block rest
+            -> Block result
+        stub : String -> result -> Block result
+
+    Changed:
+      - field : String -> Block value -> Field value
+      + field :
+            String.String
+            -> Mark.Block value
+            -> Mark.Record (value -> result)
+            -> Mark.Record result
+
+      - parse :
+            Document result
+            -> String
+            -> Result (List (DeadEnd Context Problem)) result
+      + parse :
+            Mark.Document data
+            -> String.String
+            -> Mark.Outcome
+                   (List.List Mark.Error.Error)
+                   (Mark.Partial Mark.Parsed)
+                   Mark.Parsed
+
+      - text :
+            { view : Text -> rendered
+            , inlines : List (Inline rendered)
+            , replacements : List Replacement
+            }
+            -> Block (List rendered)
+      + text :
+            (Mark.Styles -> String.String -> text)
+            -> Mark.Block (List.List text)
+
+```
