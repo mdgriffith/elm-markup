@@ -3,15 +3,16 @@ module Mark.Internal.Description exposing
     , Found(..), Nested(..), Icon(..)
     , Description(..), TextDescription(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..), TreeExpectation(..)
-    , Parsed(..), startingPoint, descriptionToString, toString, mergeWith
+    , Parsed(..), descriptionToString, toString, mergeWith
     , create, createInline
     , Styling, emptyStyles
     , inlineExample, blockName, uncertain, humanReadableExpectations
-    , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
+    , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar
     , Block(..), BlockKind(..), Document(..)
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
-    , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length
+    , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
+    , minusPosition
     )
 
 {-|
@@ -24,7 +25,7 @@ module Mark.Internal.Description exposing
 
 @docs Expectation, InlineExpectation, TreeExpectation
 
-@docs Parsed, startingPoint, descriptionToString, toString, mergeWith
+@docs Parsed, descriptionToString, toString, mergeWith
 
 @docs create, createInline
 
@@ -32,7 +33,7 @@ module Mark.Internal.Description exposing
 
 @docs inlineExample, blockName, uncertain, humanReadableExpectations
 
-@docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar, noInlineAttributes
+@docs Uncertain, mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar
 
 @docs Block, BlockKind, Document
 
@@ -40,7 +41,7 @@ module Mark.Internal.Description exposing
 
 @docs resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
 
-@docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext, blockKindToSelection, length
+@docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext, blockKindToSelection, length, match, matchExpected
 
 -}
 
@@ -391,46 +392,6 @@ type InlineExpectation
         }
 
 
-noInlineAttributes expect =
-    case expect of
-        ExpectInlineBlock details ->
-            List.isEmpty details.fields
-
-        ExpectText _ ->
-            True
-
-
-
--- expectationToAttr : AttrExpectation -> InlineAttribute
--- expectationToAttr exp =
---     case exp of
---         ExpectAttrString name default ->
---             AttrString
---                 { name = name
---                 , range = emptyRange
---                 , value = default
---                 }
---         ExpectAttrFloat name default ->
---             AttrFloat
---                 { name = name
---                 , range = emptyRange
---                 , value = default
---                 }
---         ExpectAttrInt name default ->
---             AttrInt
---                 { name = name
---                 , range = emptyRange
---                 , value = default
---                 }
--- {-| -}
--- type
---     AttrExpectation
---     --                 name   default
---     = ExpectAttrString String String
---     | ExpectAttrFloat String ( String, Float )
---     | ExpectAttrInt String Int
-
-
 {-| -}
 mapFound : (a -> b) -> Found a -> Found b
 mapFound fn found =
@@ -629,11 +590,6 @@ sizeFromRange range =
     }
 
 
-{-| -}
-type Proved
-    = Proved Id (List (Found Description))
-
-
 textDescriptionRange : TextDescription -> Range
 textDescriptionRange textDesc =
     case textDesc of
@@ -792,6 +748,7 @@ inlineExample kind inline =
             "`" ++ str ++ "`" ++ containerAsString
 
 
+match : Description -> Expectation -> Bool
 match description exp =
     case description of
         DescribeNothing _ ->
@@ -935,30 +892,6 @@ matchFields valid ( targetFieldName, targetFieldExpectation ) =
     List.any innerMatch valid
 
 
-within rangeOne rangeTwo =
-    withinOffsetRange { start = rangeOne.start.offset, end = rangeOne.end.offset } rangeTwo
-
-
-withinOffsetRange offset range =
-    range.start.offset <= offset.start && range.end.offset >= offset.end
-
-
-{-| Given an expectation and a list of choices, verify that the expectation is a valid choice.
--}
-make : Expectation -> List Expectation -> Maybe Expectation
-make expected options =
-    List.filterMap
-        (\exp ->
-            if matchExpected expected exp then
-                Just expected
-
-            else
-                Nothing
-        )
-        options
-        |> List.head
-
-
 boolToString : Bool -> String
 boolToString b =
     if b then
@@ -992,192 +925,11 @@ moveNewlines i pos =
     }
 
 
-startingPoint =
-    { offset = 0
-    , line = 1
-    , column = 1
-    }
-
-
 minusPosition end start =
     { offset = end.offset - start.offset
     , line = end.line - start.line
     , column = end.column - start.column
     }
-
-
-{-| -}
-getDescription : Parsed -> Found Description
-getDescription (Parsed parsed) =
-    parsed.found
-
-
-{-| -}
-getDesc : { start : Int, end : Int } -> Parsed -> List Description
-getDesc offset (Parsed parsed) =
-    getWithinFound offset parsed.found
-
-
-{-| -}
-getWithinFound : { start : Int, end : Int } -> Found Description -> List Description
-getWithinFound offset found =
-    case found of
-        Found range item ->
-            if withinOffsetRange offset range then
-                if isPrimitive item then
-                    [ item ]
-
-                else
-                    [ item ]
-                        ++ getContainingDescriptions item offset
-
-            else
-                []
-
-        Unexpected unexpected ->
-            []
-
-
-withinFoundLeaf offset found =
-    case found of
-        Found range item ->
-            withinOffsetRange offset range
-
-        Unexpected unexpected ->
-            withinOffsetRange offset unexpected.range
-
-
-isPrimitive : Description -> Bool
-isPrimitive description =
-    case description of
-        DescribeBlock _ ->
-            False
-
-        Record _ ->
-            False
-
-        OneOf _ ->
-            False
-
-        ManyOf _ ->
-            False
-
-        StartsWith _ ->
-            False
-
-        DescribeTree details ->
-            False
-
-        -- Primitives
-        DescribeBoolean found ->
-            True
-
-        DescribeInteger found ->
-            True
-
-        DescribeFloat found ->
-            True
-
-        DescribeText _ ->
-            True
-
-        DescribeString _ _ _ ->
-            True
-
-        DescribeNothing _ ->
-            False
-
-
-{-| -}
-getContainingDescriptions : Description -> { start : Int, end : Int } -> List Description
-getContainingDescriptions description offset =
-    case description of
-        DescribeBlock details ->
-            getWithinFound offset details.found
-
-        Record details ->
-            case details.found of
-                Found range fields ->
-                    if withinOffsetRange offset range then
-                        List.concatMap (getWithinFound offset << Tuple.second) fields
-
-                    else
-                        []
-
-                Unexpected unexpected ->
-                    if withinOffsetRange offset unexpected.range then
-                        []
-
-                    else
-                        []
-
-        OneOf one ->
-            getWithinFound offset one.child
-
-        ManyOf many ->
-            List.concatMap (getWithinFound offset) many.children
-
-        StartsWith details ->
-            if withinOffsetRange offset details.range then
-                getContainingDescriptions details.first.found offset
-                    ++ getContainingDescriptions details.second.found offset
-
-            else
-                []
-
-        DescribeTree details ->
-            if withinOffsetRange offset details.range then
-                List.concatMap (getWithinNested offset) details.children
-
-            else
-                []
-
-        -- Primitives
-        DescribeBoolean details ->
-            if withinFoundLeaf offset details.found then
-                [ description ]
-
-            else
-                []
-
-        DescribeInteger details ->
-            if withinFoundLeaf offset details.found then
-                [ description ]
-
-            else
-                []
-
-        DescribeFloat details ->
-            if withinFoundLeaf offset details.found then
-                [ description ]
-
-            else
-                []
-
-        DescribeText txt ->
-            if withinOffsetRange offset txt.range then
-                [ description ]
-
-            else
-                []
-
-        DescribeString id range str ->
-            if withinOffsetRange offset range then
-                [ description ]
-
-            else
-                []
-
-        DescribeNothing _ ->
-            []
-
-
-getWithinNested offset (Nested nest) =
-    List.concatMap
-        (\item ->
-            getContainingDescriptions item offset
-        )
-        nest.content
 
 
 
@@ -1205,22 +957,6 @@ descriptionToString desc =
         , printed = ""
         }
         |> .printed
-
-
-
--- getSize desc =
---     writeDescription desc
---         { indent = 0
---         , position = { line = 1, column = 1, offset = 0 }
---         , printed = ""
---         }
---         |> .position
---         |> (\pos ->
---                 { column = pos.column - 1
---                 , line = pos.line - 1
---                 , offset = pos.offset
---                 }
---            )
 
 
 type alias PrintCursor =
@@ -1299,11 +1035,6 @@ advanceTo target cursor =
         cursor
             |> writeNewlines lineDiff
             |> write (String.repeat (target.start.column - 1) " ")
-
-
-writeIndent : PrintCursor -> PrintCursor
-writeIndent cursor =
-    write (String.repeat (cursor.indent * 4) " ") cursor
 
 
 writeLine line cursor =
@@ -1742,97 +1473,6 @@ inlineExpectationToDesc exp cursor =
                     }
                     :: cursor.text
             }
-
-
-
--- ExpectAnnotation name attrs txts ->
---     let
---         end =
---             cursor.position
---                 |> moveColumn (String.length name + 5)
---                 |> moveColumn (attributesLength attrs)
---     in
---     { position = end
---     , styling = cursor.styling
---     , text =
---         InlineAnnotation
---             { name = name
---             , range =
---                 { start = cursor.position
---                 , end = end
---                 }
---             , text = txts
---             , attributes = List.map expectationToAttr attrs
---             }
---             :: cursor.text
---     }
--- ExpectToken name attrs ->
---     let
---         end =
---             cursor.position
---                 -- add 5 which accounts for
---                 -- two brackets, a bar, and two spaces
---                 |> moveColumn (String.length name + 5)
---                 |> moveColumn (attributesLength attrs)
---     in
---     { position = end
---     , styling = cursor.styling
---     , text =
---         InlineToken
---             { name = name
---             , range =
---                 { start = cursor.position
---                 , end = end
---                 }
---             , attributes = List.map expectationToAttr attrs
---             }
---             :: cursor.text
---     }
--- -- name, attrs, placeholder content
--- ExpectVerbatim name attrs content ->
---     let
---         end =
---             cursor.position
---                 |> moveColumn (String.length name + 5)
---                 |> moveColumn (attributesLength attrs)
---     in
---     { position =
---         end
---     , styling = cursor.styling
---     , text =
---         InlineVerbatim
---             { name =
---                 if name == "" && attrs == [] then
---                     Nothing
---                 else
---                     Just name
---             , range =
---                 { start = cursor.position
---                 , end = end
---                 }
---             , text = Text emptyStyles content
---             , attributes = List.map expectationToAttr attrs
---             }
---             :: cursor.text
---     }
--- attributesLength : List AttrExpectation -> Int
--- attributesLength attrs =
---     let
---         sumLength attr count =
---             case attr of
---                 ExpectAttrString name val ->
---                     --       2 for a space and a comma
---                     count + String.length name + String.length val + 2
---                 ExpectAttrFloat name ( flStr, _ ) ->
---                     count + String.length name + String.length flStr + 2
---                 ExpectAttrInt name i ->
---                     count + String.length name + String.length (String.fromInt i) + 2
---     in
---     case attrs of
---         [] ->
---             0
---         _ ->
---             List.foldl sumLength 0 attrs - 2
 
 
 {-|
@@ -2407,33 +2047,10 @@ createField currentIndent ( name, exp ) current =
         }
 
 
-
--- {-| -}
--- parse : Document data -> String -> Result (List (Parser.DeadEnd Error.Context Error.Problem)) Parsed
--- parse (Document blocks) source =
---     Parser.run blocks.parser source
-
-
 {-| -}
 type alias Partial data =
     { errors : List Error.Rendered
     , result : data
-    }
-
-
-{-| -}
-startDocRange : Range
-startDocRange =
-    { start =
-        { offset = 0
-        , line = 1
-        , column = 1
-        }
-    , end =
-        { offset = 0
-        , line = 1
-        , column = 1
-        }
     }
 
 
@@ -2516,21 +2133,6 @@ compile (Document blocks) source =
                 Failure
                     [ Error.renderParsingErrors source deadEnds
                     ]
-
-
-errorsToMessages source outcome =
-    case outcome of
-        Success s ->
-            Success s
-
-        Almost { errors, result } ->
-            Almost
-                { errors = List.map (Error.render source) errors
-                , result = result
-                }
-
-        Failure errors ->
-            Failure (List.map (Error.render source) errors)
 
 
 {-| Render is a little odd.

@@ -1,7 +1,6 @@
 module Mark.Internal.Parser exposing
     ( RecordType(..)
     , Replacement(..)
-    
     , backtrackCharacters
     , blocksOrNewlines
     , buildTree
@@ -411,19 +410,6 @@ type TextCursor
         }
 
 
-type SimpleTextCursor
-    = SimpleTextCursor
-        { current : Text
-        , start : Position
-        , text : List Text
-        , balancedReplacements : List String
-        }
-
-
-mapTextCursor fn (TextCursor curs) =
-    TextCursor (fn curs)
-
-
 {-| -}
 type Replacement
     = Replacement String String
@@ -431,7 +417,6 @@ type Replacement
         { start : ( String, String )
         , end : ( String, String )
         }
-
 
 
 textCursor inheritedStyles startingPos =
@@ -484,9 +469,6 @@ styledText options context seed startingPos inheritedStyles until =
                 )
             )
         ]
-
-
-
 
 
 {-| -}
@@ -840,213 +822,6 @@ attrContainer recordBlocks =
 
 
 
--- tokenBody : ( String, List AttrExpectation ) -> Tolerant.Parser Context Problem ( String, List InlineAttribute )
--- tokenBody ( name, attrs ) =
---     case attrs of
---         [] ->
---             Tolerant.map (always ( name, [] )) <|
---                 Tolerant.keyword
---                     { match = name
---                     , problem = ExpectingInlineName name
---                     , onError = Tolerant.skip
---                     }
---         _ ->
---             Tolerant.succeed (\attributes -> ( name, attributes ))
---                 |> Tolerant.ignore
---                     (Tolerant.keyword
---                         { match = name
---                         , problem = ExpectingInlineName name
---                         , onError = Tolerant.skip
---                         }
---                     )
---                 |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
---                 |> Tolerant.ignore
---                     (Tolerant.symbol
---                         { match = "|"
---                         , problem = Expecting "|"
---                         , onError = Tolerant.fastForwardTo [ '}', '\n' ]
---                         }
---                     )
---                 |> Tolerant.ignore
---                     (Tolerant.chompWhile (\c -> c == ' '))
---                 |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
---                 |> Tolerant.keep
---                     (Parser.loop
---                         { remaining = attrs
---                         , original = attrs
---                         , found = []
---                         }
---                         attributeList
---                     )
--- {-| reorder a list to be in the original order
--- -}
--- reorder original current =
---     let
---         findIndex name exp =
---             List.foldl
---                 (\expectation result ->
---                     case result of
---                         Err i ->
---                             case expectation of
---                                 ExpectAttrString expName _ ->
---                                     if expName == name then
---                                         Ok i
---                                     else
---                                         Err (i + 1)
---                                 ExpectAttrFloat expName _ ->
---                                     if expName == name then
---                                         Ok i
---                                     else
---                                         Err (i + 1)
---                                 ExpectAttrInt expName _ ->
---                                     if expName == name then
---                                         Ok i
---                                     else
---                                         Err (i + 1)
---                         Ok i ->
---                             Ok i
---                 )
---                 (Err 0)
---                 exp
---                 |> (\result ->
---                         case result of
---                             Err i ->
---                                 i
---                             Ok i ->
---                                 i
---                    )
---     in
---     List.sortBy
---         (\attr ->
---             case attr of
---                 AttrString details ->
---                     findIndex details.name original
---                 AttrFloat details ->
---                     findIndex details.name original
---                 AttrInt details ->
---                     findIndex details.name original
---         )
---         current
--- {-| Parse a set of attributes.
--- They can be parsed in any order.
--- -}
--- attributeList :
---     { remaining : List AttrExpectation
---     , original : List AttrExpectation
---     , found : List InlineAttribute
---     }
---     ->
---         Parser Context
---             Problem
---             (Parser.Step
---                 { remaining : List AttrExpectation
---                 , original : List AttrExpectation
---                 , found : List InlineAttribute
---                 }
---                 (Result (List Problem) (List InlineAttribute))
---             )
--- attributeList cursor =
---     case cursor.remaining of
---         [] ->
---             Parser.succeed (Parser.Done (Ok (reorder cursor.original cursor.found)))
---         _ ->
---             let
---                 parseAttr i expectation =
---                     Parser.succeed
---                         (\attrResult ->
---                             case attrResult of
---                                 Ok attr ->
---                                     Parser.Loop
---                                         { remaining = removeByIndex i cursor.remaining
---                                         , original = cursor.original
---                                         , found = attr :: cursor.found
---                                         }
---                                 Err err ->
---                                     Parser.Done (Err [ err ])
---                         )
---                         |= attribute expectation
---                         |. (if List.length cursor.remaining > 1 then
---                                 Parser.succeed ()
---                                     |. Parser.chompIf (\c -> c == ',') (Expecting ",")
---                                     |. Parser.chompWhile (\c -> c == ' ')
---                             else
---                                 Parser.succeed ()
---                            )
---             in
---             Parser.oneOf
---                 (List.indexedMap parseAttr cursor.remaining
---                     -- TODO: ADD MISSING ATTRIBUTES HERE!!
---                     ++ [ Parser.map (always (Parser.Done (Err []))) parseTillEnd ]
---                 )
--- attribute : AttrExpectation -> Parser Context Problem (Result Problem InlineAttribute)
--- attribute attr =
---     let
---         name =
---             case attr of
---                 ExpectAttrString attrName _ ->
---                     attrName
---                 ExpectAttrFloat attrName _ ->
---                     attrName
---                 ExpectAttrInt attrName _ ->
---                     attrName
---     in
---     Parser.succeed
---         (\start equals content end ->
---             Result.map
---                 (\expected ->
---                     case expected of
---                         ExpectAttrString inlineName value ->
---                             AttrString
---                                 { name = inlineName
---                                 , range =
---                                     { start = start
---                                     , end = end
---                                     }
---                                 , value = value
---                                 }
---                         ExpectAttrFloat inlineName value ->
---                             AttrFloat
---                                 { name = inlineName
---                                 , range =
---                                     { start = start
---                                     , end = end
---                                     }
---                                 , value = value
---                                 }
---                         ExpectAttrInt inlineName value ->
---                             AttrInt
---                                 { name = inlineName
---                                 , range =
---                                     { start = start
---                                     , end = end
---                                     }
---                                 , value = value
---                                 }
---                 )
---                 content
---         )
---         |= getPosition
---         |. Parser.keyword
---             (Parser.Token name (ExpectingFieldName name))
---         |. Parser.chompWhile (\c -> c == ' ')
---         |= Parser.oneOf
---             [ Parser.map (always True) (Parser.chompIf (\c -> c == '=') (Expecting "="))
---             , Parser.succeed False
---             ]
---         |. Parser.chompWhile (\c -> c == ' ')
---         |= (case attr of
---                 ExpectAttrString inlineName _ ->
---                     Parser.succeed (Ok << ExpectAttrString inlineName)
---                         |= Parser.getChompedString
---                             (Parser.chompWhile (\c -> c /= '|' && c /= '}' && c /= '\n' && c /= ','))
---                 ExpectAttrFloat inlineName _ ->
---                     Parser.succeed (Result.map (ExpectAttrFloat inlineName))
---                         |= floating
---                 ExpectAttrInt inlineName _ ->
---                     Parser.succeed (Result.map (ExpectAttrInt inlineName))
---                         |= integer
---            )
---         |= getPosition
 {- Style Helpers -}
 
 
@@ -1271,8 +1046,6 @@ removeBalance id (TextCursor cursor) =
         { cursor | balancedReplacements = List.filter ((/=) id) cursor.balancedReplacements }
 
 
-
-
 addText newTxt (TextCursor cursor) =
     case cursor.current of
         Text styles txt ->
@@ -1455,18 +1228,6 @@ getPosition =
         |= Parser.getPosition
 
 
-parseTillEnd =
-    Parser.succeed
-        (\str endsWithBracket ->
-            endsWithBracket
-        )
-        |= Parser.chompWhile (\c -> c /= '\n' && c /= '}')
-        |= Parser.oneOf
-            [ Parser.map (always True) (Parser.token (Parser.Token "}" InlineEnd))
-            , Parser.succeed False
-            ]
-
-
 
 {- MISC HELPERS -}
 
@@ -1501,34 +1262,6 @@ onlyAnnotation ((Block details) as thisBlock) =
 
         AnnotationNamed _ ->
             Just thisBlock
-
-
-
--- getInlineName inline =
---     case inline of
---         ExpectAnnotation name attrs _ ->
---             name
---         ExpectToken name attrs ->
---             name
---         ExpectVerbatim name _ _ ->
---             name
---         ExpectText _ ->
---             ""
-
-
-removeByIndex index list =
-    List.foldl
-        (\item ( cursor, passed ) ->
-            if cursor == index then
-                ( cursor + 1, passed )
-
-            else
-                ( cursor + 1, item :: passed )
-        )
-        ( 0, [] )
-        list
-        |> Tuple.second
-        |> List.reverse
 
 
 {-| -}
@@ -2461,8 +2194,6 @@ addToLevel index brandNewItem (Nested parent) =
                             addToLevel (index - 1) brandNewItem top
                                 :: remain
                     }
-
-
 
 
 
