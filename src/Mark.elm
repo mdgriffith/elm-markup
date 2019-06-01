@@ -2157,19 +2157,37 @@ field name value (Desc.ProtoRecord details) =
                 case details.fieldConverter desc ann of
                     Outcome.Success ( pos, fieldDescriptions, rendered ) ->
                         case getField newField fieldDescriptions of
-                            Ok (Desc.Found rng myField) ->
-                                Outcome.Success
-                                    ( pos
-                                    , fieldDescriptions
-                                    , rendered myField
+                            Just outcome ->
+                                mapSuccessAndRecovered
+                                    (\myField ->
+                                        ( pos
+                                        , fieldDescriptions
+                                        , rendered myField
+                                        )
                                     )
+                                    outcome
 
-                            Ok (Desc.Unexpected deets) ->
-                                Desc.uncertain deets
-
-                            Err prob ->
+                            Nothing ->
                                 Desc.uncertain
-                                    { problem = prob
+                                    { problem = Error.MissingFields [ fieldName newField ]
+                                    , range = pos
+                                    }
+
+                    Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
+                        case getField newField fieldDescriptions of
+                            Just outcome ->
+                                mapSuccessAndRecovered
+                                    (\myField ->
+                                        ( pos
+                                        , fieldDescriptions
+                                        , rendered myField
+                                        )
+                                    )
+                                    outcome
+
+                            Nothing ->
+                                Desc.uncertain
+                                    { problem = Error.MissingFields [ fieldName newField ]
                                     , range = pos
                                     }
 
@@ -2178,66 +2196,43 @@ field name value (Desc.ProtoRecord details) =
 
                     Outcome.Almost (Desc.Uncertain e) ->
                         Outcome.Almost (Desc.Uncertain e)
-
-                    Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
-                        case getField newField fieldDescriptions of
-                            Ok (Desc.Found rng myField) ->
-                                Outcome.Almost
-                                    (Desc.Recovered e
-                                        ( pos
-                                        , fieldDescriptions
-                                        , rendered myField
-                                        )
-                                    )
-
-                            Ok (Desc.Unexpected deets) ->
-                                Desc.uncertain deets
-
-                            Err prob ->
-                                Desc.uncertain
-                                    { problem = prob
-                                    , range = pos
-                                    }
         , fields =
             fieldParser (Desc.blockKindToContext details.blockKind) newField :: details.fields
         }
 
 
+fieldName (Field name _) =
+    name
+
+
 getField :
     Field value
     -> List ( String, Desc.Found Desc.Description )
-    -> Result Error.Error (Desc.Found value)
+    -> Maybe (Outcome.Outcome Error.AstError (Uncertain value) value)
 getField (Field name fieldBlock) fields =
-    List.foldl (matchField name fieldBlock) (Err (Error.MissingFields [ name ])) fields
+    List.foldl (matchField name fieldBlock) Nothing fields
 
 
 matchField :
     String
     -> Block value
     -> ( String, Desc.Found Desc.Description )
-    -> Result Error.Error (Desc.Found value)
-    -> Result Error.Error (Desc.Found value)
+    -> Maybe (Outcome.Outcome Error.AstError (Uncertain value) value)
+    -> Maybe (Outcome.Outcome Error.AstError (Uncertain value) value)
 matchField targetName targetBlock ( name, foundDescription ) existing =
     case existing of
-        Ok _ ->
+        Just _ ->
             existing
 
-        Err err ->
+        Nothing ->
             if name == targetName then
                 case foundDescription of
                     Desc.Found rng description ->
-                        case Desc.renderBlock targetBlock description of
-                            Outcome.Success rendered ->
-                                Ok (Desc.Found rng rendered)
-
-                            Outcome.Almost invalidAst ->
-                                Err err
-
-                            Outcome.Failure _ ->
-                                Err err
+                        Just (Desc.renderBlock targetBlock description)
 
                     Desc.Unexpected unexpected ->
-                        Ok (Desc.Unexpected unexpected)
+                        -- Just (Desc.Unexpected unexpected)
+                        Nothing
 
             else
                 existing
