@@ -637,18 +637,17 @@ suite =
                                 ]
                             ]
                         )
-            , only <|
-                test "Incorrect inline attribute content" <|
-                    \_ ->
-                        Expect.equal
-                            (toResult inlines "`my`{withColor | color = green } highlighted sentence")
-                            (Err
-                                [ Error.Custom
-                                    { message = [ "A color must be red or blue." ]
-                                    , title = "Bad Color"
-                                    }
-                                ]
-                            )
+            , test "Incorrect inline attribute content" <|
+                \_ ->
+                    Expect.equal
+                        (toResult inlines "`my`{withColor | color = green } highlighted sentence")
+                        (Err
+                            [ Error.Custom
+                                { message = [ "A color must be red or blue." ]
+                                , title = "Bad Color"
+                                }
+                            ]
+                        )
             ]
         , describe "Multiline"
             [ test "Correctly parse code block" <|
@@ -994,6 +993,19 @@ Finally, a sentence
                     Expect.equal
                         (toResult recordDoc doc1)
                         (Ok { one = "hello", three = "!", two = "world" })
+            , test "Commas allowed in record fields" <|
+                \_ ->
+                    let
+                        doc1 =
+                            """|> Test
+    one = hello, world
+    two = how are you?
+    three = !
+"""
+                    in
+                    Expect.equal
+                        (toResult recordDoc doc1)
+                        (Ok { one = "hello, world", three = "!", two = "how are you?" })
             , test "Extra line between two fields" <|
                 \_ ->
                     let

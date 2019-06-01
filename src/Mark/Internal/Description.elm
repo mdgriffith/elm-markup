@@ -194,7 +194,7 @@ blockKindToContext kind =
             ParseBlock
 
         Named name ->
-            ParseInline
+            ParseBlock
 
         VerbatimNamed name ->
             ParseInline
@@ -457,7 +457,8 @@ type alias FieldConverter data =
 
 
 type alias FieldParser =
-    Id.Seed
+    ParseContext
+    -> Id.Seed
     -> ( Id.Seed, ( String, Parser Error.Context Error.Problem ( String, Found Description ) ) )
 
 

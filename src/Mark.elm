@@ -1486,7 +1486,7 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
                         Id.step seed
 
                     ( newSeed, fields ) =
-                        Id.thread parentSeed (List.reverse details.fields)
+                        Id.thread parentSeed (List.foldl (\f ls -> f ParseInline :: ls) [] details.fields)
                 in
                 ( newSeed
                 , Parse.record Parse.InlineRecord
@@ -2197,7 +2197,7 @@ field name value (Desc.ProtoRecord details) =
                     Outcome.Almost (Desc.Uncertain e) ->
                         Outcome.Almost (Desc.Uncertain e)
         , fields =
-            fieldParser (Desc.blockKindToContext details.blockKind) newField :: details.fields
+            fieldParser newField :: details.fields
         }
 
 
@@ -2231,8 +2231,7 @@ matchField targetName targetBlock ( name, foundDescription ) existing =
                         Just (Desc.renderBlock targetBlock description)
 
                     Desc.Unexpected unexpected ->
-                        -- Just (Desc.Unexpected unexpected)
-                        Nothing
+                        Just (Desc.uncertain unexpected)
 
             else
                 existing
@@ -2271,7 +2270,7 @@ toBlock (Desc.ProtoRecord details) =
                         Id.step seed
 
                     ( newSeed, fields ) =
-                        Id.thread parentSeed (List.reverse details.fields)
+                        Id.thread parentSeed (List.foldl (\f ls -> f ParseBlock :: ls) [] details.fields)
                 in
                 ( newSeed
                 , Parse.record Parse.BlockRecord
@@ -2288,8 +2287,8 @@ type Field value
     = Field String (Block value)
 
 
-fieldParser : Desc.ParseContext -> Field value -> Id.Seed -> ( Id.Seed, ( String, Parser Context Problem ( String, Desc.Found Desc.Description ) ) )
-fieldParser context (Field name myBlock) seed =
+fieldParser : Field value -> Desc.ParseContext -> Id.Seed -> ( Id.Seed, ( String, Parser Context Problem ( String, Desc.Found Desc.Description ) ) )
+fieldParser (Field name myBlock) context seed =
     let
         ( newSeed, blockParser ) =
             Desc.getParser context seed myBlock
