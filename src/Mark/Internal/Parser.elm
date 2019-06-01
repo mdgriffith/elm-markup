@@ -1784,11 +1784,20 @@ captureField found recordName fields fieldNames =
                                 }
         )
         (Parser.oneOf
-            (List.map (Parser.map Just << Tuple.second) fields.remaining
+            (List.map (Parser.map Just << parseField) fields.remaining
                 ++ [ Parser.map Just (unexpectedField recordName fieldNames)
                    ]
             )
         )
+
+
+parseField ( name, contentParser ) =
+    Parser.succeed identity
+        |. Parser.keyword (Parser.Token name (ExpectingFieldName name))
+        |. Parser.chompWhile (\c -> c == ' ')
+        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
+        |. Parser.chompWhile (\c -> c == ' ')
+        |= contentParser
 
 
 unexpectedField recordName options =

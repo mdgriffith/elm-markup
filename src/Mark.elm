@@ -1613,9 +1613,7 @@ convertTextDescription id options comp cursor =
                                 Error.UnknownInline
                                     (List.map
                                         (\inline ->
-                                            inline Desc.EmptyAnnotation
-                                                |> getBlockExpectation
-                                                |> Desc.inlineExample details.kind
+                                            Desc.inlineExample details.kind (inline Desc.EmptyAnnotation)
                                         )
                                         options.inlines
                                     )
@@ -2303,7 +2301,7 @@ fieldParser context (Field name myBlock) seed =
     in
     ( newSeed
     , ( name
-      , withFieldName
+      , fieldContentParser
             name
             blockParser
       )
@@ -2314,21 +2312,16 @@ fieldExpectation (Field name fieldBlock) =
     ( name, Desc.getBlockExpectation fieldBlock )
 
 
-withFieldName : String -> Parser Error.Context Error.Problem Desc.Description -> Parser Error.Context Error.Problem ( String, Desc.Found Desc.Description )
-withFieldName name parser =
+fieldContentParser : String -> Parser Error.Context Error.Problem Desc.Description -> Parser Error.Context Error.Problem ( String, Desc.Found Desc.Description )
+fieldContentParser name parser =
     Parse.withIndent
         (\indentation ->
             Parser.map
                 (\( pos, description ) ->
                     ( name, Desc.Found pos description )
                 )
-            <|
-                Parse.withRange
+                (Parse.withRange
                     (Parser.succeed identity
-                        |. Parser.keyword (Parser.Token name (ExpectingFieldName name))
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |. Parser.chompIf (\c -> c == '=') (Expecting "=")
-                        |. Parser.chompWhile (\c -> c == ' ')
                         |= Parser.oneOf
                             [ Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
                             , Parser.succeed identity
@@ -2337,4 +2330,5 @@ withFieldName name parser =
                                 |= Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
                             ]
                     )
+                )
         )

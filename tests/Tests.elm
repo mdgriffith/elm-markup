@@ -37,9 +37,32 @@ inlines =
             , inlines =
                 [ Mark.annotation "highlight" identity
                 , Mark.verbatim "verb" (List.singleton << Tuple.pair emptyStyles)
+                , Mark.verbatim "withColor"
+                    (\str color ->
+                        [ ( emptyStyles, str ++ color )
+                        ]
+                    )
+                    |> Mark.field "color" redOrBlue
                 ]
             }
         )
+
+
+redOrBlue =
+    Mark.string
+        |> Mark.verify
+            (\str ->
+                if str == "red" || str == "blue" then
+                    Ok str
+
+                else
+                    Err
+                        { title = "Bad Color"
+                        , message =
+                            [ "A color must be red or blue."
+                            ]
+                        }
+            )
 
 
 inlineMultipleVerbatim =
@@ -609,7 +632,20 @@ suite =
                         (Err
                             [ Error.UnknownInline
                                 [ "[my]{highlight}"
-                                , "[my]{verb}"
+                                , "`my`{verb}"
+                                , "`my`{withColor| color = value }"
+                                ]
+                            ]
+                        )
+            , test "Incorrect inline attribute content" <|
+                \_ ->
+                    Expect.equal
+                        (toResult inlines "`my`{withColor | color = green} highlighted sentence")
+                        (Err
+                            [ Error.UnknownInline
+                                [ "[my]{highlight}"
+                                , "`my`{verb}"
+                                , "`my`{withColor| color = value }"
                                 ]
                             ]
                         )

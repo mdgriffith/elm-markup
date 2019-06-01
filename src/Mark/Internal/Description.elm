@@ -710,11 +710,11 @@ strikeStyle =
     }
 
 
-inlineExample : AnnotationType -> Expectation -> String
-inlineExample kind inline =
+inlineExample : AnnotationType -> Block a -> String
+inlineExample kind (Block block) =
     let
         containerAsString =
-            case inline of
+            case block.expect of
                 ExpectRecord name [] ->
                     "{" ++ name ++ "}"
 
@@ -728,24 +728,38 @@ inlineExample kind inline =
                 _ ->
                     ""
 
-        renderField ( name, block ) =
+        renderField ( name, contentBlock ) =
             name ++ " = " ++ "value"
+
+        selection =
+            case kind of
+                EmptyAnnotation ->
+                    ""
+
+                SelectText txts ->
+                    let
+                        ( newStyles, renderedText ) =
+                            txts
+                                |> List.foldl gatherText ( emptyStyles, "" )
+                                |> gatherText (Text emptyStyles "")
+                    in
+                    renderedText
+
+                SelectString str ->
+                    str
     in
-    case kind of
-        EmptyAnnotation ->
+    case block.kind of
+        Named name ->
             containerAsString
 
-        SelectText txts ->
-            let
-                ( newStyles, renderedText ) =
-                    txts
-                        |> List.foldl gatherText ( emptyStyles, "" )
-                        |> gatherText (Text emptyStyles "")
-            in
-            "[" ++ renderedText ++ "]" ++ containerAsString
+        Value ->
+            containerAsString
 
-        SelectString str ->
-            "`" ++ str ++ "`" ++ containerAsString
+        VerbatimNamed str ->
+            "`" ++ selection ++ "`" ++ containerAsString
+
+        AnnotationNamed name ->
+            "[" ++ selection ++ "]" ++ containerAsString
 
 
 match : Description -> Expectation -> Bool
