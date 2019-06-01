@@ -20,7 +20,7 @@ To get started, check out the `/examples` folder:
 
 ## Elm Markup CLI
 
-There'a also an [`Elm Markup CLI`](https://github.com/mdgriffith/elm-markup-vscode), which can be used to check errors on external elm markup files.
+There'a also an [`Elm Markup CLI`](https://github.com/mdgriffith/elm-markup-cli), which can be used to check errors on external elm markup files.
 
 ## VSCode Extension
 
