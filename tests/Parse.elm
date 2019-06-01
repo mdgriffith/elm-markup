@@ -1,4 +1,4 @@
-module Parse exposing (suite, text)
+module Parse exposing (text)
 
 {-| -}
 
@@ -24,101 +24,6 @@ bold =
     { emptyStyles | bold = True }
 
 
-suite =
-    describe "Inline parsing"
-        [ test "Parse string attribute" <|
-            \_ ->
-                Expect.equal
-                    (Parser.run
-                        (Mark.Internal.Parser.attribute (Description.ExpectAttrString "attr" "placeholder"))
-                        "attr = My String variable"
-                    )
-                    (Ok <|
-                        (Ok <|
-                            Description.AttrString
-                                { name = "attr"
-                                , range =
-                                    { end = { column = 26, line = 1, offset = 25 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
-                                , value = "My String variable"
-                                }
-                        )
-                    )
-        , test "Single string attrs in list" <|
-            \_ ->
-                Expect.equal
-                    (Parser.run
-                        (Parser.loop
-                            { remaining =
-                                [ Description.ExpectAttrString "attr1" "placeholder"
-                                ]
-                            , original =
-                                [ Description.ExpectAttrString "attr1" "placeholder"
-                                ]
-                            , found = []
-                            }
-                            Mark.Internal.Parser.attributeList
-                        )
-                        "attr1 = My String variable"
-                    )
-                    (Ok <|
-                        Ok <|
-                            [ Description.AttrString
-                                { name = "attr1"
-                                , range =
-                                    { end = { column = 27, line = 1, offset = 26 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
-                                , value = "My String variable"
-                                }
-                            ]
-                    )
-        , test "Many string attrs" <|
-            \_ ->
-                Expect.equal
-                    (Parser.run
-                        (Parser.loop
-                            { original =
-                                [ Description.ExpectAttrString "attr1" "placeholder"
-                                , Description.ExpectAttrString "attr2" "placeholder"
-                                ]
-                            , remaining =
-                                [ Description.ExpectAttrString "attr1" "placeholder"
-                                , Description.ExpectAttrString "attr2" "placeholder"
-                                ]
-                            , found = []
-                            }
-                            Mark.Internal.Parser.attributeList
-                        )
-                        "attr1 = My String variable, attr2 = My Second variable"
-                    )
-                    (Ok
-                        (Ok
-                            [ Description.AttrString
-                                { name = "attr1"
-                                , range =
-                                    { end =
-                                        { column = 27, line = 1, offset = 26 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
-                                , value = "My String variable"
-                                }
-                            , Description.AttrString
-                                { name = "attr2"
-                                , range =
-                                    { end =
-                                        { column = 55, line = 1, offset = 54 }
-                                    , start = { column = 29, line = 1, offset = 28 }
-                                    }
-                                , value = "My Second variable"
-                                }
-                            ]
-                        )
-                    )
-        ]
-
-
 dummyRange =
     { end = { column = -1, line = 1, offset = -1 }
     , start = { column = -1, line = 1, offset = -1 }
@@ -136,6 +41,7 @@ styleParser =
             ]
         , replacements = []
         }
+        Description.ParseInline
         Id.initialSeed
         { column = 1, line = 1, offset = 0 }
         emptyStyles
@@ -152,6 +58,7 @@ text =
                             { inlines = []
                             , replacements = []
                             }
+                            Description.ParseInline
                             Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
                             emptyStyles

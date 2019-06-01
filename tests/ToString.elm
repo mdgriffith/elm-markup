@@ -12,6 +12,13 @@ import Mark.New
 import Test exposing (..)
 
 
+startingPoint =
+    { offset = 0
+    , line = 1
+    , column = 1
+    }
+
+
 bold =
     { italic = False
     , bold = True
@@ -23,7 +30,7 @@ create exp =
     .desc <|
         Description.create
             { indent = 0
-            , base = Description.startingPoint
+            , base = startingPoint
             , expectation = exp
             , seed = Id.initialSeed
             }
@@ -33,7 +40,7 @@ createIndented exp =
     .desc <|
         Description.create
             { indent = 1
-            , base = Description.startingPoint
+            , base = startingPoint
             , expectation = exp
             , seed = Id.initialSeed
             }
@@ -252,8 +259,8 @@ threeHellos =
         , currentSeed = Id.initialSeed
         , found =
             Description.Found
-                { start = Description.startingPoint
-                , end = Description.startingPoint
+                { start = startingPoint
+                , end = startingPoint
                 }
                 (manyHellos ())
         , expected =
@@ -285,7 +292,7 @@ edits =
                                     , currentSeed = Id.initialSeed
                                     , found =
                                         Description.Found
-                                            { start = Description.startingPoint
+                                            { start = startingPoint
                                             , end =
                                                 { column = 1, line = 50, offset = 200 }
                                             }
@@ -417,7 +424,8 @@ edits =
                                         styledText
                                         (Mark.Edit.restyle
                                             (Id.Id [ 1 ])
-                                            { anchor = 3, focus = 8 }
+                                            3
+                                            8
                                             bold
                                         )
                                         parsed
@@ -440,7 +448,8 @@ edits =
                                         styledText
                                         (Mark.Edit.restyle
                                             (Id.Id [ 1 ])
-                                            { anchor = 3, focus = 8 }
+                                            3
+                                            8
                                             { bold = False
                                             , italic = False
                                             , strike = False
@@ -466,7 +475,8 @@ edits =
                                         styledText
                                         (Mark.Edit.restyle
                                             (Id.Id [ 1 ])
-                                            { anchor = 3, focus = 8 }
+                                            3
+                                            8
                                             { bold = True
                                             , italic = True
                                             , strike = True

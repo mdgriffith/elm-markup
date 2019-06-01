@@ -8,7 +8,6 @@ import Mark.Internal.Description
 import Mark.Internal.Error as Error
 import Mark.Internal.Outcome
 import Mark.New
-import Mark.Record as Record
 import Test exposing (..)
 
 
@@ -72,8 +71,8 @@ inlineMultipleVerbatim =
                     (\str one two ->
                         [ str, one, two ]
                     )
-                    |> Record.field "one" Mark.string
-                    |> Record.field "two" Mark.string
+                    |> Mark.field "one" Mark.string
+                    |> Mark.field "two" Mark.string
                 ]
             }
         )
@@ -101,8 +100,8 @@ inlineOrder =
                     (\txt one two ->
                         Just ( one, two )
                     )
-                    |> Record.field "one" Mark.string
-                    |> Record.field "two" Mark.string
+                    |> Mark.field "one" Mark.string
+                    |> Mark.field "two" Mark.string
                 ]
             }
         )
@@ -112,11 +111,11 @@ withMetaData =
     Mark.documentWith
         Tuple.pair
         { metadata =
-            Record.record "Meta"
+            Mark.record "Meta"
                 (\one two -> { one = one, two = two })
-                |> Record.field "one" Mark.string
-                |> Record.field "two" Mark.string
-                |> Record.toBlock
+                |> Mark.field "one" Mark.string
+                |> Mark.field "two" Mark.string
+                |> Mark.toBlock
         , body =
             Mark.manyOf
                 [ text
@@ -142,36 +141,36 @@ textDoc =
 recordDoc =
     Mark.document
         identity
-        (Record.record "Test"
+        (Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            |> Record.field "one" Mark.string
-            |> Record.field "two" Mark.string
-            |> Record.field "three" Mark.string
-            |> Record.toBlock
+            |> Mark.field "one" Mark.string
+            |> Mark.field "two" Mark.string
+            |> Mark.field "three" Mark.string
+            |> Mark.toBlock
         )
 
 
 recordManyTextDoc =
     Mark.document
         identity
-        (Record.record "Test"
+        (Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            |> Record.field "one" Mark.string
-            |> Record.field "two" Mark.string
-            |> Record.field "three" (Mark.manyOf [ text ])
-            |> Record.toBlock
+            |> Mark.field "one" Mark.string
+            |> Mark.field "two" Mark.string
+            |> Mark.field "three" (Mark.manyOf [ text ])
+            |> Mark.toBlock
         )
 
 
 floatDoc =
     Mark.document
         identity
-        (Record.record "Test"
+        (Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            |> Record.field "one" Mark.float
-            |> Record.field "two" Mark.float
-            |> Record.field "three" Mark.float
-            |> Record.toBlock
+            |> Mark.field "one" Mark.float
+            |> Mark.field "two" Mark.float
+            |> Mark.field "three" Mark.float
+            |> Mark.toBlock
         )
 
 
@@ -214,12 +213,12 @@ codeAndTextDoc =
 intDoc =
     Mark.document
         identity
-        (Record.record "Test"
+        (Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
-            |> Record.field "one" Mark.int
-            |> Record.field "two" Mark.int
-            |> Record.field "three" Mark.int
-            |> Record.toBlock
+            |> Mark.field "one" Mark.int
+            |> Mark.field "two" Mark.int
+            |> Mark.field "three" Mark.int
+            |> Mark.toBlock
         )
 
 
@@ -228,12 +227,12 @@ sectionDoc =
         identity
         (Mark.manyOf
             [ Mark.map (always "text") text
-            , Record.record "Test"
+            , Mark.record "Test"
                 (\one two three -> "record:one,two,three")
-                |> Record.field "one" Mark.string
-                |> Record.field "two" Mark.string
-                |> Record.field "three" Mark.string
-                |> Record.toBlock
+                |> Mark.field "one" Mark.string
+                |> Mark.field "two" Mark.string
+                |> Mark.field "three" Mark.string
+                |> Mark.toBlock
             , Mark.block "Section"
                 (\x -> "section:" ++ String.join "," x)
                 (Mark.manyOf
@@ -250,7 +249,7 @@ sectionDoc =
 nested : Mark.Document (List Indexed)
 nested =
     Mark.document
-        (List.indexedMap (renderIndex []))
+        (renderEnumWith (renderIndex []))
         (Mark.tree
             "Nested"
             identity
@@ -261,7 +260,7 @@ nested =
 nestedOrdering : Mark.Document (List Ordered)
 nestedOrdering =
     Mark.document
-        (List.indexedMap (renderContent []))
+        (renderEnumWith (renderContent []))
         (Mark.tree "Nested"
             identity
             Mark.int
@@ -277,40 +276,33 @@ type Ordered
 
 
 type Icons
-    = Icons Mark.Edit.Icon (List Icons)
+    = Icons Mark.Icon (List Icons)
 
 
-renderContent stack i (Mark.Edit.Tree node) =
-    case node.children of
-        [] ->
-            Ordered node.content []
-
-        _ ->
-            Ordered node.content (List.indexedMap (renderContent (i :: stack)) node.children)
+renderEnumWith fn (Mark.Enumerated enum) =
+    List.indexedMap fn enum.items
 
 
-renderIndex stack i (Mark.Edit.Tree node) =
-    case node.children of
-        [] ->
-            Indexed i []
-
-        _ ->
-            Indexed i (List.indexedMap (renderIndex (i :: stack)) node.children)
+renderEnumWithIcon fn (Mark.Enumerated enum) =
+    List.indexedMap (fn enum.icon) enum.items
 
 
-renderIcon stack i (Mark.Edit.Tree node) =
-    case node.children of
-        [] ->
-            Icons node.icon []
+renderContent stack i (Mark.Item item) =
+    Ordered item.content (renderEnumWith (renderContent (i :: stack)) item.children)
 
-        _ ->
-            Icons node.icon (List.indexedMap (renderIcon (i :: stack)) node.children)
+
+renderIndex stack i (Mark.Item item) =
+    Indexed i (renderEnumWith (renderIndex (i :: stack)) item.children)
+
+
+renderIcon stack icon i (Mark.Item node) =
+    Icons icon (renderEnumWithIcon (renderIcon (i :: stack)) node.children)
 
 
 iconListDoc : Mark.Document (List Icons)
 iconListDoc =
     Mark.document
-        (List.indexedMap (renderIcon []))
+        (renderEnumWithIcon (renderIcon []))
         (Mark.tree "WithIcons"
             identity
             Mark.int
@@ -320,7 +312,7 @@ iconListDoc =
 nestedString : Mark.Document (List Icons)
 nestedString =
     Mark.document
-        (List.indexedMap (renderIcon []))
+        (renderEnumWithIcon (renderIcon []))
         (Mark.tree "WithIcons"
             identity
             Mark.string
@@ -420,12 +412,12 @@ sectionWithRecordDoc =
         (Mark.manyOf
             [ text
                 |> Mark.map (always "text")
-            , Record.record "Test"
+            , Mark.record "Test"
                 (\one two three -> "record:one,two,three")
-                |> Record.field "one" Mark.string
-                |> Record.field "two" Mark.string
-                |> Record.field "three" Mark.string
-                |> Record.toBlock
+                |> Mark.field "one" Mark.string
+                |> Mark.field "two" Mark.string
+                |> Mark.field "three" Mark.string
+                |> Mark.toBlock
             , Mark.block "Section"
                 (\x -> "embedded:" ++ String.join "," x)
                 (Mark.manyOf
@@ -694,17 +686,17 @@ Then some text.
                     Expect.equal
                         (toResult iconListDoc iconSetting)
                         (Ok
-                            [ Icons Mark.Edit.Number
-                                [ Icons Mark.Edit.Bullet []
-                                , Icons Mark.Edit.Bullet []
-                                , Icons Mark.Edit.Bullet []
-                                , Icons Mark.Edit.Bullet
-                                    [ Icons Mark.Edit.Number []
-                                    , Icons Mark.Edit.Number []
+                            [ Icons Mark.Number
+                                [ Icons Mark.Bullet []
+                                , Icons Mark.Bullet []
+                                , Icons Mark.Bullet []
+                                , Icons Mark.Bullet
+                                    [ Icons Mark.Number []
+                                    , Icons Mark.Number []
                                     ]
                                 ]
-                            , Icons Mark.Edit.Number [ Icons Mark.Edit.Bullet [] ]
-                            , Icons Mark.Edit.Number []
+                            , Icons Mark.Number [ Icons Mark.Bullet [] ]
+                            , Icons Mark.Number []
                             ]
                         )
             , test "Nested list parsing" <|
