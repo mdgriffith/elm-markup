@@ -1,7 +1,8 @@
 module Mark.Internal.Error exposing
     ( Error(..), render
     , Context(..), Problem(..), UnexpectedDetails, documentMismatch, renderParsingErrors, idNotFound
-    , AstError(..), Rendered(..), compilerError
+    , EditErr(..)
+    , AstError(..), Rendered(..), compilerError, renderEditError
     )
 
 {-|
@@ -9,6 +10,8 @@ module Mark.Internal.Error exposing
 @docs Error, render
 
 @docs Context, Problem, UnexpectedDetails, documentMismatch, renderParsingErrors, idNotFound
+
+@docs EditErr
 
 -}
 
@@ -52,8 +55,145 @@ type Error
         { title : String
         , message : List String
         }
-      --
-    | IdNotFound
+      -- Editing Errors
+    | EditingError EditErr
+
+
+type EditErr
+    = IdNotFound
+      -- i.e. trying to do a text edit on anything other than `text`
+    | InvalidTextEdit
+    | InvalidInsert
+    | InvalidDelete
+      -- We're trying to insert a block but the document doesn't have a definition for it.
+      -- first expectation is what we attempted to
+    | DocumentDoesntAllow String (List String)
+
+
+renderEditError editErr =
+    case editErr of
+        IdNotFound ->
+            idNotFound
+
+        InvalidTextEdit ->
+            invalidTextEdit
+
+        InvalidInsert ->
+            invalidInsert
+
+        InvalidDelete ->
+            invalidDelete
+
+        DocumentDoesntAllow new exp ->
+            documentDoesntAllow new exp
+
+
+idNotFound =
+    Global
+        { title = "ID NOT FOUND"
+        , problem = EditingError IdNotFound
+        , message =
+            [ Format.text "The "
+            , Format.yellow (Format.text "Mark.Edit.Id")
+            , Format.text " that you provided doesn't match any blocks in the document."
+            ]
+        }
+
+
+{-| Invalid edits include:
+
+    - Text edits on a non-text (String in particular)
+    - insertAt/deleteAt edits on a non-manyOf
+
+-}
+invalidTextEdit =
+    Global
+        { title = "INVALID TEXT EDIT"
+        , problem = EditingError InvalidTextEdit
+        , message =
+            [ Format.text "Text edits such as\n\n"
+            , indent
+            , Format.text "Mark.Edit.insertText\n"
+                |> Format.yellow
+            , indent
+            , Format.text "Mark.Edit.deleteText\n"
+                |> Format.yellow
+            , indent
+            , Format.text "Mark.Edit.restyle\n"
+                |> Format.yellow
+            , indent
+            , Format.text "Mark.Edit.addStyles\n"
+                |> Format.yellow
+            , indent
+            , Format.text "Mark.Edit.removeStyles\n\n"
+                |> Format.yellow
+            , Format.text "only work on "
+            , Format.text "Mark.text"
+                |> Format.yellow
+            , Format.text " or "
+            , Format.text "Mark.textWith"
+                |> Format.yellow
+            , Format.text " blocks.\n\n"
+            ]
+                ++ hint "If you're trying to update a simple Mark.string, you probably want to use `Mark.Edit.replace` instead."
+        }
+
+
+invalidInsert =
+    Global
+        { title = "INVALID INSERT"
+        , problem = EditingError InvalidInsert
+        , message =
+            [ Format.text "Mark.Edit.insertAt"
+                |> Format.yellow
+            , Format.text " is only valid for elements within a "
+            , indent
+            , Format.yellow (Format.text "Mark.manyOf")
+            ]
+        }
+
+
+invalidDelete =
+    Global
+        { title = "INVALID DELETE"
+        , problem = EditingError InvalidInsert
+        , message =
+            [ Format.text "Mark.Edit.deleteAt"
+                |> Format.yellow
+            , Format.text " is only valid for elements within a "
+            , indent
+            , Format.yellow (Format.text "Mark.manyOf")
+            ]
+        }
+
+
+documentDoesntAllow new expectations =
+    Global
+        { title = "DOCUMENT DOESN'T ALLOW"
+        , problem = EditingError (DocumentDoesntAllow new expectations)
+        , message =
+            [ Format.text "You tried to insert a\n\n"
+            , indent
+            , Format.yellow (Format.text new)
+            , Format.text "\n\n"
+            , Format.text "but the block at the provided "
+            , Format.yellow (Format.text "Mark.Edit.Id")
+            , Format.text " is expecting\n\n"
+            ]
+                ++ List.concatMap
+                    (\exp ->
+                        [ indent
+                        , Format.text exp
+                            |> Format.yellow
+                        , Format.text "\n"
+                        ]
+                    )
+                    expectations
+        }
+
+
+indent =
+    Format.text (String.repeat 4 " ")
 
 
 
@@ -211,18 +351,6 @@ renderParsingErrors source issues =
         }
 
 
-idNotFound =
-    Global
-        { title = "ID NOT FOUND"
-        , problem = IdNotFound
-        , message =
-            [ Format.text "I tried to edit your document but couldn't find any blocks with the "
-            , Format.yellow (Format.text "Mark.Edit.Id")
-            , Format.text " that you provided."
-            ]
-        }
-
-
 render : String -> UnexpectedDetails -> Rendered
 render source current =
     case current.problem of
@@ -232,8 +360,8 @@ render source current =
         DocumentMismatch ->
             documentMismatch
 
-        IdNotFound ->
-            idNotFound
+        EditingError editErr ->
+            renderEditError editErr
 
         ParsingIssue issues ->
             renderParsingErrors source issues

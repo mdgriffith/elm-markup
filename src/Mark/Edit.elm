@@ -191,45 +191,70 @@ editAtId id fn indentation pos desc =
 
 {-| Set the content of the current block
 -}
-replaceOption id new desc =
+replaceOption id i pos original new desc =
+    let
+        created =
+            create
+                { indent = i
+                , base = pos
+                , expectation = new
+                , seed = original.currentSeed
+                }
+    in
     case desc of
         OneOf one ->
             -- When we're replacing the OneOf, we actually want to replace it's contents.
-            let
-                newSize =
-                    getSize new
+            if List.any (matchExpected new) one.choices then
+                let
+                    newSize =
+                        getSize created.desc
 
-                existingSize =
-                    sizeFromRange (getFoundRange one.child)
-            in
-            case one.child of
-                Found range val ->
-                    EditMade
-                        (minusSize newSize existingSize
-                            |> sizeToPush
-                        )
-                        (OneOf { one | child = Found range new })
+                    existingSize =
+                        sizeFromRange (getFoundRange one.child)
+                in
+                case one.child of
+                    Found range val ->
+                        EditMade
+                            (minusSize newSize existingSize
+                                |> sizeToPush
+                            )
+                            (OneOf { one | child = Found range created.desc })
 
-                Unexpected unexpected ->
-                    EditMade
-                        (minusSize newSize existingSize
-                            |> sizeToPush
-                        )
-                        (OneOf { one | child = Found unexpected.range new })
+                    Unexpected unexpected ->
+                        EditMade
+                            (minusSize newSize existingSize
+                                |> sizeToPush
+                            )
+                            (OneOf { one | child = Found unexpected.range created.desc })
+
+            else
+                ErrorMakingEdit
+                    (Error.DocumentDoesntAllow
+                        (Desc.humanReadableExpectations new)
+                        (List.map Desc.humanReadableExpectations one.choices)
+                    )
 
         _ ->
-            let
-                newSize =
-                    getSize new
+            if Desc.match desc new then
+                let
+                    newSize =
+                        getSize created.desc
 
-                existingSize =
-                    getSize desc
-            in
-            EditMade
-                (minusSize newSize existingSize
-                    |> sizeToPush
-                )
-                new
+                    existingSize =
+                        getSize desc
+                in
+                EditMade
+                    (minusSize newSize existingSize
+                        |> sizeToPush
+                    )
+                    created.desc
+
+            else
+                ErrorMakingEdit
+                    (Error.DocumentDoesntAllow
+                        (Desc.humanReadableExpectations new)
+                        [ Desc.descriptionToString desc ]
+                    )
 
 
 sizeToPush size =
@@ -256,7 +281,7 @@ makeDeleteBlock id index indentation pos desc =
                 )
 
         _ ->
-            MismatchedBlock
+            ErrorMakingEdit Error.InvalidDelete
 
 
 {-| -}
@@ -268,20 +293,8 @@ update doc edit (Parsed original) =
                 Replace id new ->
                     editAtId id <|
                         \i pos desc ->
-                            if Desc.match desc new then
-                                let
-                                    created =
-                                        create
-                                            { indent = i
-                                            , base = pos
-                                            , expectation = new
-                                            , seed = original.currentSeed
-                                            }
-                                in
-                                replaceOption id created.desc desc
-
-                            else
-                                MismatchedBlock
+                            -- if Desc.match desc new then
+                            replaceOption id i pos original new desc
 
                 InsertAt id index new ->
                     editAtId id <|
@@ -308,13 +321,15 @@ update doc edit (Parsed original) =
                                             )
 
                                     else
-                                        -- TODO: We're trying to insert an invalid block
-                                        MismatchedBlock
+                                        ErrorMakingEdit
+                                            (Error.DocumentDoesntAllow
+                                                (Desc.humanReadableExpectations new)
+                                                (List.map Desc.humanReadableExpectations many.choices)
+                                            )
 
                                 _ ->
-                                    -- inserts only work for
-                                    -- `ManyOf`, `Tree`, and `Text`
-                                    MismatchedBlock
+                                    -- inserts= by index only works for `manyOf`
+                                    ErrorMakingEdit Error.InvalidInsert
 
                 Delete id index ->
                     editAtId id
@@ -344,7 +359,7 @@ update doc edit (Parsed original) =
                                         )
 
                                 _ ->
-                                    MismatchedBlock
+                                    ErrorMakingEdit Error.InvalidTextEdit
                         )
 
                 Annotate id start end wrapper ->
@@ -404,7 +419,7 @@ update doc edit (Parsed original) =
                                         (DescribeText { details | text = newTexts })
 
                                 _ ->
-                                    MismatchedBlock
+                                    ErrorMakingEdit Error.InvalidTextEdit
                         )
 
                 ReplaceSelection id start end newTextEls ->
@@ -434,7 +449,7 @@ update doc edit (Parsed original) =
                                         (DescribeText { details | text = newTexts })
 
                                 _ ->
-                                    MismatchedBlock
+                                    ErrorMakingEdit Error.InvalidTextEdit
                         )
     in
     original.found
@@ -450,8 +465,8 @@ prepareResults doc original edited =
         NoIdFound ->
             Err [ Error.idNotFound ]
 
-        MismatchedBlock ->
-            Err [ Error.idNotFound ]
+        ErrorMakingEdit err ->
+            Err [ Error.renderEditError err ]
 
         EditMade maybePush newDescription ->
             let
@@ -508,15 +523,15 @@ type alias Size =
 
 
 type EditOutcome desc
-    = MismatchedBlock
+    = ErrorMakingEdit Error.EditErr
     | EditMade Push desc
     | NoIdFound
 
 
 mapEdit fn edit =
     case edit of
-        MismatchedBlock ->
-            MismatchedBlock
+        ErrorMakingEdit err ->
+            ErrorMakingEdit err
 
         EditMade maybePush desc ->
             EditMade maybePush (fn desc)
@@ -530,13 +545,9 @@ makeFoundEdit : EditCursor -> Found Description -> EditOutcome (Found Descriptio
 makeFoundEdit cursor foundDesc =
     case foundDesc of
         Found range desc ->
-            -- case cursor.makeEdit cursor.indentation range.start desc of
-            --     NoIdFound ->
             makeEdit cursor desc
                 |> mapEdit (Found range)
 
-        -- otherwise ->
-        -- otherwise
         Unexpected unexpected ->
             NoIdFound
 
@@ -561,8 +572,8 @@ makeEdit cursor desc =
                         NoIdFound ->
                             NoIdFound
 
-                        MismatchedBlock ->
-                            MismatchedBlock
+                        ErrorMakingEdit err ->
+                            ErrorMakingEdit err
 
                 otherwise ->
                     otherwise
@@ -589,8 +600,8 @@ makeEdit cursor desc =
                                 NoIdFound ->
                                     NoIdFound
 
-                                MismatchedBlock ->
-                                    MismatchedBlock
+                                ErrorMakingEdit err ->
+                                    ErrorMakingEdit err
 
                 otherwise ->
                     otherwise
@@ -611,8 +622,8 @@ makeEdit cursor desc =
                         NoIdFound ->
                             NoIdFound
 
-                        MismatchedBlock ->
-                            MismatchedBlock
+                        ErrorMakingEdit err ->
+                            ErrorMakingEdit err
 
                 otherwise ->
                     otherwise
@@ -641,8 +652,8 @@ makeEdit cursor desc =
                         NoIdFound ->
                             NoIdFound
 
-                        MismatchedBlock ->
-                            MismatchedBlock
+                        ErrorMakingEdit err ->
+                            ErrorMakingEdit err
 
                 otherwise ->
                     otherwise
@@ -716,8 +727,8 @@ makeEdit cursor desc =
                         NoIdFound ->
                             NoIdFound
 
-                        MismatchedBlock ->
-                            MismatchedBlock
+                        ErrorMakingEdit err ->
+                            ErrorMakingEdit err
 
                 otherwise ->
                     otherwise
@@ -756,8 +767,8 @@ editListNested cursor lsNested =
                         , pushNested maybePush foundChild :: pastChildren
                         )
 
-                    MismatchedBlock ->
-                        ( MismatchedBlock
+                    ErrorMakingEdit err ->
+                        ( ErrorMakingEdit err
                         , foundChild :: pastChildren
                         )
 
@@ -768,8 +779,8 @@ editListNested cursor lsNested =
                                 , foundChild :: pastChildren
                                 )
 
-                            MismatchedBlock ->
-                                ( MismatchedBlock
+                            ErrorMakingEdit err ->
+                                ( ErrorMakingEdit err
                                 , foundChild :: pastChildren
                                 )
 
@@ -832,8 +843,8 @@ editFields cursor fields =
                             , field :: pastFields
                             )
 
-                        MismatchedBlock ->
-                            ( MismatchedBlock
+                        ErrorMakingEdit err ->
+                            ( ErrorMakingEdit err
                             , field :: pastFields
                             )
 
@@ -842,8 +853,8 @@ editFields cursor fields =
                             , ( fieldName, newField ) :: pastFields
                             )
 
-                MismatchedBlock ->
-                    ( MismatchedBlock
+                ErrorMakingEdit err ->
+                    ( ErrorMakingEdit err
                     , field :: pastFields
                     )
     in
@@ -869,8 +880,8 @@ editMany fn pusher cursor manyItems =
                         , pusher maybePush node :: pastChildren
                         )
 
-                    MismatchedBlock ->
-                        ( MismatchedBlock
+                    ErrorMakingEdit err ->
+                        ( ErrorMakingEdit err
                         , node :: pastChildren
                         )
 
@@ -886,8 +897,8 @@ editMany fn pusher cursor manyItems =
                                 , node :: pastChildren
                                 )
 
-                            MismatchedBlock ->
-                                ( MismatchedBlock
+                            ErrorMakingEdit err ->
+                                ( ErrorMakingEdit err
                                 , node :: pastChildren
                                 )
             )
