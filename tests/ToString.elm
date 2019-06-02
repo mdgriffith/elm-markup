@@ -334,9 +334,6 @@ edits =
             , test "Insert at 1" <|
                 \_ ->
                     let
-                        _ =
-                            Debug.log "doc" threeHellos
-
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
