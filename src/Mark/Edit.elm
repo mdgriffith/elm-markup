@@ -181,33 +181,12 @@ addStyles id start end styles =
     StyleText id start end (AddStyle styles)
 
 
-prepareResults doc original ( edited, newDescription ) =
-    case edited of
-        NoEditMade ->
-            Err [ Error.idNotFound ]
-
-        YesEditMade _ ->
-            let
-                newParsed =
-                    Parsed { original | found = newDescription }
-            in
-            case Desc.render doc newParsed of
-                Outcome.Success _ ->
-                    Ok newParsed
-
-                Outcome.Almost details ->
-                    Err details.errors
-
-                Outcome.Failure errs ->
-                    Err errs
-
-
 editAtId id fn indentation pos desc =
     if Desc.getId desc == id then
         fn indentation pos desc
 
     else
-        Nothing
+        NoIdFound
 
 
 {-| Set the content of the current block
@@ -225,18 +204,18 @@ replaceOption id new desc =
             in
             case one.child of
                 Found range val ->
-                    Just
-                        ( minusSize newSize existingSize
+                    EditMade
+                        (minusSize newSize existingSize
                             |> sizeToPush
-                        , OneOf { one | child = Found range new }
                         )
+                        (OneOf { one | child = Found range new })
 
                 Unexpected unexpected ->
-                    Just
-                        ( minusSize newSize existingSize
+                    EditMade
+                        (minusSize newSize existingSize
                             |> sizeToPush
-                        , OneOf { one | child = Found unexpected.range new }
                         )
+                        (OneOf { one | child = Found unexpected.range new })
 
         _ ->
             let
@@ -246,11 +225,11 @@ replaceOption id new desc =
                 existingSize =
                     getSize desc
             in
-            Just
-                ( minusSize newSize existingSize
+            EditMade
+                (minusSize newSize existingSize
                     |> sizeToPush
-                , new
                 )
+                new
 
 
 sizeToPush size =
@@ -268,16 +247,16 @@ makeDeleteBlock id index indentation pos desc =
                 cleaned =
                     removeByIndex index many.children
             in
-            Just
-                ( cleaned.push
-                , ManyOf
+            EditMade
+                cleaned.push
+                (ManyOf
                     { many
                         | children = List.reverse cleaned.items
                     }
                 )
 
         _ ->
-            Nothing
+            MismatchedBlock
 
 
 {-| -}
@@ -302,7 +281,7 @@ update doc edit (Parsed original) =
                                 replaceOption id created.desc desc
 
                             else
-                                Nothing
+                                MismatchedBlock
 
                 InsertAt id index new ->
                     editAtId id <|
@@ -319,9 +298,9 @@ update doc edit (Parsed original) =
                                                     many
                                                     new
                                         in
-                                        Just
-                                            ( pushed
-                                            , ManyOf
+                                        EditMade
+                                            pushed
+                                            (ManyOf
                                                 { many
                                                     | children =
                                                         newChildren
@@ -329,12 +308,13 @@ update doc edit (Parsed original) =
                                             )
 
                                     else
-                                        Nothing
+                                        -- TODO: We're trying to insert an invalid block
+                                        MismatchedBlock
 
                                 _ ->
                                     -- inserts only work for
                                     -- `ManyOf`, `Tree`, and `Text`
-                                    Nothing
+                                    MismatchedBlock
 
                 Delete id index ->
                     editAtId id
@@ -357,14 +337,14 @@ update doc edit (Parsed original) =
                                                 |> .elements
                                                 |> List.foldl mergeStyles []
                                     in
-                                    Just
-                                        ( Just (pushNewTexts details.text newTexts)
-                                        , DescribeText
+                                    EditMade
+                                        (Just (pushNewTexts details.text newTexts))
+                                        (DescribeText
                                             { details | text = newTexts }
                                         )
 
                                 _ ->
-                                    Nothing
+                                    MismatchedBlock
                         )
 
                 Annotate id start end wrapper ->
@@ -419,14 +399,12 @@ update doc edit (Parsed original) =
                                                 |> .elements
                                                 |> List.foldl mergeStyles []
                                     in
-                                    Just
-                                        ( Just (pushNewTexts details.text newTexts)
-                                        , DescribeText
-                                            { details | text = newTexts }
-                                        )
+                                    EditMade
+                                        (Just (pushNewTexts details.text newTexts))
+                                        (DescribeText { details | text = newTexts })
 
                                 _ ->
-                                    Nothing
+                                    MismatchedBlock
                         )
 
                 ReplaceSelection id start end newTextEls ->
@@ -451,14 +429,12 @@ update doc edit (Parsed original) =
                                                 |> .elements
                                                 |> List.foldl mergeStyles []
                                     in
-                                    Just
-                                        ( Just (pushNewTexts details.text newTexts)
-                                        , DescribeText
-                                            { details | text = newTexts }
-                                        )
+                                    EditMade
+                                        (Just (pushNewTexts details.text newTexts))
+                                        (DescribeText { details | text = newTexts })
 
                                 _ ->
-                                    Nothing
+                                    MismatchedBlock
                         )
     in
     original.found
@@ -467,6 +443,30 @@ update doc edit (Parsed original) =
             , indentation = 0
             }
         |> prepareResults doc original
+
+
+prepareResults doc original edited =
+    case edited of
+        NoIdFound ->
+            Err [ Error.idNotFound ]
+
+        MismatchedBlock ->
+            Err [ Error.idNotFound ]
+
+        EditMade maybePush newDescription ->
+            let
+                newParsed =
+                    Parsed { original | found = newDescription }
+            in
+            case Desc.render doc newParsed of
+                Outcome.Success _ ->
+                    Ok newParsed
+
+                Outcome.Almost details ->
+                    Err details.errors
+
+                Outcome.Failure errs ->
+                    Err errs
 
 
 pushNewTexts existing new =
@@ -492,7 +492,7 @@ type alias EditCursor =
     -- An edit takes the indentation level
     -- , the last reference position
     -- and the current description
-    { makeEdit : Int -> Position -> Description -> Maybe ( Push, Description )
+    { makeEdit : Int -> Position -> Description -> EditOutcome Description
     , indentation : Int
     }
 
@@ -507,263 +507,292 @@ type alias Size =
     }
 
 
-type EditMade
-    = YesEditMade Push
-    | NoEditMade
+type EditOutcome desc
+    = MismatchedBlock
+    | EditMade Push desc
+    | NoIdFound
+
+
+mapEdit fn edit =
+    case edit of
+        MismatchedBlock ->
+            MismatchedBlock
+
+        EditMade maybePush desc ->
+            EditMade maybePush (fn desc)
+
+        NoIdFound ->
+            NoIdFound
 
 
 {-| -}
-makeFoundEdit : EditCursor -> Found Description -> ( EditMade, Found Description )
+makeFoundEdit : EditCursor -> Found Description -> EditOutcome (Found Description)
 makeFoundEdit cursor foundDesc =
     case foundDesc of
         Found range desc ->
-            case cursor.makeEdit cursor.indentation range.start desc of
-                Nothing ->
-                    makeEdit cursor desc
-                        |> Tuple.mapSecond (Found range)
+            -- case cursor.makeEdit cursor.indentation range.start desc of
+            --     NoIdFound ->
+            makeEdit cursor desc
+                |> mapEdit (Found range)
 
-                Just ( maybePush, newDesc ) ->
-                    ( YesEditMade maybePush, Found range newDesc )
-
+        -- otherwise ->
+        -- otherwise
         Unexpected unexpected ->
-            ( NoEditMade, foundDesc )
-
-
-increaseIndent x =
-    { x | indentation = x.indentation + 1 }
+            NoIdFound
 
 
 {-| -}
-makeEdit : EditCursor -> Description -> ( EditMade, Description )
+makeEdit : EditCursor -> Description -> EditOutcome Description
 makeEdit cursor desc =
     case desc of
         DescribeBlock details ->
             case cursor.makeEdit cursor.indentation (foundStart details.found) desc of
-                Just ( maybePush, newDesc ) ->
-                    -- replace current description
-                    ( YesEditMade maybePush, newDesc )
-
-                Nothing ->
+                NoIdFound ->
                     -- dive further
-                    makeFoundEdit (increaseIndent cursor) details.found
-                        |> (\( editMade, newFound ) ->
-                                case editMade of
-                                    NoEditMade ->
-                                        ( NoEditMade, desc )
+                    case makeFoundEdit (increaseIndent cursor) details.found of
+                        EditMade maybePush newFound ->
+                            EditMade maybePush
+                                (DescribeBlock
+                                    { details
+                                        | found = newFound
+                                    }
+                                )
 
-                                    YesEditMade maybePush ->
-                                        ( YesEditMade maybePush
-                                        , DescribeBlock
-                                            { details
-                                                | found = newFound
-                                            }
-                                        )
-                           )
+                        NoIdFound ->
+                            NoIdFound
+
+                        MismatchedBlock ->
+                            MismatchedBlock
+
+                otherwise ->
+                    otherwise
 
         Record details ->
             case cursor.makeEdit (cursor.indentation + 1) (foundStart details.found) desc of
-                Just ( maybePush, newDesc ) ->
-                    -- replace current description
-                    ( YesEditMade maybePush, newDesc )
-
-                Nothing ->
+                NoIdFound ->
                     case details.found of
-                        Found rng fields ->
-                            let
-                                ( fieldsEdited, updatedFields ) =
-                                    List.foldl
-                                        (\(( fieldName, foundField ) as field) ( editMade, pastFields ) ->
-                                            case editMade of
-                                                YesEditMade maybePush ->
-                                                    ( editMade
-                                                    , ( fieldName
-                                                      , case maybePush of
-                                                            Nothing ->
-                                                                foundField
-
-                                                            Just to ->
-                                                                pushFound to foundField
-                                                      )
-                                                        :: pastFields
-                                                    )
-
-                                                NoEditMade ->
-                                                    case makeFoundEdit (increaseIndent (increaseIndent cursor)) foundField of
-                                                        ( NoEditMade, _ ) ->
-                                                            ( NoEditMade, field :: pastFields )
-
-                                                        ( YesEditMade maybePush, newField ) ->
-                                                            ( YesEditMade maybePush
-                                                            , ( fieldName, newField ) :: pastFields
-                                                            )
-                                        )
-                                        ( NoEditMade, [] )
-                                        fields
-                            in
-                            case fieldsEdited of
-                                NoEditMade ->
-                                    ( NoEditMade, desc )
-
-                                YesEditMade maybePush ->
-                                    ( YesEditMade maybePush
-                                    , Record
-                                        { details
-                                            | found =
-                                                Found (expandRange maybePush rng)
-                                                    (List.reverse updatedFields)
-                                        }
-                                    )
-
                         Unexpected unexpected ->
-                            ( NoEditMade, desc )
+                            NoIdFound
+
+                        Found rng fields ->
+                            case editFields (increaseIndent (increaseIndent cursor)) fields of
+                                EditMade maybePush updatedFields ->
+                                    EditMade maybePush
+                                        (Record
+                                            { details
+                                                | found =
+                                                    Found (expandRange maybePush rng)
+                                                        updatedFields
+                                            }
+                                        )
+
+                                NoIdFound ->
+                                    NoIdFound
+
+                                MismatchedBlock ->
+                                    MismatchedBlock
+
+                otherwise ->
+                    otherwise
 
         OneOf details ->
             case cursor.makeEdit cursor.indentation (foundStart details.child) desc of
-                Just ( maybePush, newDesc ) ->
-                    -- replace current description
-                    ( YesEditMade maybePush
-                    , newDesc
-                    )
-
-                Nothing ->
+                NoIdFound ->
                     -- dive further
-                    makeFoundEdit (increaseIndent cursor) details.child
-                        |> (\( editMade, newFound ) ->
-                                case editMade of
-                                    NoEditMade ->
-                                        ( NoEditMade, desc )
+                    case makeFoundEdit (increaseIndent cursor) details.child of
+                        EditMade maybePush newFound ->
+                            EditMade maybePush
+                                (OneOf
+                                    { details
+                                        | child = expandFound maybePush newFound
+                                    }
+                                )
 
-                                    YesEditMade maybePush ->
-                                        ( YesEditMade maybePush
-                                        , OneOf
-                                            { details
-                                                | child = expandFound maybePush newFound
-                                            }
-                                        )
-                           )
+                        NoIdFound ->
+                            NoIdFound
+
+                        MismatchedBlock ->
+                            MismatchedBlock
+
+                otherwise ->
+                    otherwise
 
         ManyOf many ->
             case cursor.makeEdit cursor.indentation many.range.start desc of
-                Just ( maybePush, newDesc ) ->
-                    -- replace current description
-                    ( YesEditMade maybePush, newDesc )
-
-                Nothing ->
+                NoIdFound ->
                     -- dive further
-                    let
-                        ( childrenEdited, updatedChildren ) =
-                            editMany makeFoundEdit push cursor many.children
-                    in
-                    case childrenEdited of
-                        NoEditMade ->
-                            ( NoEditMade, desc )
+                    case editMany makeFoundEdit push cursor many.children of
+                        EditMade maybePush updatedChildren ->
+                            EditMade maybePush
+                                (ManyOf
+                                    { many
+                                        | children =
+                                            updatedChildren
+                                        , range =
+                                            case maybePush of
+                                                Nothing ->
+                                                    many.range
 
-                        YesEditMade maybePush ->
-                            ( childrenEdited
-                            , ManyOf
-                                { many
-                                    | children =
-                                        updatedChildren
-                                    , range =
-                                        case maybePush of
-                                            Nothing ->
-                                                many.range
+                                                Just p ->
+                                                    pushRange p many.range
+                                    }
+                                )
 
-                                            Just p ->
-                                                pushRange p many.range
-                                }
-                            )
+                        NoIdFound ->
+                            NoIdFound
+
+                        MismatchedBlock ->
+                            MismatchedBlock
+
+                otherwise ->
+                    otherwise
 
         StartsWith details ->
-            let
-                ( firstEdited, firstUpdated ) =
-                    makeEdit cursor details.first.found
-            in
-            case firstEdited of
-                NoEditMade ->
-                    let
-                        ( secondEdited, secondUpdated ) =
-                            makeEdit cursor details.second.found
-                    in
-                    case secondEdited of
-                        NoEditMade ->
-                            ( NoEditMade, desc )
+            case makeEdit cursor details.first.found of
+                NoIdFound ->
+                    case makeEdit cursor details.second.found of
+                        EditMade maybePush secondUpdated ->
+                            EditMade maybePush
+                                (StartsWith
+                                    { range = expandRange maybePush details.range
+                                    , id = details.id
+                                    , first = details.first
+                                    , second =
+                                        details.second
+                                            |> (\snd ->
+                                                    { snd | found = secondUpdated }
+                                               )
+                                    }
+                                )
 
-                        YesEditMade maybePush ->
-                            ( YesEditMade maybePush
-                            , StartsWith
-                                { range = details.range
-                                , id = details.id
-                                , first = details.first
-                                , second =
-                                    details.second
-                                        |> (\snd ->
-                                                { snd | found = secondUpdated }
-                                           )
+                        otherwise ->
+                            otherwise
+
+                EditMade maybePush firstUpdated ->
+                    EditMade maybePush
+                        (StartsWith
+                            { range = expandRange maybePush details.range
+                            , id = details.id
+                            , second =
+                                { expected = details.second.expected
+                                , found =
+                                    case maybePush of
+                                        Nothing ->
+                                            details.second.found
+
+                                        Just p ->
+                                            pushDescription p details.second.found
                                 }
-                            )
+                            , first =
+                                details.first
+                                    |> (\fst ->
+                                            { fst | found = firstUpdated }
+                                       )
+                            }
+                        )
 
-                YesEditMade maybePush ->
-                    ( YesEditMade maybePush
-                    , StartsWith
-                        { range = details.range
-                        , id = details.id
-                        , second = details.second
-                        , first =
-                            details.first
-                                |> (\fst ->
-                                        { fst | found = firstUpdated }
-                                   )
-                        }
-                    )
+                otherwise ->
+                    otherwise
 
         DescribeTree details ->
-            let
-                ( treeEdited, newChildren ) =
-                    editListNested cursor details.children
-            in
-            case treeEdited of
-                NoEditMade ->
-                    ( treeEdited, desc )
+            case cursor.makeEdit cursor.indentation details.range.start desc of
+                NoIdFound ->
+                    case editListNested cursor details.children of
+                        EditMade maybePush newChildren ->
+                            EditMade maybePush
+                                (DescribeTree
+                                    { details
+                                        | children = newChildren
+                                        , range =
+                                            case maybePush of
+                                                Nothing ->
+                                                    details.range
 
-                YesEditMade maybePush ->
-                    ( treeEdited
-                    , DescribeTree
-                        { details
-                            | children = newChildren
-                            , range =
-                                case maybePush of
-                                    Nothing ->
-                                        details.range
+                                                Just p ->
+                                                    pushRange p details.range
+                                    }
+                                )
 
-                                    Just p ->
-                                        pushRange p details.range
-                        }
-                    )
+                        NoIdFound ->
+                            NoIdFound
+
+                        MismatchedBlock ->
+                            MismatchedBlock
+
+                otherwise ->
+                    otherwise
 
         -- Primitives
         DescribeBoolean details ->
-            replacePrimitive cursor (foundStart details.found) desc
+            cursor.makeEdit cursor.indentation (foundStart details.found) desc
 
         DescribeInteger found ->
-            replacePrimitive cursor (foundStart found.found) desc
+            cursor.makeEdit cursor.indentation (foundStart found.found) desc
 
         DescribeFloat found ->
-            replacePrimitive cursor (foundStart found.found) desc
+            cursor.makeEdit cursor.indentation (foundStart found.found) desc
 
         DescribeText txt ->
-            replacePrimitive cursor (.start txt.range) desc
+            cursor.makeEdit cursor.indentation (.start txt.range) desc
 
         DescribeString id range str ->
-            replacePrimitive cursor range.start desc
+            cursor.makeEdit cursor.indentation range.start desc
 
         DescribeNothing _ ->
-            ( NoEditMade, desc )
+            NoIdFound
+
+
+editListNested cursor lsNested =
+    let
+        indentedCursor =
+            increaseIndent cursor
+    in
+    lsNested
+        |> List.foldl
+            (\foundChild ( editMade, pastChildren ) ->
+                case editMade of
+                    EditMade maybePush _ ->
+                        ( editMade
+                        , pushNested maybePush foundChild :: pastChildren
+                        )
+
+                    MismatchedBlock ->
+                        ( MismatchedBlock
+                        , foundChild :: pastChildren
+                        )
+
+                    NoIdFound ->
+                        case editNested indentedCursor foundChild of
+                            NoIdFound ->
+                                ( NoIdFound
+                                , foundChild :: pastChildren
+                                )
+
+                            MismatchedBlock ->
+                                ( MismatchedBlock
+                                , foundChild :: pastChildren
+                                )
+
+                            EditMade maybePush newChild ->
+                                ( EditMade maybePush []
+                                , newChild :: pastChildren
+                                )
+            )
+            ( NoIdFound, [] )
+        |> (\( editMade, updatedList ) ->
+                case editMade of
+                    EditMade maybePush _ ->
+                        EditMade maybePush (List.reverse updatedList)
+
+                    otherwise ->
+                        otherwise
+           )
 
 
 editNested cursor (Nested nestedDetails) =
     let
-        ( contentEdited, newContent ) =
+        -- TODO: This code doesn't look like it's hooked up!
+        _ =
             editMany makeEdit
                 (\maybePush desc ->
                     case maybePush of
@@ -779,32 +808,55 @@ editNested cursor (Nested nestedDetails) =
     editListNested cursor nestedDetails.children
 
 
-editListNested cursor lsNested =
+editFields cursor fields =
     let
-        indentedCursor =
-            increaseIndent cursor
+        makeFieldEdit (( fieldName, foundField ) as field) ( editMade, pastFields ) =
+            case editMade of
+                EditMade maybePush ls ->
+                    ( EditMade maybePush ls
+                    , ( fieldName
+                      , case maybePush of
+                            Nothing ->
+                                foundField
+
+                            Just to ->
+                                pushFound to foundField
+                      )
+                        :: pastFields
+                    )
+
+                NoIdFound ->
+                    case makeFoundEdit cursor foundField of
+                        NoIdFound ->
+                            ( NoIdFound
+                            , field :: pastFields
+                            )
+
+                        MismatchedBlock ->
+                            ( MismatchedBlock
+                            , field :: pastFields
+                            )
+
+                        EditMade maybePush newField ->
+                            ( EditMade maybePush []
+                            , ( fieldName, newField ) :: pastFields
+                            )
+
+                MismatchedBlock ->
+                    ( MismatchedBlock
+                    , field :: pastFields
+                    )
     in
-    lsNested
-        |> List.foldl
-            (\foundChild ( editMade, pastChildren ) ->
+    fields
+        |> List.foldl makeFieldEdit ( NoIdFound, [] )
+        |> (\( editMade, updatedList ) ->
                 case editMade of
-                    YesEditMade maybePush ->
-                        ( editMade
-                        , pushNested maybePush foundChild :: pastChildren
-                        )
+                    EditMade maybePush _ ->
+                        EditMade maybePush (List.reverse updatedList)
 
-                    NoEditMade ->
-                        case editNested indentedCursor foundChild of
-                            ( NoEditMade, _ ) ->
-                                ( NoEditMade, foundChild :: pastChildren )
-
-                            ( YesEditMade maybePush, newChild ) ->
-                                ( YesEditMade maybePush
-                                , newChild :: pastChildren
-                                )
-            )
-            ( NoEditMade, [] )
-        |> Tuple.mapSecond List.reverse
+                    otherwise ->
+                        otherwise
+           )
 
 
 editMany fn pusher cursor manyItems =
@@ -812,23 +864,46 @@ editMany fn pusher cursor manyItems =
         |> List.foldl
             (\node ( editMade, pastChildren ) ->
                 case editMade of
-                    YesEditMade maybePush ->
+                    EditMade maybePush _ ->
                         ( editMade
                         , pusher maybePush node :: pastChildren
                         )
 
-                    NoEditMade ->
-                        case fn (increaseIndent (increaseIndent cursor)) node of
-                            ( NoEditMade, _ ) ->
-                                ( NoEditMade, node :: pastChildren )
+                    MismatchedBlock ->
+                        ( MismatchedBlock
+                        , node :: pastChildren
+                        )
 
-                            ( YesEditMade maybePush, newChild ) ->
-                                ( YesEditMade maybePush
+                    NoIdFound ->
+                        case fn (increaseIndent (increaseIndent cursor)) node of
+                            EditMade maybePush newChild ->
+                                ( EditMade maybePush []
                                 , newChild :: pastChildren
                                 )
+
+                            NoIdFound ->
+                                ( NoIdFound
+                                , node :: pastChildren
+                                )
+
+                            MismatchedBlock ->
+                                ( MismatchedBlock
+                                , node :: pastChildren
+                                )
             )
-            ( NoEditMade, [] )
-        |> Tuple.mapSecond List.reverse
+            ( NoIdFound, [] )
+        |> (\( editMade, updatedList ) ->
+                case editMade of
+                    EditMade maybePush _ ->
+                        EditMade maybePush (List.reverse updatedList)
+
+                    otherwise ->
+                        otherwise
+           )
+
+
+increaseIndent x =
+    { x | indentation = x.indentation + 1 }
 
 
 foundStart found =
@@ -838,16 +913,6 @@ foundStart found =
 
         Unexpected unexpected ->
             unexpected.range.start
-
-
-replacePrimitive cursor startingPos desc =
-    case cursor.makeEdit cursor.indentation startingPos desc of
-        Just ( maybePush, newDesc ) ->
-            -- replace current description
-            ( YesEditMade maybePush, newDesc )
-
-        Nothing ->
-            ( NoEditMade, desc )
 
 
 removeByIndex index list =
