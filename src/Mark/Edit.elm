@@ -309,7 +309,7 @@ update doc edit (Parsed original) =
                         \indentation pos desc ->
                             case desc of
                                 ManyOf many ->
-                                    if Desc.match desc new then
+                                    if List.any (matchExpected new) many.choices then
                                         let
                                             ( pushed, newChildren ) =
                                                 makeInsertAt
