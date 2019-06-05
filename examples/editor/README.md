@@ -39,7 +39,7 @@ I've tried ranking the estimated difficulty.
    1. Look up a range of boxes between two points.
       1. Subsequent lookups are likely near each other. 
    2. Be updated/recreated incrementally
-5. `involved` - consider adopting an incremental strategy for rescanning the document (`Ports.send Ports.Rescan`).  Depends on `3.`
+5. `involved` - consider adopting an incremental strategy for rescanning the document (`Ports.send Ports.Rescan`).  Depends on `4.`
    - Just rescan what's needed.
    - Incrementally update `model.characterLayout`.
 6. `?` - Expand the UI of the editor to allow inserting `Mark.Block`s, such as images. 
