@@ -34,8 +34,8 @@ I've tried ranking the estimated difficulty.
 
 1. `easy` - `Shift + Arrow` should expand the selection range
 2. `easy` - Resizing the window messes up the `Charlayout`.  I think we'd want to make it so that the `Charlayout` is not affected by window size instead of just rescanning the document on `Browser.Event.onResize`
-3. `medium` - The text selection highlight should be rendered as one single polyline in Svg instead of a bunch of text boxes.  This will likely improve performance a bit as well. Ideally we'd like it to have the standard shape of a text selection. I think capturing multiple paragraphs might be a little tricky, but who knows!
-4. `involved` - The `Selection.CharLayout` data structure could use some love.  My suspicion is that it's slow for larger documents.  It's a bounding box for every character after all. So, after writing a few benchmarks to see if/when it's actually an issue, the data structure likely needs to:
+3. `medium` - The text selection highlight should be rendered as one single polyline in Svg instead of a bunch of text boxes.  This will likely improve performance a bit as well. Ideally we'd like it to have the standard shape of a text selection. I think capturing multiple paragraphs might be a little tricky, but who knows!  Check out [MakePad](https://makepad.github.io/makepad/) for an example of a single "blob" shape for text selection.
+4. `involved` - The `Selection.CharLayout` data structure could use some love.  My suspicion is that it's slow for larger documents.  It's a bounding box for every character after all. So, *after writing a few benchmarks to see if/when it's actually an issue*, the data structure likely needs to:
    1. Look up a range of boxes between two points.
       1. Subsequent lookups are likely near each other. 
    2. Be updated/recreated incrementally
