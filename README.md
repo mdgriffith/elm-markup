@@ -1,8 +1,8 @@
-# A Markup for Elm!
+# A Markup that's best friends with Elm!
 
 Elm Markup is a markup language that integrates closely with Elm.
 
-You describe your document and then having a parser that can parse that document or hand you nice error messages.
+You describe your document and get a parser that can parse that document or hand you nice error messages.
 
 ![Syntax Highlighted Elm Markup](https://github.com/mdgriffith/elm-markup/blob/master/examples/highlighted-code-small.png?raw=true)
 
