@@ -23,7 +23,7 @@ Once you have those you can [`update`](#update) your document, which can succeed
 
 # Text Edits
 
-Here are edits you cna make against [`Mark.text`](Mark#text) and [`Mark.textWith`](Mark#textWith) blocks.
+Here are edits you can make against [`Mark.text`](Mark#text) and [`Mark.textWith`](Mark#textWith) blocks.
 
 **Note** These edits don't apply to [`Mark.string`](Mark#string). If you want to modify a `Mark.string`, use [`Mark.Edit.replace`](Mark-Edit#replace).
 
