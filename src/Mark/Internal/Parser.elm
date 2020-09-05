@@ -449,10 +449,9 @@ styledText options context seed startingPos inheritedStyles until =
         meaningful =
             '1' :: '\\' :: '\n' :: until ++ stylingChars ++ replacementStartingChars options.replacements
 
+        -- Note #1 : We're conting on the caller of styled text to advance the seed for us.
         ( newId, newSeed ) =
             Id.step seed
-
-        -- TODO: return new seed!
     in
     Parser.oneOf
         [ Parser.map
@@ -1404,6 +1403,7 @@ makeBlocksParser blocks seed =
 type alias NestedIndex =
     { base : Int
     , prev : Int
+    , seed : Id.Seed
     }
 
 
@@ -1429,11 +1429,10 @@ type alias FlatCursor =
 -}
 indentedBlocksOrNewlines :
     ParseContext
-    -> Id.Seed
     -> Block thing
     -> ( NestedIndex, List FlatCursor )
     -> Parser Context Problem (Parser.Step ( NestedIndex, List FlatCursor ) (List FlatCursor))
-indentedBlocksOrNewlines context seed item ( indentation, existing ) =
+indentedBlocksOrNewlines context item ( indentation, existing ) =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -1449,8 +1448,19 @@ indentedBlocksOrNewlines context seed item ( indentation, existing ) =
                 |> Parser.andThen
                     (\newIndent ->
                         let
+                            newSeed =
+                                if newIndent > indentation.prev then
+                                    Id.indent indentation.seed
+
+                                else if newIndent == indentation.prev then
+                                    Id.step indentation.seed
+                                        |> Tuple.second
+
+                                else
+                                    Id.dedent ((indentation.prev - newIndent) // 4) indentation.seed
+
                             ( itemSeed, itemParser ) =
-                                getParser context seed item
+                                getParser context newSeed item
                         in
                         -- If the indent has changed, then the delimiter is required
                         Parser.withIndent newIndent <|
@@ -1460,6 +1470,8 @@ indentedBlocksOrNewlines context seed item ( indentation, existing ) =
                                         let
                                             newIndex =
                                                 { prev = newIndent
+                                                , seed =
+                                                    newSeed
                                                 , base = indentation.base
                                                 }
                                         in
@@ -1482,6 +1494,7 @@ indentedBlocksOrNewlines context seed item ( indentation, existing ) =
                                                         let
                                                             newIndex =
                                                                 { prev = indentation.prev
+                                                                , seed = newSeed
                                                                 , base = indentation.base
                                                                 }
                                                         in

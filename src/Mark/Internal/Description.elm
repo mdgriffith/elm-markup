@@ -1662,7 +1662,7 @@ create current =
                     Id.step newSeed
 
                 reseeded =
-                    Id.reseed childStart
+                    Id.indent childStart
 
                 ( finalSeed, lastPos, children ) =
                     List.foldl

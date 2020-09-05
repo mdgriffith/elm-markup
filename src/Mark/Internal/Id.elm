@@ -1,9 +1,10 @@
 module Mark.Internal.Id exposing
     ( Id(..)
     , Seed
+    , dedent
     , fromString
+    , indent
     , initialSeed
-    , reseed
     , step
     , thread
     , threadThrough
@@ -20,11 +21,11 @@ initialSeed =
 
 {-| We might want to move to a list based ID.
 
-So, when we `reseed`, we're actually adding a level.
+So, when we `indent`, we're actually adding a level.
 
     Seed [0]
 
-    Seed [1] --reseed -> Seed [1, 0]
+    Seed [1] --indent -> Seed [1, 0]
                             |
                             v
                          Seed [1, 1]
@@ -33,6 +34,17 @@ So, when we `reseed`, we're actually adding a level.
     Seed [2]
 
 Is there a performance issue with allocating a bunch of lists intead of base Ints?
+
+A very common pattern is to
+
+    1. step a seed forward and pass that seed for the next block
+    2. indent the same original seed, and pass that to the children
+
+So
+
+    [0]
+        -> stepped [1]  (goes to next element by handing the seed back in the parser)
+        -> indented [0,0] (handed to child parser to go nuts with)
 
 -}
 type Seed
@@ -64,9 +76,15 @@ fromString str =
 
 
 {-| -}
-reseed : Seed -> Seed
-reseed (Seed seed) =
+indent : Seed -> Seed
+indent (Seed seed) =
     Seed (0 :: seed)
+
+
+{-| -}
+dedent : Int -> Seed -> Seed
+dedent num (Seed seed) =
+    Seed (List.drop num seed)
 
 
 step : Seed -> ( Id, Seed )

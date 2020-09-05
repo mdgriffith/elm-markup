@@ -703,10 +703,10 @@ block name view child =
             \context seed ->
                 let
                     ( newSeed, childParser ) =
-                        getParser context seed child
+                        getParser context (Id.indent seed) child
 
                     ( parentId, finalSeed ) =
-                        Id.step newSeed
+                        Id.step seed
                 in
                 ( finalSeed
                 , Parser.map
@@ -947,14 +947,8 @@ manyOf blocks =
                 let
                     ( parentId, newSeed ) =
                         Id.step seed
-
-                    ( _, childStart ) =
-                        Id.step newSeed
-
-                    reseeded =
-                        Id.reseed childStart
                 in
-                ( reseeded
+                ( newSeed
                 , Parser.succeed
                     (\( range, results ) ->
                         ManyOf
@@ -970,7 +964,8 @@ manyOf blocks =
                                 Parser.loop
                                     { parsedSomething = False
                                     , found = []
-                                    , seed = childStart
+                                    , seed =
+                                        seed
                                     }
                                     (Parse.blocksOrNewlines indentation blocks)
                             )
@@ -1173,10 +1168,10 @@ tree name view contentBlock =
                     ( newId, newSeed ) =
                         Id.step seed
 
-                    reseeded =
-                        Id.reseed newSeed
+                    indentedSeed =
+                        Id.indent seed
                 in
-                ( reseeded
+                ( newSeed
                 , Parse.withIndent
                     (\baseIndent ->
                         Parser.succeed identity
@@ -1199,12 +1194,12 @@ tree name view contentBlock =
                                     (Parser.loop
                                         ( { base = baseIndent + 4
                                           , prev = baseIndent + 4
+                                          , seed = indentedSeed
                                           }
                                         , []
                                         )
                                         (Parse.indentedBlocksOrNewlines
                                             ParseInTree
-                                            seed
                                             contentBlock
                                         )
                                     )
@@ -1432,13 +1427,12 @@ textWith options =
         , parser =
             \context seed ->
                 let
+                    -- Note #1 - seed for styled text is advanced here
+                    --  instead of within the styledText parser
                     ( _, newSeed ) =
                         Id.step seed
-
-                    ( _, returnSeed ) =
-                        Id.step newSeed
                 in
-                ( returnSeed
+                ( newSeed
                 , Parse.getPosition
                     |> Parser.andThen
                         (\pos ->
@@ -1447,7 +1441,7 @@ textWith options =
                                 , replacements = options.replacements
                                 }
                                 context
-                                newSeed
+                                seed
                                 pos
                                 emptyStyles
                                 []
@@ -1486,7 +1480,7 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
                         Id.step seed
 
                     ( newSeed, fields ) =
-                        Id.thread parentSeed (List.foldl (\f ls -> f ParseInline :: ls) [] details.fields)
+                        Id.thread (Id.indent seed) (List.foldl (\f ls -> f ParseInline :: ls) [] details.fields)
                 in
                 ( newSeed
                 , Parse.record Parse.InlineRecord
@@ -2270,7 +2264,8 @@ toBlock (Desc.ProtoRecord details) =
                         Id.step seed
 
                     ( newSeed, fields ) =
-                        Id.thread parentSeed (List.foldl (\f ls -> f ParseBlock :: ls) [] details.fields)
+                        Id.thread (Id.indent seed)
+                            (List.foldl (\f ls -> f ParseBlock :: ls) [] details.fields)
                 in
                 ( newSeed
                 , Parse.record Parse.BlockRecord
