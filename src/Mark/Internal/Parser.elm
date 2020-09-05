@@ -1453,11 +1453,22 @@ indentedBlocksOrNewlines context item ( indentation, existing ) =
                                     Id.indent indentation.seed
 
                                 else if newIndent == indentation.prev then
-                                    Id.step indentation.seed
-                                        |> Tuple.second
+                                    -- This may look weird
+                                    -- but this loop is started with an indented id, which should be unique.
+                                    -- Therefore we only need to increment it after the first thing found
+                                    case existing of
+                                        [] ->
+                                            indentation.seed
+
+                                        _ ->
+                                            Id.step indentation.seed
+                                                |> Tuple.second
 
                                 else
                                     Id.dedent ((indentation.prev - newIndent) // 4) indentation.seed
+                                        -- we're back in old land, so we have to increment to avoid a collision
+                                        |> Id.step
+                                        |> Tuple.second
 
                             ( itemSeed, itemParser ) =
                                 getParser context newSeed item
