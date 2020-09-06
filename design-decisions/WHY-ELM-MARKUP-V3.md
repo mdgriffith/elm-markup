@@ -15,7 +15,7 @@ Well, I gave a talk at [Oslo Elm Day](https://www.youtube.com/watch?v=8Zd3ocr9Di
 
 But to give a brief-ish summary:
 
-1. Elm Markup is a lightweight markup langauge where the structure is defined beforehand.
+1. Elm Markup is a lightweight markup language where the structure is defined beforehand.
 2. You define your document in Elm in a similar way you'd define a JSON decoder.
 3. Once defined, you can parse the markup and get a rendered result (which could be html, `elm-ui` Elements, or even just a list of records)
 
