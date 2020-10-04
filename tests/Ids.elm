@@ -191,33 +191,32 @@ toResult doc src =
 
 
 suite =
-    only <|
-        describe "ID handling"
-            [ test "IDs are not duplicated" <|
-                \_ ->
-                    case toResult sectionDoc doc1 of
-                        Err errs ->
-                            let
-                                _ =
-                                    Debug.log "error" errs
-                            in
-                            Expect.fail "Document failed to parse for tests"
+    describe "ID handling"
+        [ test "IDs are not duplicated" <|
+            \_ ->
+                case toResult sectionDoc doc1 of
+                    Err errs ->
+                        let
+                            _ =
+                                Debug.log "error" errs
+                        in
+                        Expect.fail "Document failed to parse for tests"
 
-                        Ok data ->
-                            let
-                                stringIds =
-                                    List.concatMap (List.map (Mark.idToString << Tuple.first)) data
+                    Ok data ->
+                        let
+                            stringIds =
+                                List.concatMap (List.map (Mark.idToString << Tuple.first)) data
 
-                                -- _ =
-                                --     List.map (Debug.log "ids") data
-                            in
-                            Expect.true "All IDs found are unique"
-                                (stringIds
-                                    |> List.all
-                                        (\str ->
-                                            List.filter (\s -> s == str) stringIds
-                                                |> List.length
-                                                |> (\len -> len == 1)
-                                        )
-                                )
-            ]
+                            -- _ =
+                            --     List.map (Debug.log "ids") data
+                        in
+                        Expect.true "All IDs found are unique"
+                            (stringIds
+                                |> List.all
+                                    (\str ->
+                                        List.filter (\s -> s == str) stringIds
+                                            |> List.length
+                                            |> (\len -> len == 1)
+                                    )
+                            )
+        ]
