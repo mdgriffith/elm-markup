@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , minusPosition
+    , minusPosition, resetBlockStart
     )
 
 {-|
@@ -105,6 +105,7 @@ type Icon
 type Nested item
     = Nested
         { icon : Icon
+        , range : Range
         , content : List item
         , children :
             List (Nested item)
@@ -116,6 +117,7 @@ mapNested fn (Nested nest) =
     Nested
         { icon = nest.icon
         , content = List.map fn nest.content
+        , range = nest.range
         , children =
             List.map (mapNested fn) nest.children
         }
@@ -267,6 +269,7 @@ type Description
         }
     | DescribeTree
         { id : Id
+        , name : String
         , range : Range
         , children : List (Nested Description)
         , expected : Expectation
@@ -369,7 +372,7 @@ type Expectation
     | ExpectFloat Float
     | ExpectTextBlock (List InlineExpectation)
     | ExpectString String
-    | ExpectTree Expectation (List TreeExpectation)
+    | ExpectTree String (List TreeExpectation)
     | ExpectNothing
 
 
@@ -630,41 +633,71 @@ blockName (Block details) =
             Just name
 
 
+getPosition : Parser c p Position
+getPosition =
+    Parser.succeed
+        (\offset ( row, col ) ->
+            { offset = offset
+            , line = row
+            , column = col
+            }
+        )
+        |= Parser.getOffset
+        |= Parser.getPosition
+
+
+resetBlockStart : Position -> Description -> Description
+resetBlockStart pos d =
+    case d of
+        DescribeBlock block ->
+            DescribeBlock { block | found = resetFoundStart pos block.found }
+
+        Record record ->
+            Record { record | found = resetFoundStart pos record.found }
+
+        x ->
+            x
+
+
+resetFoundStart : Position -> Found x -> Found x
+resetFoundStart pos found =
+    case found of
+        Found range item ->
+            Found { range | start = pos } item
+
+        Unexpected err ->
+            found
+
+
 getParser : ParseContext -> Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
 getParser context seed (Block details) =
     case details.kind of
         Named name ->
-            let
-                ( newSeed, blockParser ) =
+            case context of
+                ParseInline ->
                     details.parser context seed
-            in
-            ( newSeed
-            , Parser.succeed identity
-                |. Parser.token (Parser.Token "|>" (Error.ExpectingBlockName name))
-                |. Parser.chompWhile (\c -> c == ' ')
-                |= blockParser
-            )
+
+                _ ->
+                    let
+                        ( newSeed, blockParser ) =
+                            details.parser context seed
+                    in
+                    ( newSeed
+                    , Parser.succeed resetBlockStart
+                        |= getPosition
+                        |. Parser.token (Parser.Token "|>" (Error.ExpectingBlockName name))
+                        |. Parser.chompWhile (\c -> c == ' ')
+                        |= blockParser
+                    )
 
         Value ->
             details.parser context seed
 
         VerbatimNamed name ->
-            let
-                ( newSeed, blockParser ) =
-                    details.parser context seed
-            in
-            ( newSeed
-            , blockParser
-            )
+            details.parser context seed
 
         AnnotationNamed name ->
-            let
-                ( newSeed, blockParser ) =
-                    details.parser context seed
-            in
-            ( newSeed
-            , blockParser
-            )
+            details.parser context seed
 
 
 getParserNoBar : ParseContext -> Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
@@ -1072,7 +1105,7 @@ writeIcon icon cursor =
     case icon of
         Bullet ->
             cursor
-                |> write "-"
+                |> write "--"
 
         AutoNumber i ->
             cursor
@@ -1183,14 +1216,32 @@ writeDescription description cursor =
 
         DescribeTree tree ->
             cursor
+                |> write ("|> " ++ tree.name)
                 |> advanceTo tree.range
                 |> (\curs -> List.foldl writeNested curs tree.children)
 
 
 writeNested (Nested node) cursor =
     cursor
-        |> writeIcon node.icon
-        |> (\curs -> List.foldl writeDescription curs node.content)
+        |> (\curs ->
+                List.foldl
+                    (\desc ( started, c ) ->
+                        if not started then
+                            c
+                                |> advanceTo node.range
+                                |> writeIcon node.icon
+                                |> writeDescription desc
+                                |> Tuple.pair True
+
+                        else
+                            c
+                                |> writeDescription desc
+                                |> Tuple.pair True
+                    )
+                    ( False, curs )
+                    node.content
+           )
+        |> Tuple.second
         |> indent
         |> (\curs -> List.foldl writeNested curs node.children)
         |> dedent
@@ -1369,9 +1420,31 @@ writeField : ( String, Found Description ) -> PrintCursor -> PrintCursor
 writeField ( name, foundVal ) cursor =
     case foundVal of
         Found rng fnd ->
+            -- Sort of awkwardly, the rng here refers to the `value` of the field
+            -- For example
+            --     fieldName = supercoolvalue
+            --                 ^------------^
+            --                     range
+            -- So we need to subtract out the fieldname and equals
+            -- in order to advance to the correct indentation
+            let
+                fieldName =
+                    name ++ " = "
+
+                fieldNameLen =
+                    String.length fieldName
+            in
             cursor
-                |> advanceTo rng
-                |> write (name ++ " =")
+                |> advanceTo
+                    { start =
+                        { offset = rng.start.offset - fieldNameLen
+                        , column = rng.start.column - fieldNameLen
+                        , line = rng.start.line
+                        }
+                    , end = rng.end
+                    }
+                --(Debug.log "advance field to" rng)
+                |> write fieldName
                 |> writeDescription fnd
 
         Unexpected unexpected ->
@@ -1575,7 +1648,7 @@ create current =
             , seed = newSeed
             }
 
-        ExpectTree content branches ->
+        ExpectTree name branches ->
             let
                 range =
                     { start = current.base
@@ -1613,7 +1686,8 @@ create current =
             { pos = moveNewline current.base
             , desc =
                 DescribeTree
-                    { children = children
+                    { name = name
+                    , children = children
                     , id = parentId
                     , range = range
                     , expected = current.expectation
@@ -1958,6 +2032,10 @@ createTree (TreeExpectation details) cursor =
     { desc =
         Nested
             { icon = details.icon
+            , range =
+                { start = cursor.base
+                , end = lastPos
+                }
             , content = content
             , children =
                 children
@@ -2242,9 +2320,7 @@ humanReadableExpectations expect =
             "A String"
 
         ExpectTree content _ ->
-            "A tree starting of "
-                ++ humanReadableExpectations content
-                ++ " content"
+            "A tree"
 
 
 mergeWith fn one two =

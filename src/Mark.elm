@@ -967,7 +967,7 @@ manyOf blocks =
                                     , seed =
                                         seed
                                     }
-                                    (Parse.blocksOrNewlines indentation blocks)
+                                    (Parse.manyOf indentation blocks)
                             )
                         )
                 )
@@ -1121,7 +1121,7 @@ tree name view contentBlock =
 
         expectation =
             ExpectTree
-                (getBlockExpectation contentBlock)
+                name
                 [ TreeExpectation
                     { icon = Desc.Bullet
                     , content = [ blockExpectation ]
@@ -1185,6 +1185,7 @@ tree name view contentBlock =
                                 (\( pos, result ) ->
                                     DescribeTree
                                         { id = newId
+                                        , name = name
                                         , children = Parse.buildTree (baseIndent + 4) result
                                         , range = pos
                                         , expected = expectation
@@ -1198,7 +1199,7 @@ tree name view contentBlock =
                                           }
                                         , []
                                         )
-                                        (Parse.indentedBlocksOrNewlines
+                                        (Parse.tree
                                             ParseInTree
                                             contentBlock
                                         )

@@ -2,15 +2,14 @@ module Mark.Internal.Parser exposing
     ( RecordType(..)
     , Replacement(..)
     , backtrackCharacters
-    , blocksOrNewlines
     , buildTree
     , float
     , getFailableBlock
     , getPosition
     , getRangeAndSource
-    , indentedBlocksOrNewlines
     , indentedString
     , int
+    , manyOf
     , newline
     , newlineWith
     , oneOf
@@ -19,6 +18,7 @@ module Mark.Internal.Parser exposing
     , record
     , skipBlankLineWith
     , styledText
+    , tree
     , withIndent
     , withRange
     , withRangeResult
@@ -266,28 +266,8 @@ indentationBetween lower higher =
 
 oneOf blocks expectations context seed =
     let
-        gatherParsers myBlock details =
-            let
-                ( currentSeed, parser ) =
-                    getParserNoBar context details.seed myBlock
-            in
-            case blockName myBlock of
-                Just name ->
-                    { blockNames = name :: details.blockNames
-                    , childBlocks = parser :: details.childBlocks
-                    , childValues = details.childValues
-                    , seed = currentSeed
-                    }
-
-                Nothing ->
-                    { blockNames = details.blockNames
-                    , childBlocks = details.childBlocks
-                    , childValues = Parser.map Ok parser :: details.childValues
-                    , seed = currentSeed
-                    }
-
         children =
-            List.foldl gatherParsers
+            List.foldl (gatherParsers context)
                 { blockNames = []
                 , childBlocks = []
                 , childValues = []
@@ -328,9 +308,36 @@ oneOf blocks expectations context seed =
         )
         |= withRangeResult
             (Parser.oneOf
-                (blockParser :: List.reverse (unexpectedInOneOf expectations :: children.childValues))
+                (blockParser
+                    :: List.reverse
+                        (unexpectedInOneOf expectations
+                            :: children.childValues
+                        )
+                )
             )
     )
+
+
+gatherParsers context =
+    \myBlock details ->
+        let
+            ( currentSeed, parser ) =
+                getParserNoBar context details.seed myBlock
+        in
+        case blockName myBlock of
+            Just name ->
+                { blockNames = name :: details.blockNames
+                , childBlocks = parser :: details.childBlocks
+                , childValues = details.childValues
+                , seed = currentSeed
+                }
+
+            Nothing ->
+                { blockNames = details.blockNames
+                , childBlocks = details.childBlocks
+                , childValues = Parser.map Ok parser :: details.childValues
+                , seed = currentSeed
+                }
 
 
 unexpectedInOneOf expectations =
@@ -378,7 +385,8 @@ getFailableBlock context seed (Block details) =
 
 -}
 failableBlocks blocks =
-    Parser.succeed identity
+    Parser.succeed (\pos block -> Result.map (resetBlockStart pos) block)
+        |= getPosition
         |. Parser.token (Parser.Token "|>" BlockStart)
         |. Parser.chompWhile (\c -> c == ' ')
         |= Parser.oneOf
@@ -481,6 +489,10 @@ styledTextLoop :
     -> TextCursor
     -> Parser Context Problem (Parser.Step TextCursor (List TextDescription))
 styledTextLoop options context meaningful untilStrings found =
+    -- let
+    --     _ =
+    --         Debug.log "options" options.inlines
+    -- in
     Parser.oneOf
         [ Parser.oneOf (replace options.replacements found)
             |> Parser.map Parser.Loop
@@ -499,6 +511,38 @@ styledTextLoop options context meaningful untilStrings found =
                 , Parser.map (always Strike) (Parser.token (Parser.Token "~" (Expecting "~")))
                 , Parser.map (always Bold) (Parser.token (Parser.Token "*" (Expecting "*")))
                 ]
+        , case List.filter onlyStandalone options.inlines of
+            standalones ->
+                Parser.succeed
+                    (\src start result end ->
+                        let
+                            range =
+                                { start = start
+                                , end = end
+                                }
+                        in
+                        case result of
+                            Ok desc ->
+                                found
+                                    |> commitText
+                                    |> addToTextCursor
+                                        (InlineBlock
+                                            { kind = EmptyAnnotation
+                                            , range =
+                                                range
+                                            , record = desc
+                                            }
+                                        )
+                                    |> advanceTo end
+                                    |> Parser.Loop
+
+                            Err err ->
+                                Parser.Loop (addText (sliceRange range src) found)
+                    )
+                    |= Parser.getSource
+                    |= getPosition
+                    |= attrContainer standalones
+                    |= getPosition
 
         -- Parse Selection
         -- depending on selection type, capture attributes if applicable.
@@ -571,10 +615,10 @@ styledTextLoop options context meaningful untilStrings found =
                                 (attrContainer
                                     (case selection of
                                         SelectString _ ->
-                                            List.filterMap onlyVerbatim options.inlines
+                                            List.filter onlyVerbatim options.inlines
 
                                         SelectText _ ->
-                                            List.filterMap onlyAnnotation options.inlines
+                                            List.filter onlyAnnotation options.inlines
 
                                         EmptyAnnotation ->
                                             -- TODO: parse only normal records
@@ -795,19 +839,21 @@ If they are required, then we can fastforward to a specific condition and contin
 attrContainer : List (Block a) -> Tolerant.Parser Context Problem Description
 attrContainer recordBlocks =
     Tolerant.succeed identity
-        |> Tolerant.ignore
-            (Tolerant.token
-                { match = "{"
-                , problem = InlineStart
-                , onError = Tolerant.stopWith InlineStart
-                }
-            )
+        |. Tolerant.try
+            (Parser.chompIf (\c -> c == '{') (Expecting "{"))
         |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
         |> Tolerant.keep
             (Tolerant.oneOf (ExpectingInlineName "")
                 (recordBlocks
                     -- NOTE: We're throwing away IDs here, maybe we dont want to do that?
-                    |> List.map (Tolerant.try << Tuple.second << getParser ParseInline Id.initialSeed)
+                    |> List.map
+                        (\rec ->
+                            let
+                                recordParser =
+                                    getParser ParseInline Id.initialSeed rec
+                            in
+                            Tolerant.try (Tuple.second recordParser)
+                        )
                 )
             )
         |> Tolerant.ignore (Tolerant.chompWhile (\c -> c == ' '))
@@ -1231,40 +1277,57 @@ getPosition =
 {- MISC HELPERS -}
 
 
-onlyVerbatim : Block a -> Maybe (Block a)
-onlyVerbatim ((Block details) as thisBlock) =
+{-| -}
+onlyStandalone : Block a -> Bool
+onlyStandalone (Block details) =
     case details.kind of
         Value ->
-            Nothing
+            False
 
         Named name ->
-            Nothing
+            True
 
         VerbatimNamed _ ->
-            Just thisBlock
+            False
 
         AnnotationNamed _ ->
-            Nothing
+            False
 
 
-onlyAnnotation : Block a -> Maybe (Block a)
-onlyAnnotation ((Block details) as thisBlock) =
+onlyVerbatim : Block a -> Bool
+onlyVerbatim (Block details) =
     case details.kind of
         Value ->
-            Nothing
+            False
 
         Named name ->
-            Nothing
+            False
 
         VerbatimNamed _ ->
-            Nothing
+            True
 
         AnnotationNamed _ ->
-            Just thisBlock
+            False
+
+
+onlyAnnotation : Block a -> Bool
+onlyAnnotation (Block details) =
+    case details.kind of
+        Value ->
+            False
+
+        Named name ->
+            False
+
+        VerbatimNamed _ ->
+            False
+
+        AnnotationNamed _ ->
+            True
 
 
 {-| -}
-blocksOrNewlines indentation blocks cursor =
+manyOf indentation blocks cursor =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -1341,7 +1404,7 @@ blocksOrNewlines indentation blocks cursor =
 
 makeBlocksParser blocks seed =
     let
-        gatherParsers myBlock details =
+        gatherParsers2 myBlock details =
             let
                 -- We don't care about the new seed because that's handled by the loop.
                 ( _, parser ) =
@@ -1361,7 +1424,7 @@ makeBlocksParser blocks seed =
                     }
 
         children =
-            List.foldl gatherParsers
+            List.foldl gatherParsers2
                 { blockNames = []
                 , childBlocks = []
                 , childValues = []
@@ -1374,7 +1437,8 @@ makeBlocksParser blocks seed =
                     Result.map (\desc -> ( pos, desc )) result
                 )
                 (withRange
-                    (Parser.succeed identity
+                    (Parser.succeed (\pos block -> Result.map (resetBlockStart pos) block)
+                        |= getPosition
                         |. Parser.token (Parser.Token "|>" BlockStart)
                         |. Parser.chompWhile (\c -> c == ' ')
                         |= Parser.oneOf
@@ -1410,6 +1474,7 @@ type alias NestedIndex =
 type alias FlatCursor =
     { icon : Maybe Icon
     , indent : Int
+    , range : Range
     , content : Description
     }
 
@@ -1427,12 +1492,12 @@ type alias FlatCursor =
     ( 4, Maybe Icon, [ "nested item three" ] )
 
 -}
-indentedBlocksOrNewlines :
+tree :
     ParseContext
     -> Block thing
     -> ( NestedIndex, List FlatCursor )
     -> Parser Context Problem (Parser.Step ( NestedIndex, List FlatCursor ) (List FlatCursor))
-indentedBlocksOrNewlines context item ( indentation, existing ) =
+tree context item ( indentation, existing ) =
     Parser.oneOf
         [ Parser.end End
             |> Parser.map
@@ -1477,7 +1542,7 @@ indentedBlocksOrNewlines context item ( indentation, existing ) =
                         Parser.withIndent newIndent <|
                             Parser.oneOf
                                 ((Parser.succeed
-                                    (\iconResult itemResult ->
+                                    (\start iconResult itemResult end ->
                                         let
                                             newIndex =
                                                 { prev = newIndent
@@ -1489,35 +1554,41 @@ indentedBlocksOrNewlines context item ( indentation, existing ) =
                                         Parser.Loop
                                             ( newIndex
                                             , { indent = newIndent
+                                              , range = { start = start, end = end }
                                               , icon = Just iconResult
                                               , content = itemResult
                                               }
                                                 :: existing
                                             )
                                     )
+                                    |= getPosition
                                     |= iconParser
                                     |= Parser.withIndent (newIndent + 4) itemParser
+                                    |= getPosition
                                  )
                                     :: (if newIndent - 4 == indentation.prev then
-                                            [ itemParser
-                                                |> Parser.map
-                                                    (\foundBlock ->
-                                                        let
-                                                            newIndex =
-                                                                { prev = indentation.prev
-                                                                , seed = newSeed
-                                                                , base = indentation.base
-                                                                }
-                                                        in
-                                                        Parser.Loop
-                                                            ( newIndex
-                                                            , { indent = indentation.prev
-                                                              , icon = Nothing
-                                                              , content = foundBlock
-                                                              }
-                                                                :: existing
-                                                            )
-                                                    )
+                                            [ Parser.succeed
+                                                (\start foundBlock end ->
+                                                    let
+                                                        newIndex =
+                                                            { prev = indentation.prev
+                                                            , seed = newSeed
+                                                            , base = indentation.base
+                                                            }
+                                                    in
+                                                    Parser.Loop
+                                                        ( newIndex
+                                                        , { indent = indentation.prev
+                                                          , range = { start = start, end = end }
+                                                          , icon = Nothing
+                                                          , content = foundBlock
+                                                          }
+                                                            :: existing
+                                                        )
+                                                )
+                                                |= getPosition
+                                                |= itemParser
+                                                |= getPosition
                                             ]
 
                                         else
@@ -1531,6 +1602,11 @@ indentedBlocksOrNewlines context item ( indentation, existing ) =
             , Parser.succeed (Parser.Done (List.reverse existing))
             ]
         ]
+
+
+debugParser str =
+    Parser.map
+        (Debug.log str)
 
 
 type RecordType
@@ -1548,7 +1624,7 @@ record recordType id recordName expectations fields =
                         , id = id
                         , name = recordName
                         , found =
-                            Found (backtrackCharacters 2 details.range) details.value
+                            Found details.range details.value
                         }
 
                 Err err ->
@@ -1558,7 +1634,7 @@ record recordType id recordName expectations fields =
                         , name = recordName
                         , found =
                             Unexpected
-                                { range = Maybe.withDefault (backtrackCharacters 2 err.range) (Tuple.first err.error)
+                                { range = Maybe.withDefault err.range (Tuple.first err.error)
                                 , problem = Tuple.second err.error
                                 }
                         }
@@ -2024,65 +2100,8 @@ descending base prev =
 buildTree : Int -> List FlatCursor -> List (Nested Description)
 buildTree baseIndent items =
     let
-        -- gather ( indentation, icon, item ) (TreeBuilder builder) =
         gather item builder =
-            addItem (item.indent - baseIndent) item.icon item.content builder
-
-        groupByIcon item maybeCursor =
-            case maybeCursor of
-                Nothing ->
-                    case item.icon of
-                        Just icon ->
-                            Just
-                                { indent = item.indent
-                                , icon = icon
-                                , items = [ item.content ]
-                                , accumulated = []
-                                }
-
-                        Nothing ->
-                            -- Because of how the code runs, we have a tenuous guarantee that this branch won't execute.
-                            -- Not entirely sure how to make the types work to eliminate this.
-                            Nothing
-
-                Just cursor ->
-                    Just <|
-                        case item.icon of
-                            Nothing ->
-                                { indent = cursor.indent
-                                , icon = cursor.icon
-                                , items = item.content :: cursor.items
-                                , accumulated = cursor.accumulated
-                                }
-
-                            Just icon ->
-                                { indent = item.indent
-                                , icon = icon
-                                , items = [ item.content ]
-                                , accumulated =
-                                    { indent = cursor.indent
-                                    , icon = cursor.icon
-                                    , content = cursor.items
-                                    }
-                                        :: cursor.accumulated
-                                }
-
-        finalizeGrouping maybeCursor =
-            case maybeCursor of
-                Nothing ->
-                    []
-
-                Just cursor ->
-                    case cursor.items of
-                        [] ->
-                            cursor.accumulated
-
-                        _ ->
-                            { indent = cursor.indent
-                            , icon = cursor.icon
-                            , content = cursor.items
-                            }
-                                :: cursor.accumulated
+            addItem (item.indent - baseIndent) item.icon item.content item.range builder
 
         newTree =
             items
@@ -2094,6 +2113,94 @@ buildTree baseIndent items =
     case newTree of
         TreeBuilder builder ->
             List.reverse (renderLevels builder.levels)
+
+
+finalizeGrouping :
+    Maybe GroupedCursor
+    ->
+        List
+            { indent : Int
+            , icon : Icon
+            , range : Range
+            , content : List Description
+            }
+finalizeGrouping maybeCursor =
+    case maybeCursor of
+        Nothing ->
+            []
+
+        Just cursor ->
+            case cursor.items of
+                [] ->
+                    cursor.accumulated
+
+                _ ->
+                    { indent = cursor.indent
+                    , icon = cursor.icon
+                    , range = cursor.range
+                    , content = cursor.items
+                    }
+                        :: cursor.accumulated
+
+
+type alias GroupedCursor =
+    { indent : Int
+    , icon : Icon
+    , items : List Description
+    , range : Range
+    , accumulated :
+        List
+            { indent : Int
+            , icon : Icon
+            , content : List Description
+            , range : Range
+            }
+    }
+
+
+groupByIcon : FlatCursor -> Maybe GroupedCursor -> Maybe GroupedCursor
+groupByIcon item maybeCursor =
+    case maybeCursor of
+        Nothing ->
+            case item.icon of
+                Just icon ->
+                    Just
+                        { indent = item.indent
+                        , icon = icon
+                        , items = [ item.content ]
+                        , range = item.range
+                        , accumulated = []
+                        }
+
+                Nothing ->
+                    -- Because of how the code runs, we have a tenuous guarantee that this branch won't execute.
+                    -- Not entirely sure how to make the types work to eliminate this.
+                    Nothing
+
+        Just cursor ->
+            Just <|
+                case item.icon of
+                    Nothing ->
+                        { indent = cursor.indent
+                        , icon = cursor.icon
+                        , items = item.content :: cursor.items
+                        , range = item.range
+                        , accumulated = cursor.accumulated
+                        }
+
+                    Just icon ->
+                        { indent = item.indent
+                        , icon = icon
+                        , items = [ item.content ]
+                        , range = item.range
+                        , accumulated =
+                            { indent = cursor.indent
+                            , icon = cursor.icon
+                            , content = cursor.items
+                            , range = item.range
+                            }
+                                :: cursor.accumulated
+                        }
 
 
 {-| A list item started with a list icon.
@@ -2150,14 +2257,15 @@ if ident decreases
     ]
 
 -}
-addItem : Int -> Icon -> List Description -> TreeBuilder -> TreeBuilder
-addItem indentation icon content (TreeBuilder builder) =
+addItem : Int -> Icon -> List Description -> Range -> TreeBuilder -> TreeBuilder
+addItem indentation icon content range (TreeBuilder builder) =
     let
         newItem : Nested Description
         newItem =
             Nested
                 { icon = icon
                 , children = []
+                , range = range
                 , content = content
                 }
     in
@@ -2190,20 +2298,6 @@ addItem indentation icon content (TreeBuilder builder) =
                             lvl
                             :: remaining
                     }
-
-
-
--- indentIndex (Nested nested) =
---     Nested
---         { nested
---             | index = 1 :: nested.index
---         }
--- indexTo i (Nested nested) =
---     case nested.index of
---         [] ->
---             Nested { nested | index = [ i ] }
---         top :: tail ->
---             Nested { nested | index = i :: tail }
 
 
 addToLevel index brandNewItem (Nested parent) =
@@ -2320,6 +2414,7 @@ renderLevels levels =
 reverseTree cursor (Nested nest) =
     Nested
         { icon = nest.icon
+        , range = nest.range
         , content = List.reverse nest.content
         , children =
             List.foldl rev ( dive cursor, [] ) nest.children
