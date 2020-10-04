@@ -136,11 +136,9 @@ type Icon
 
 
 {-| -}
-tree : List Tree -> Block
-tree treeContents =
-    -- BUGBUG: ExpectNothing is not right
-    -- But Likely won't affect anything at the moment.
-    ExpectTree ExpectNothing
+tree : String -> List Tree -> Block
+tree name treeContents =
+    ExpectTree name
         (List.map convertToTreeExpectation treeContents)
 
 
