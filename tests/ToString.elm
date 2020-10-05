@@ -423,7 +423,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 1 ])
+                                            (Id.Id [ 0 ])
                                             3
                                             8
                                             bold
@@ -447,7 +447,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 1 ])
+                                            (Id.Id [ 0 ])
                                             3
                                             8
                                             { bold = False
@@ -474,7 +474,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 1 ])
+                                            (Id.Id [ 0 ])
                                             3
                                             8
                                             { bold = True
