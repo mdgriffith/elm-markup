@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , minusPosition, resetBlockStart
+    , minusPosition, resetBlockStart, resetFoundStart
     )
 
 {-|
@@ -1420,30 +1420,18 @@ writeField : ( String, Found Description ) -> PrintCursor -> PrintCursor
 writeField ( name, foundVal ) cursor =
     case foundVal of
         Found rng fnd ->
-            -- Sort of awkwardly, the rng here refers to the `value` of the field
+            -- The rng here refers to the field name and the `value` of the field
+            -- NOTE #1
             -- For example
             --     fieldName = supercoolvalue
-            --                 ^------------^
-            --                     range
-            -- So we need to subtract out the fieldname and equals
-            -- in order to advance to the correct indentation
+            --     ^------------------------^
+            --          range
             let
                 fieldName =
-                    name ++ " = "
-
-                fieldNameLen =
-                    String.length fieldName
+                    name ++ " ="
             in
             cursor
-                |> advanceTo
-                    { start =
-                        { offset = rng.start.offset - fieldNameLen
-                        , column = rng.start.column - fieldNameLen
-                        , line = rng.start.line
-                        }
-                    , end = rng.end
-                    }
-                --(Debug.log "advance field to" rng)
+                |> advanceTo rng
                 |> write fieldName
                 |> writeDescription fnd
 
@@ -2062,8 +2050,9 @@ createField :
     -> CreateFieldCursor
 createField currentIndent ( name, exp ) current =
     let
+        -- SEE NOTE #1
         -- This is the beginning of the field
-        --    field = x
+        --    fieldName = supercoolvalue
         --   ^ right there
         fieldValueStart =
             current.position

@@ -489,10 +489,6 @@ styledTextLoop :
     -> TextCursor
     -> Parser Context Problem (Parser.Step TextCursor (List TextDescription))
 styledTextLoop options context meaningful untilStrings found =
-    -- let
-    --     _ =
-    --         Debug.log "options" options.inlines
-    -- in
     Parser.oneOf
         [ Parser.oneOf (replace options.replacements found)
             |> Parser.map Parser.Loop
@@ -576,25 +572,23 @@ styledTextLoop options context meaningful untilStrings found =
                     |> Parser.andThen
                         (\( maybeNewCursor, selection ) ->
                             Parser.map
-                                (\attrResult ->
+                                (\maybeAttrResult ->
                                     ( maybeNewCursor
                                     , \range ->
-                                        case attrResult of
-                                            Err [ InlineStart ] ->
+                                        case maybeAttrResult of
+                                            Nothing ->
+                                                -- no attributes attached, so we capture as a verbatim string
                                                 case selection of
                                                     SelectString str ->
                                                         Styled range (Text (getCurrentStyle found) str)
 
-                                                    _ ->
-                                                        -- TODO: some sort of real error happend
-                                                        InlineBlock
-                                                            { kind = selection
-                                                            , range =
-                                                                range
-                                                            , record = DescribeNothing (Tuple.first (Id.step Id.initialSeed))
-                                                            }
+                                                    SelectText txt ->
+                                                        Styled range (Text (getCurrentStyle found) "")
 
-                                            Err errs ->
+                                                    EmptyAnnotation ->
+                                                        Styled range (Text (getCurrentStyle found) "")
+
+                                            Just (Err errs) ->
                                                 -- TODO: some sort of real error happend
                                                 InlineBlock
                                                     { kind = selection
@@ -603,7 +597,7 @@ styledTextLoop options context meaningful untilStrings found =
                                                     , record = DescribeNothing (Tuple.first (Id.step Id.initialSeed))
                                                     }
 
-                                            Ok foundFields ->
+                                            Just (Ok foundFields) ->
                                                 InlineBlock
                                                     { kind = selection
                                                     , range =
@@ -612,18 +606,23 @@ styledTextLoop options context meaningful untilStrings found =
                                                     }
                                     )
                                 )
-                                (attrContainer
-                                    (case selection of
-                                        SelectString _ ->
-                                            List.filter onlyVerbatim options.inlines
+                                (Parser.oneOf
+                                    [ Parser.map Just
+                                        (attrContainer
+                                            (case selection of
+                                                SelectString _ ->
+                                                    List.filter onlyVerbatim options.inlines
 
-                                        SelectText _ ->
-                                            List.filter onlyAnnotation options.inlines
+                                                SelectText _ ->
+                                                    List.filter onlyAnnotation options.inlines
 
-                                        EmptyAnnotation ->
-                                            -- TODO: parse only normal records
-                                            []
-                                    )
+                                                EmptyAnnotation ->
+                                                    -- TODO: parse only normal records
+                                                    []
+                                            )
+                                        )
+                                    , Parser.succeed Nothing
+                                    ]
                                 )
                         )
                )
@@ -1863,11 +1862,11 @@ captureField found recordName fields fieldNames =
                 Nothing ->
                     Parser.Loop fields
 
-                Just ( foundFieldname, fieldValue ) ->
+                Just ( fieldPos, ( foundFieldname, fieldValue ) ) ->
                     case fieldValue of
                         Found _ _ ->
                             Parser.Loop
-                                { found = Ok (( foundFieldname, fieldValue ) :: found)
+                                { found = Ok (( foundFieldname, resetFoundStart fieldPos fieldValue ) :: found)
                                 , remaining =
                                     List.filter
                                         (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
@@ -1891,8 +1890,12 @@ captureField found recordName fields fieldNames =
         )
 
 
+{-| Parse a field name
+-}
+parseField : ( String, Parser Context Problem ( String, Found Description ) ) -> Parser Context Problem ( Position, ( String, Found Description ) )
 parseField ( name, contentParser ) =
-    Parser.succeed identity
+    Parser.succeed Tuple.pair
+        |= getPosition
         |. Parser.keyword (Parser.Token name (ExpectingFieldName name))
         |. Parser.chompWhile (\c -> c == ' ')
         |. Parser.chompIf (\c -> c == '=') (Expecting "=")
@@ -1900,21 +1903,24 @@ parseField ( name, contentParser ) =
         |= contentParser
 
 
+unexpectedField : String -> List String -> Parser Context Problem ( Position, ( String, Found item ) )
 unexpectedField recordName options =
     withIndent
         (\indentation ->
             Parser.map
                 (\{ range, value } ->
-                    ( value
-                    , Unexpected
-                        { range = range
-                        , problem =
-                            Error.UnexpectedField
-                                { found = value
-                                , options = options
-                                , recordName = recordName
-                                }
-                        }
+                    ( range.start
+                    , ( value
+                      , Unexpected
+                            { range = range
+                            , problem =
+                                Error.UnexpectedField
+                                    { found = value
+                                    , options = options
+                                    , recordName = recordName
+                                    }
+                            }
+                      )
                     )
                 )
                 (getRangeAndSource

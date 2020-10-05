@@ -23,38 +23,29 @@ suite =
                         Mark.parse
                             document
                             elmOptimizeLevelTwoTODO
-
-                    _ =
-                        case parsed of
-                            Mark.Success success ->
-                                Debug.log "" (Mark.toString success)
-
-                            _ ->
-                                ""
                 in
                 Expect.true
                     "Parsed successfully"
                     (isSuccessful parsed)
-        , only <|
-            test "Mark.toString matches the source material" <|
-                \_ ->
-                    let
-                        parsed =
-                            Mark.parse
-                                document
-                                elmOptimizeLevelTwoTODOTiny
+        , test "Mark.toString matches the source material" <|
+            \_ ->
+                let
+                    parsed =
+                        Mark.parse
+                            document
+                            elmOptimizeLevelTwoTODOTiny
 
-                        stringified =
-                            case parsed of
-                                Mark.Success success ->
-                                    Mark.toString success
+                    stringified =
+                        case parsed of
+                            Mark.Success success ->
+                                Mark.toString success
 
-                                _ ->
-                                    ""
-                    in
-                    Expect.equal
-                        elmOptimizeLevelTwoTODOTiny
-                        stringified
+                            _ ->
+                                ""
+                in
+                Expect.equal
+                    elmOptimizeLevelTwoTODOTiny
+                    stringified
         ]
 
 
@@ -87,14 +78,6 @@ elmOptimizeLevelTwoTODOTiny =
 
 |> H2
     Benchmarks
-
-
-|> Page
-    author = Test
-    title = Elm Optimize TODO
-    icon = ?
-    description = Imported
-
 
 
 |> List
