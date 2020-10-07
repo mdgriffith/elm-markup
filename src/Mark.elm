@@ -76,8 +76,6 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 -}
 
-import Html
-import Html.Attributes
 import Mark.Edit
 import Mark.Error
 import Mark.Internal.Description as Desc exposing (..)
@@ -1654,7 +1652,7 @@ type alias Replacement =
     Parse.Replacement
 
 
-{-| An annotation is some **text**, a **name**, and zero or more **attributes**.
+{-| An annotation is some _styled text_, a _name_, and zero or more _attributes_.
 
 So, we can make a `link` that looks like this in markup:
 
@@ -1731,7 +1729,7 @@ selectedString sel =
 
 {-| A `verbatim` annotation is denoted by backticks(\`) and allows you to capture a literal string.
 
-Just like `token` and `annotation`, a `verbatim` can have a name and attributes attached to it.
+Just like `annotation`, a `verbatim` can have a name and attributes attached to it.
 
 Let's say we wanted to embed an inline piece of elm code. We could write
 
@@ -1882,6 +1880,9 @@ string =
 
 
 {-| Capture either `True` or `False`.
+
+`elm-markup` doesn't infer truthiness in other values, so it needs to be exactly `True` or `False`.
+
 -}
 bool : Block Bool
 bool =
@@ -2011,13 +2012,6 @@ float =
 
 
 {- Parser Heleprs -}
-
-
-type alias BlockOrNewlineCursor thing =
-    { parsedSomething : Bool
-    , found : List thing
-    , seed : Id.Seed
-    }
 
 
 {-| This is a set of common character replacements with some typographical niceties.
