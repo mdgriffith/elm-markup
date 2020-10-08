@@ -556,171 +556,170 @@ styledTextLoop :
     -> TextCursor
     -> Parser Context Problem (Parser.Step TextCursor (List TextDescription))
 styledTextLoop options context meaningful found =
-    peek "loop" <|
-        Parser.oneOf
-            [ Parser.oneOf (replace options.replacements found)
-                |> Parser.map Parser.Loop
+    Parser.oneOf
+        [ Parser.oneOf (replace options.replacements found)
+            |> Parser.map Parser.Loop
 
-            -- If a char matches the first character of a replacement,
-            -- but didn't match the full replacement captured above,
-            -- then stash that char.
-            , Parser.oneOf (almostReplacement options.replacements found)
-                |> Parser.map Parser.Loop
-            , Parser.succeed
-                (\styling ->
-                    Parser.Loop (changeStyle found styling)
-                )
-                |= styleTokens
-            , case List.filter onlyStandalone options.inlines of
-                standalones ->
-                    Parser.succeed
-                        (\src start result end ->
-                            let
-                                range =
-                                    { start = start
-                                    , end = end
-                                    }
-                            in
-                            case result of
-                                Ok desc ->
-                                    found
-                                        |> commitText
-                                        |> addToTextCursor
-                                            (InlineBlock
-                                                { kind = EmptyAnnotation
-                                                , range =
-                                                    range
-                                                , record = desc
-                                                }
-                                            )
-                                        |> advanceTo end
-                                        |> Parser.Loop
-
-                                Err err ->
-                                    Parser.Loop (addText (sliceRange range src) found)
-                        )
-                        |= Parser.getSource
-                        |= getPosition
-                        |= attrContainer standalones
-                        |= getPosition
-
-            -- if we encounter links, parse them as complete lines
-            , Parser.succeed
-                (\link ->
-                    Parser.Loop (addText ("http:/" ++ link) found)
-                )
-                |. Parser.token (Parser.Token "http:/" (Expecting "http://"))
-                |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-            , Parser.succeed
-                (\link ->
-                    Parser.Loop (addText ("https:/" ++ link) found)
-                )
-                |. Parser.token (Parser.Token "http:/" (Expecting "https://"))
-                |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-
-            -- Parse Selection
-            -- depending on selection type, capture attributes if applicable.
-            , Parser.succeed
-                (\start ( maybeNewCursor, newInlineBlock ) end ->
-                    let
-                        resetCursor curs =
-                            case maybeNewCursor of
-                                Nothing ->
-                                    curs
-
-                                Just (TextCursor newCursor) ->
-                                    curs
-                                        |> resetBalancedReplacements newCursor.balancedReplacements
-                                        |> resetTextWith newCursor.current
-                    in
-                    found
-                        |> commitText
-                        |> addToTextCursor
-                            (newInlineBlock
+        -- If a char matches the first character of a replacement,
+        -- but didn't match the full replacement captured above,
+        -- then stash that char.
+        , Parser.oneOf (almostReplacement options.replacements found)
+            |> Parser.map Parser.Loop
+        , Parser.succeed
+            (\styling ->
+                Parser.Loop (changeStyle found styling)
+            )
+            |= styleTokens
+        , case List.filter onlyStandalone options.inlines of
+            standalones ->
+                Parser.succeed
+                    (\src start result end ->
+                        let
+                            range =
                                 { start = start
                                 , end = end
                                 }
-                            )
-                        |> resetCursor
-                        |> advanceTo end
-                        |> Parser.Loop
-                )
-                |= getPosition
-                |= (textSelection options.replacements found
-                        |> Parser.andThen
-                            (\( maybeNewCursor, selection ) ->
-                                Parser.map
-                                    (\maybeAttrResult ->
-                                        ( maybeNewCursor
-                                        , \range ->
-                                            case maybeAttrResult of
-                                                Nothing ->
-                                                    -- no attributes attached, so we capture as a verbatim string
-                                                    case selection of
-                                                        SelectString str ->
-                                                            Styled range (Text (getCurrentStyle found) str)
-
-                                                        SelectText txt ->
-                                                            Styled range (Text (getCurrentStyle found) "")
-
-                                                        EmptyAnnotation ->
-                                                            Styled range (Text (getCurrentStyle found) "")
-
-                                                Just (Err errs) ->
-                                                    -- TODO: some sort of real error happend
-                                                    InlineBlock
-                                                        { kind = selection
-                                                        , range =
-                                                            range
-                                                        , record = DescribeNothing (Tuple.first (Id.step Id.initialSeed))
-                                                        }
-
-                                                Just (Ok foundFields) ->
-                                                    InlineBlock
-                                                        { kind = selection
-                                                        , range =
-                                                            range
-                                                        , record = foundFields
-                                                        }
+                        in
+                        case result of
+                            Ok desc ->
+                                found
+                                    |> commitText
+                                    |> addToTextCursor
+                                        (InlineBlock
+                                            { kind = EmptyAnnotation
+                                            , range =
+                                                range
+                                            , record = desc
+                                            }
                                         )
-                                    )
-                                    (Parser.oneOf
-                                        [ Parser.map Just
-                                            (attrContainer
-                                                (case selection of
-                                                    SelectString _ ->
-                                                        List.filter onlyVerbatim options.inlines
+                                    |> advanceTo end
+                                    |> Parser.Loop
 
-                                                    SelectText _ ->
-                                                        List.filter onlyAnnotation options.inlines
+                            Err err ->
+                                Parser.Loop (addText (sliceRange range src) found)
+                    )
+                    |= Parser.getSource
+                    |= getPosition
+                    |= attrContainer standalones
+                    |= getPosition
+
+        -- if we encounter links, parse them as complete lines
+        , Parser.succeed
+            (\link ->
+                Parser.Loop (addText ("http:/" ++ link) found)
+            )
+            |. Parser.token (Parser.Token "http:/" (Expecting "http://"))
+            |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+        , Parser.succeed
+            (\link ->
+                Parser.Loop (addText ("https:/" ++ link) found)
+            )
+            |. Parser.token (Parser.Token "http:/" (Expecting "https://"))
+            |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
+
+        -- Parse Selection
+        -- depending on selection type, capture attributes if applicable.
+        , Parser.succeed
+            (\start ( maybeNewCursor, newInlineBlock ) end ->
+                let
+                    resetCursor curs =
+                        case maybeNewCursor of
+                            Nothing ->
+                                curs
+
+                            Just (TextCursor newCursor) ->
+                                curs
+                                    |> resetBalancedReplacements newCursor.balancedReplacements
+                                    |> resetTextWith newCursor.current
+                in
+                found
+                    |> commitText
+                    |> addToTextCursor
+                        (newInlineBlock
+                            { start = start
+                            , end = end
+                            }
+                        )
+                    |> resetCursor
+                    |> advanceTo end
+                    |> Parser.Loop
+            )
+            |= getPosition
+            |= (textSelection options.replacements found
+                    |> Parser.andThen
+                        (\( maybeNewCursor, selection ) ->
+                            Parser.map
+                                (\maybeAttrResult ->
+                                    ( maybeNewCursor
+                                    , \range ->
+                                        case maybeAttrResult of
+                                            Nothing ->
+                                                -- no attributes attached, so we capture as a verbatim string
+                                                case selection of
+                                                    SelectString str ->
+                                                        Styled range (Text (getCurrentStyle found) str)
+
+                                                    SelectText txt ->
+                                                        Styled range (Text (getCurrentStyle found) "")
 
                                                     EmptyAnnotation ->
-                                                        -- TODO: parse only normal records
-                                                        []
-                                                )
-                                            )
-                                        , Parser.succeed Nothing
-                                        ]
-                                    )
-                            )
-                   )
-                |= getPosition
-            , -- chomp until a meaningful character
-              Parser.succeed
-                (\( new, final ) ->
-                    if new == "" || final then
-                        case commitText (addText (String.trimRight new) found) of
-                            TextCursor txt ->
-                                Parser.Done (List.reverse txt.found)
+                                                        Styled range (Text (getCurrentStyle found) "")
 
-                    else
-                        Parser.Loop (addText new found)
-                )
-                |= (Parser.chompWhile (\c -> not (List.member c meaningful))
-                        |> Parser.getChompedString
-                        |> Parser.andThen (finalizeString context)
-                   )
-            ]
+                                            Just (Err errs) ->
+                                                -- TODO: some sort of real error happend
+                                                InlineBlock
+                                                    { kind = selection
+                                                    , range =
+                                                        range
+                                                    , record = DescribeNothing (Tuple.first (Id.step Id.initialSeed))
+                                                    }
+
+                                            Just (Ok foundFields) ->
+                                                InlineBlock
+                                                    { kind = selection
+                                                    , range =
+                                                        range
+                                                    , record = foundFields
+                                                    }
+                                    )
+                                )
+                                (Parser.oneOf
+                                    [ Parser.map Just
+                                        (attrContainer
+                                            (case selection of
+                                                SelectString _ ->
+                                                    List.filter onlyVerbatim options.inlines
+
+                                                SelectText _ ->
+                                                    List.filter onlyAnnotation options.inlines
+
+                                                EmptyAnnotation ->
+                                                    -- TODO: parse only normal records
+                                                    []
+                                            )
+                                        )
+                                    , Parser.succeed Nothing
+                                    ]
+                                )
+                        )
+               )
+            |= getPosition
+        , -- chomp until a meaningful character
+          Parser.succeed
+            (\( new, final ) ->
+                if new == "" || final then
+                    case commitText (addText (String.trimRight new) found) of
+                        TextCursor txt ->
+                            Parser.Done (List.reverse txt.found)
+
+                else
+                    Parser.Loop (addText new found)
+            )
+            |= (Parser.chompWhile (\c -> not (List.member c meaningful))
+                    |> Parser.getChompedString
+                    |> Parser.andThen (finalizeString context)
+               )
+        ]
 
 
 finalizeString context str =
