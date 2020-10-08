@@ -45,7 +45,6 @@ styleParser =
         Id.initialSeed
         { column = 1, line = 1, offset = 0 }
         emptyStyles
-        []
 
 
 text =
@@ -62,7 +61,6 @@ text =
                             Id.initialSeed
                             { column = 1, line = 1, offset = 0 }
                             emptyStyles
-                            []
                         )
                         "Here is my /styled/ *text*."
                     )
@@ -85,6 +83,160 @@ text =
                             }
                         )
                     )
+        , test "spacing required for control chars" <|
+            \_ ->
+                Expect.equal
+                    (Parser.run
+                        (Mark.Internal.Parser.styledText
+                            { inlines = []
+                            , replacements = []
+                            }
+                            Description.ParseInline
+                            Id.initialSeed
+                            { column = 1, line = 1, offset = 0 }
+                            emptyStyles
+                        )
+                        "Here is my /styled / *text*."
+                    )
+                    (Ok
+                        (Description.DescribeText
+                            { id = Id.Id [ 0 ]
+                            , range =
+                                { end = { column = 29, line = 1, offset = 28 }
+                                , start = { column = 1, line = 1, offset = 0 }
+                                }
+                            , text =
+                                [ Description.Styled
+                                    { end =
+                                        { column = 12
+                                        , line = 1
+                                        , offset = 11
+                                        }
+                                    , start = { column = 1, line = 1, offset = 0 }
+                                    }
+                                    (Description.Text { bold = False, italic = False, strike = False } "Here is my ")
+                                , Description.Styled
+                                    { end =
+                                        { column = 21
+                                        , line = 1
+                                        , offset = 20
+                                        }
+                                    , start = { column = 12, line = 1, offset = 11 }
+                                    }
+                                    (Description.Text { bold = False, italic = True, strike = False } "styled / ")
+                                , Description.Styled
+                                    { end = { column = 25, line = 1, offset = 24 }
+                                    , start = { column = 21, line = 1, offset = 20 }
+                                    }
+                                    (Description.Text { bold = True, italic = True, strike = False } "text")
+                                , Description.Styled
+                                    { end = { column = 26, line = 1, offset = 25 }
+                                    , start = { column = 25, line = 1, offset = 24 }
+                                    }
+                                    (Description.Text { bold = False, italic = True, strike = False } ".")
+                                ]
+                            }
+                        )
+                    )
+        , test "style that ends at the end" <|
+            \_ ->
+                Expect.equal
+                    (Parser.run
+                        (Mark.Internal.Parser.styledText
+                            { inlines = []
+                            , replacements = []
+                            }
+                            Description.ParseInline
+                            Id.initialSeed
+                            { column = 1, line = 1, offset = 0 }
+                            emptyStyles
+                        )
+                        "Hello *World*"
+                    )
+                    (Ok
+                        (Description.DescribeText
+                            { id = Id.Id [ 0 ]
+                            , range =
+                                { end = { column = 14, line = 1, offset = 13 }
+                                , start = { column = 1, line = 1, offset = 0 }
+                                }
+                            , text =
+                                [ Description.Styled
+                                    { end = { column = 7, line = 1, offset = 6 }
+                                    , start = { column = 1, line = 1, offset = 0 }
+                                    }
+                                    (Description.Text
+                                        { bold = False
+                                        , italic = False
+                                        , strike = False
+                                        }
+                                        "Hello "
+                                    )
+                                , Description.Styled
+                                    { end = { column = 12, line = 1, offset = 11 }
+                                    , start = { column = 7, line = 1, offset = 6 }
+                                    }
+                                    (Description.Text
+                                        { bold = True
+                                        , italic = False
+                                        , strike = False
+                                        }
+                                        "World"
+                                    )
+                                ]
+                            }
+                        )
+                    )
+        , only <|
+            test "stackedstyles" <|
+                \_ ->
+                    Expect.equal
+                        (Parser.run
+                            (Mark.Internal.Parser.styledText
+                                { inlines = []
+                                , replacements = []
+                                }
+                                Description.ParseInline
+                                Id.initialSeed
+                                { column = 1, line = 1, offset = 0 }
+                                emptyStyles
+                            )
+                            "Hello /*World*/"
+                        )
+                        (Ok
+                            (Description.DescribeText
+                                { id = Id.Id [ 0 ]
+                                , range =
+                                    { end = { column = 16, line = 1, offset = 15 }
+                                    , start = { column = 1, line = 1, offset = 0 }
+                                    }
+                                , text =
+                                    [ Description.Styled
+                                        { end = { column = 7, line = 1, offset = 6 }
+                                        , start = { column = 1, line = 1, offset = 0 }
+                                        }
+                                        (Description.Text
+                                            { bold = False
+                                            , italic = False
+                                            , strike = False
+                                            }
+                                            "Hello "
+                                        )
+                                    , Description.Styled
+                                        { end = { column = 12, line = 1, offset = 11 }
+                                        , start = { column = 7, line = 1, offset = 6 }
+                                        }
+                                        (Description.Text
+                                            { bold = True
+                                            , italic = True
+                                            , strike = False
+                                            }
+                                            "World"
+                                        )
+                                    ]
+                                }
+                            )
+                        )
 
         -- , test "basic w/ inline token" <|
         --     \_ ->

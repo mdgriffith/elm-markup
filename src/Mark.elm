@@ -1443,7 +1443,6 @@ textWith options =
                                 seed
                                 pos
                                 emptyStyles
-                                []
                         )
                 )
         }
