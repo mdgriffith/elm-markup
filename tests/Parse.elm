@@ -187,56 +187,55 @@ text =
                             }
                         )
                     )
-        , only <|
-            test "stackedstyles" <|
-                \_ ->
-                    Expect.equal
-                        (Parser.run
-                            (Mark.Internal.Parser.styledText
-                                { inlines = []
-                                , replacements = []
-                                }
-                                Description.ParseInline
-                                Id.initialSeed
-                                { column = 1, line = 1, offset = 0 }
-                                emptyStyles
-                            )
-                            "Hello /*World*/"
+        , test "stackedstyles" <|
+            \_ ->
+                Expect.equal
+                    (Parser.run
+                        (Mark.Internal.Parser.styledText
+                            { inlines = []
+                            , replacements = []
+                            }
+                            Description.ParseInline
+                            Id.initialSeed
+                            { column = 1, line = 1, offset = 0 }
+                            emptyStyles
                         )
-                        (Ok
-                            (Description.DescribeText
-                                { id = Id.Id [ 0 ]
-                                , range =
-                                    { end = { column = 16, line = 1, offset = 15 }
+                        "Hello /*World*/"
+                    )
+                    (Ok
+                        (Description.DescribeText
+                            { id = Id.Id [ 0 ]
+                            , range =
+                                { end = { column = 16, line = 1, offset = 15 }
+                                , start = { column = 1, line = 1, offset = 0 }
+                                }
+                            , text =
+                                [ Description.Styled
+                                    { end = { column = 7, line = 1, offset = 6 }
                                     , start = { column = 1, line = 1, offset = 0 }
                                     }
-                                , text =
-                                    [ Description.Styled
-                                        { end = { column = 7, line = 1, offset = 6 }
-                                        , start = { column = 1, line = 1, offset = 0 }
+                                    (Description.Text
+                                        { bold = False
+                                        , italic = False
+                                        , strike = False
                                         }
-                                        (Description.Text
-                                            { bold = False
-                                            , italic = False
-                                            , strike = False
-                                            }
-                                            "Hello "
-                                        )
-                                    , Description.Styled
-                                        { end = { column = 12, line = 1, offset = 11 }
-                                        , start = { column = 7, line = 1, offset = 6 }
+                                        "Hello "
+                                    )
+                                , Description.Styled
+                                    { end = { column = 12, line = 1, offset = 11 }
+                                    , start = { column = 7, line = 1, offset = 6 }
+                                    }
+                                    (Description.Text
+                                        { bold = True
+                                        , italic = True
+                                        , strike = False
                                         }
-                                        (Description.Text
-                                            { bold = True
-                                            , italic = True
-                                            , strike = False
-                                            }
-                                            "World"
-                                        )
-                                    ]
-                                }
-                            )
+                                        "World"
+                                    )
+                                ]
+                            }
                         )
+                    )
 
         -- , test "basic w/ inline token" <|
         --     \_ ->
