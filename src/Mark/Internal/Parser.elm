@@ -451,7 +451,7 @@ styledText options context seed startingPos inheritedStyles =
             textCursor inheritedStyles startingPos
 
         meaningful =
-            'h' :: '1' :: '\\' :: '\n' :: stylingChars ++ replacementStartingChars options.replacements
+            '1' :: '\\' :: '\n' :: stylingChars ++ replacementStartingChars options.replacements
 
         -- Note #1 : We're conting on the caller of styled text to advance the seed for us.
         ( newId, newSeed ) =
@@ -602,17 +602,6 @@ styledTextLoop options context meaningful found =
                     |= getPosition
                     |= attrContainer standalones
                     |= getPosition
-
-        -- if we encounter links, parse them as complete lines
-        , Parser.succeed
-            (\link ->
-                Parser.Loop (addText ("http" ++ link) found)
-            )
-            |. Parser.token (Parser.Token "http" (Expecting "http"))
-            |= Parser.getChompedString (Parser.chompWhile (\c -> c /= ' ' && c /= '\n'))
-        , Parser.succeed
-            (Parser.Loop (addText "h" found))
-            |. Parser.chompIf (\c -> c == 'h') (Expecting "h")
 
         -- Parse Selection
         -- depending on selection type, capture attributes if applicable.

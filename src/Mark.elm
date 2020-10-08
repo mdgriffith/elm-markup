@@ -2021,7 +2021,6 @@ float =
   - `--` is replaced with an [en-dash(`–`)](https://practicaltypography.com/hyphens-and-dashes.html).
   - `---` is replaced with an [em-dash(`—`)](https://practicaltypography.com/hyphens-and-dashes.html).
   - `<>` also known as "glue", will create a non-breaking space (`&nbsp;`). This is not for manually increasing space (sequential `<>` tokens will only render as one `&nbsp;`), but to signify that the space between two words shouldn't break when wrapping. Like glueing two words together!
-  - `//` will change to `/`. Normally `/` starts italic formatting. To escape this, we'd normally do `\/`, though that looks pretty funky. `//` just feels better!
 
 **Note** this is included by default in `Mark.text`
 
@@ -2032,7 +2031,6 @@ commonReplacements =
     , Parse.Replacement "<>" "\u{00A0}"
     , Parse.Replacement "---" "—"
     , Parse.Replacement "--" "–"
-    , Parse.Replacement "//" "/"
     , Parse.Replacement "'" "’"
     , Parse.Balanced
         { start = ( "\"", "“" )
