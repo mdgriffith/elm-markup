@@ -351,14 +351,11 @@ update doc edit (Parsed original) =
                                 DescribeText details ->
                                     let
                                         newTexts =
-                                            details.text
-                                                |> List.foldl
-                                                    (doTextEdit start
-                                                        end
-                                                        (List.map (applyStyles restyleAction))
-                                                    )
-                                                    emptySelectionEdit
-                                                |> .elements
+                                            doTextEdit start
+                                                end
+                                                (List.map (applyStyles restyleAction))
+                                                details.text
+                                                emptySelectionEdit
                                                 |> List.foldl mergeStyles []
                                     in
                                     EditMade
@@ -379,49 +376,46 @@ update doc edit (Parsed original) =
                                 DescribeText details ->
                                     let
                                         newTexts =
-                                            details.text
-                                                |> List.foldl
-                                                    (doTextEdit start
-                                                        end
-                                                        (\els ->
-                                                            let
-                                                                textStart =
-                                                                    getTextStart els
-                                                                        |> Maybe.withDefault pos
+                                            doTextEdit start
+                                                end
+                                                (\els ->
+                                                    let
+                                                        textStart =
+                                                            getTextStart els
+                                                                |> Maybe.withDefault pos
 
-                                                                wrapped =
-                                                                    case wrapper of
-                                                                        Annotation name attrs ->
-                                                                            ExpectInlineBlock
-                                                                                { name = name
-                                                                                , kind =
-                                                                                    SelectText
-                                                                                        (List.concatMap onlyText els)
-                                                                                , fields = attrs
-                                                                                }
+                                                        wrapped =
+                                                            case wrapper of
+                                                                Annotation name attrs ->
+                                                                    ExpectInlineBlock
+                                                                        { name = name
+                                                                        , kind =
+                                                                            SelectText
+                                                                                (List.concatMap onlyText els)
+                                                                        , fields = attrs
+                                                                        }
 
-                                                                        Verbatim name attrs ->
-                                                                            ExpectInlineBlock
-                                                                                { name = name
-                                                                                , kind =
-                                                                                    SelectString
-                                                                                        (List.concatMap onlyText els
-                                                                                            |> List.map textString
-                                                                                            |> String.join ""
-                                                                                        )
-                                                                                , fields = attrs
-                                                                                }
+                                                                Verbatim name attrs ->
+                                                                    ExpectInlineBlock
+                                                                        { name = name
+                                                                        , kind =
+                                                                            SelectString
+                                                                                (List.concatMap onlyText els
+                                                                                    |> List.map textString
+                                                                                    |> String.join ""
+                                                                                )
+                                                                        , fields = attrs
+                                                                        }
 
-                                                                ( end_, newText ) =
-                                                                    createInline
-                                                                        textStart
-                                                                        [ wrapped ]
-                                                            in
-                                                            newText
-                                                        )
-                                                    )
-                                                    emptySelectionEdit
-                                                |> .elements
+                                                        ( end_, newText ) =
+                                                            createInline
+                                                                textStart
+                                                                [ wrapped ]
+                                                    in
+                                                    newText
+                                                )
+                                                details.text
+                                                emptySelectionEdit
                                                 |> List.foldl mergeStyles []
                                     in
                                     EditMade
@@ -445,14 +439,12 @@ update doc edit (Parsed original) =
                                                 |> Tuple.second
 
                                         newTexts =
-                                            details.text
-                                                |> List.foldl
-                                                    (doTextEdit start
-                                                        end
-                                                        makeNewText
-                                                    )
-                                                    emptySelectionEdit
-                                                |> .elements
+                                            doTextEdit
+                                                start
+                                                end
+                                                makeNewText
+                                                details.text
+                                                emptySelectionEdit
                                                 |> List.foldl mergeStyles []
                                     in
                                     EditMade
@@ -1556,90 +1548,116 @@ doTextEdit :
     Offset
     -> Offset
     -> (List TextDescription -> List TextDescription)
-    -> TextDescription
+    -> List TextDescription
     ->
         { elements : List TextDescription
         , offset : Int
         , selection : Maybe (List TextDescription)
         }
-    ->
-        { elements : List TextDescription
-        , offset : Int
-        , selection : Maybe (List TextDescription)
-        }
-doTextEdit anchor focus editFn current cursor =
-    let
-        start =
-            min anchor focus
+    -> List TextDescription
+doTextEdit anchor focus editFn textDescs cursor =
+    case textDescs of
+        [] ->
+            case cursor.selection of
+                Nothing ->
+                    cursor.elements
 
-        end =
-            max anchor focus
+                Just selection ->
+                    editFn selection ++ cursor.elements
 
-        len =
-            length current
-    in
-    case cursor.selection of
-        Nothing ->
-            if cursor.offset <= start && cursor.offset + len >= start then
-                {- Start Selection -}
-                if cursor.offset + len >= end then
-                    {- We finish the selection in this element -}
-                    let
-                        ( before, afterLarge ) =
-                            splitAt (start - cursor.offset) current
+        current :: remain ->
+            let
+                start =
+                    min anchor focus
 
-                        ( selected, after ) =
-                            splitAt (end - start) afterLarge
-                    in
-                    { offset = cursor.offset + len
-                    , elements =
-                        after :: editFn [ selected ] ++ (before :: cursor.elements)
-                    , selection =
-                        Nothing
-                    }
+                end =
+                    max anchor focus
 
-                else
-                    let
-                        ( before, after ) =
-                            splitAt (start - cursor.offset) current
-                    in
-                    { offset = cursor.offset + len
-                    , elements =
-                        before :: cursor.elements
-                    , selection =
-                        Just [ after ]
-                    }
+                len =
+                    length current
+            in
+            case cursor.selection of
+                Nothing ->
+                    if cursor.offset <= start && cursor.offset + len >= start then
+                        {- Start Selection -}
+                        if cursor.offset + len >= end then
+                            {- We finish the selection in this element -}
+                            let
+                                ( before, afterLarge ) =
+                                    splitAt (start - cursor.offset) current
 
-            else
-                { offset = cursor.offset + len
-                , elements = current :: cursor.elements
-                , selection = cursor.selection
-                }
+                                ( selected, after ) =
+                                    splitAt (end - start) afterLarge
+                            in
+                            doTextEdit anchor
+                                focus
+                                editFn
+                                remain
+                                { offset = cursor.offset + len
+                                , elements =
+                                    after :: editFn [ selected ] ++ (before :: cursor.elements)
+                                , selection =
+                                    Nothing
+                                }
 
-        Just selection ->
-            if cursor.offset + len >= end then
-                let
-                    ( before, after ) =
-                        splitAt (end - cursor.offset) current
-
-                    fullSelection =
-                        before :: selection
-                in
-                { offset = cursor.offset + len
-                , elements =
-                    if cursor.offset + len == end then
-                        editFn fullSelection ++ cursor.elements
+                        else
+                            let
+                                ( before, after ) =
+                                    splitAt (start - cursor.offset) current
+                            in
+                            doTextEdit anchor
+                                focus
+                                editFn
+                                remain
+                                { offset = cursor.offset + len
+                                , elements =
+                                    before :: cursor.elements
+                                , selection =
+                                    Just [ after ]
+                                }
 
                     else
-                        after :: editFn fullSelection ++ cursor.elements
-                , selection = Nothing
-                }
+                        doTextEdit anchor
+                            focus
+                            editFn
+                            remain
+                            { offset = cursor.offset + len
+                            , elements = current :: cursor.elements
+                            , selection = cursor.selection
+                            }
 
-            else
-                { offset = cursor.offset + len
-                , elements = cursor.elements
-                , selection = Just (current :: selection)
-                }
+                Just selection ->
+                    if cursor.offset + len >= end then
+                        let
+                            ( before, after ) =
+                                splitAt (end - cursor.offset) current
+
+                            fullSelection =
+                                before :: selection
+                        in
+                        doTextEdit anchor
+                            focus
+                            editFn
+                            remain
+                            { offset = cursor.offset + len
+                            , elements =
+                                if cursor.offset + len == end then
+                                    editFn fullSelection ++ cursor.elements
+
+                                else
+                                    after :: editFn fullSelection ++ cursor.elements
+                            , selection = Nothing
+                            }
+
+                    else
+                        doTextEdit anchor
+                            focus
+                            editFn
+                            remain
+                            { offset = cursor.offset + len
+                            , elements = cursor.elements
+                            , selection = Just (current :: selection)
+                            }
 
 
 applyStyles : Restyle -> TextDescription -> TextDescription

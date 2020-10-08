@@ -439,7 +439,7 @@ edits =
                 \_ ->
                     let
                         parseOutcome =
-                            Mark.parse styledText "Hel*lo Wo*rld"
+                            Mark.parse styledText "Hello *World*"
 
                         new =
                             case parseOutcome of
@@ -449,7 +449,34 @@ edits =
                                         (Mark.Edit.restyle
                                             (Id.Id [ 0 ])
                                             3
-                                            8
+                                            11
+                                            { bold = False
+                                            , italic = False
+                                            , strike = False
+                                            }
+                                        )
+                                        parsed
+
+                                _ ->
+                                    Err []
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok "Hello World")
+            , test "Clearing styles with over-sized ranges still works as you'd expect" <|
+                \_ ->
+                    let
+                        parseOutcome =
+                            Mark.parse styledText "Hello *World*"
+
+                        new =
+                            case parseOutcome of
+                                Mark.Success parsed ->
+                                    Mark.Edit.update
+                                        styledText
+                                        (Mark.Edit.restyle
+                                            (Id.Id [ 0 ])
+                                            3
+                                            13
                                             { bold = False
                                             , italic = False
                                             , strike = False
