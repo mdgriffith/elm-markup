@@ -1821,7 +1821,7 @@ string =
             \desc ->
                 case desc of
                     DescribeString id range str ->
-                        Outcome.Success (String.trim str)
+                        Outcome.Success str
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -1852,7 +1852,7 @@ string =
                     ParseBlock ->
                         Parser.map
                             (\( pos, str ) ->
-                                DescribeString id pos str
+                                DescribeString id pos (String.trim str)
                             )
                             (Parse.withRange
                                 (Parse.withIndent
@@ -1865,7 +1865,7 @@ string =
                     ParseInTree ->
                         Parser.map
                             (\( pos, str ) ->
-                                DescribeString id pos str
+                                DescribeString id pos (String.trim str)
                             )
                             (Parse.withRange
                                 (Parse.withIndent
