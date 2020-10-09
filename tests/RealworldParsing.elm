@@ -80,9 +80,7 @@ elmOptimizeLevelTwoTODOTiny =
     Benchmarks
 
 
-|> List
-
-    -- other {x} Script to run benchmark via webdriver."""
+-- other {x} Script to run benchmark via webdriver."""
 
 
 elmOptimizeLevelTwoTODO =
@@ -92,99 +90,100 @@ elmOptimizeLevelTwoTODO =
     icon = ?
     description = Imported
 
-|> List
 
-    -- {x} Script to run benchmark via webdriver.
 
-        -- {x} Reports results from elm-benchmark via json through a port
+-- {x} Script to run benchmark via webdriver.
 
-            -- {x} Can we standardize this as a Benchmark.JsonRunner?
+    -- {x} Reports results from elm-benchmark via json through a port
+
+        -- {x} Can we standardize this as a Benchmark.JsonRunner?
+
 |> H2
     Benchmarks
 
 
 
-    -- {x} elm-markdown
+-- {x} elm-markdown
 
-        -- {x} Here, but runs into a transformation error
+    -- {x} Here, but runs into a transformation error
 
-    -- {x} elm-ui
+-- {x} elm-ui
 
-        -- {x} Might run afoul of elm-benchmark using style-elements
+    -- {x} Might run afoul of elm-benchmark using style-elements
 
-    -- {x} elm-animator
+-- {x} elm-animator
 
-    -- {_} elm-json
+-- {_} elm-json
 
-    -- {_} [https://github.com/ianmackenzie/elm-iso-10303]{link| url = https://github.com/ianmackenzie/elm-iso-10303}
+-- {_} [https://github.com/ianmackenzie/elm-iso-10303]{link| url = https://github.com/ianmackenzie/elm-iso-10303}
 
-    -- {x} [https://github.com/w0rm/elm-obj-file/blob/master/benchmarks/src/Decode.elm]{link| url = https://github.com/w0rm/elm-obj-file/blob/master/benchmarks/src/Decode.elm}
+-- {x} [https://github.com/w0rm/elm-obj-file/blob/master/benchmarks/src/Decode.elm]{link| url = https://github.com/w0rm/elm-obj-file/blob/master/benchmarks/src/Decode.elm}
 
-    -- {_} Rewrite Readme
+-- {_} Rewrite Readme
 
-        -- {x} Running the CLI
+    -- {x} Running the CLI
 
-            -- {x} A drop in replacement for elm make --optimize
+        -- {x} A drop in replacement for elm make --optimize
 
-            -- {x} Also a --no-ie option
+        -- {x} Also a --no-ie option
 
-        -- {x} Overview of Results
+    -- {x} Overview of Results
 
-            -- {x} Transformation Overview
+        -- {x} Transformation Overview
 
-            -- {x} Latest suite of benchmarks in table
+        -- {x} Latest suite of benchmarks in table
 
-            -- {x} Benchmarks of Breakdowns
+        -- {x} Benchmarks of Breakdowns
 
-        -- {x} elm-optimize as a testbed
+    -- {x} elm-optimize as a testbed
 
-            -- {x} Running the testcases
+        -- {x} Running the testcases
 
-        -- {x} Contributing
+    -- {x} Contributing
 
-            -- {x} Contributing actual benchmarks
+        -- {x} Contributing actual benchmarks
 
-                -- {x} via exposed elm-benchmark
+            -- {x} via exposed elm-benchmark
 
-            -- {_} Open Problems
+        -- {_} Open Problems
 
-                -- {_} Hoisting Constants
+            -- {_} Hoisting Constants
 
-                -- {_} Analyzing What Functions are Optimized or Deoptimized for a Run
+            -- {_} Analyzing What Functions are Optimized or Deoptimized for a Run
 
-                -- {_} Shape analysis for elm functions
+            -- {_} Shape analysis for elm functions
 
-                    -- {_} Specifically do the constructors for each variant actually return the same shape?
+                -- {_} Specifically do the constructors for each variant actually return the same shape?
 
-    -- {_} Improve testcase run output
+-- {_} Improve testcase run output
 
-        -- {x} Report what is happening at each step, colorized
+    -- {x} Report what is happening at each step, colorized
 
-        -- {_} Instrument each transformation with metrics
+    -- {_} Instrument each transformation with metrics
 
-            -- {_} What optimizations were applied and how many instances
+        -- {_} What optimizations were applied and how many instances
 
-            -- {_} What situations were detected that were unoptimizable.
+        -- {_} What situations were detected that were unoptimizable.
 
-            -- {_} Can we return this as data for a report?
+        -- {_} Can we return this as data for a report?
 
-    -- {x} Report project for each benchmark
+-- {x} Report project for each benchmark
 
-        -- {x} markdown report
+    -- {x} markdown report
 
-    -- {x} Report benchmark tags for each benchmark
+-- {x} Report benchmark tags for each benchmark
 
-        -- {x} json
+    -- {x} json
 
-        -- {x} markdown report
+    -- {x} markdown report
 
-    -- {x} Parse actual project for types
+-- {x} Parse actual project for types
 
-    -- {_} Blissfully Test case
+-- {_} Blissfully Test case
 
-        -- {_} Add note to transformations about arrowizing functions being important for initial parse time.
+    -- {_} Add note to transformations about arrowizing functions being important for initial parse time.
 
-        -- {_} Compare terser vs our own version
+    -- {_} Compare terser vs our own version
 |> H3
     Table to Generate
 
@@ -193,17 +192,16 @@ elmOptimizeLevelTwoTODO =
 
 Project →
 
-|> List
 
-    -- Tags, Name
+-- Tags, Name
 
-    -- Base | transformed (transformations applied)
+-- Base | transformed (transformations applied)
 
-    -- Browser
+-- Browser
 
-    -- Ops/Second
+-- Ops/Second
 
-    -- Percent Change
+-- Percent Change
 """
 
 
@@ -233,7 +231,7 @@ document =
                 , image
                 , list
                 , code
-                , Mark.map (always (Html.text "record")) metadata
+                , Mark.map (always (Html.text "record")) (Mark.toBlock metadata)
                 , Mark.withId
                     (\id els ->
                         Html.p
@@ -376,7 +374,6 @@ metadata =
         |> Mark.field "description" text
         |> Mark.field "title" text
         |> Mark.field "icon" Mark.string
-        |> Mark.toBlock
 
 
 
@@ -467,7 +464,7 @@ code =
 
 list : Mark.Block (Html msg)
 list =
-    Mark.tree "List" renderList (Mark.map (Html.div []) text)
+    Mark.tree renderList (Mark.map (Html.div []) text)
 
 
 {-| Note: we have to define this as a separate function because

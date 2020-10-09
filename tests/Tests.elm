@@ -138,7 +138,6 @@ withMetaData =
                 (\one two -> { one = one, two = two })
                 |> Mark.field "one" Mark.string
                 |> Mark.field "two" Mark.string
-                |> Mark.toBlock
         , body =
             Mark.manyOf
                 [ text
@@ -218,19 +217,17 @@ singleOneOf =
 
 
 codeAndTextDoc =
-    Mark.documentWith
-        (\mono extra ->
-            mono ++ ":" ++ String.join "," extra
+    Mark.document
+        (\blocks ->
+            String.join ":" blocks
         )
-        { metadata =
-            Mark.block "Monospace"
+        (Mark.manyOf
+            [ Mark.block "Monospace"
                 identity
                 Mark.string
-        , body =
-            Mark.manyOf
-                [ Mark.map (always "text") text
-                ]
-        }
+            , Mark.map (always "text") text
+            ]
+        )
 
 
 intDoc =
@@ -273,10 +270,12 @@ nested : Mark.Document (List Indexed)
 nested =
     Mark.document
         (renderEnumWith (renderIndex []))
-        (Mark.tree
-            "Nested"
+        (Mark.block "Nested"
             identity
-            (Mark.map (always True) Mark.int)
+            (Mark.tree
+                identity
+                (Mark.map (always True) Mark.int)
+            )
         )
 
 
@@ -284,9 +283,12 @@ nestedOrdering : Mark.Document (List Ordered)
 nestedOrdering =
     Mark.document
         (renderEnumWith (renderContent []))
-        (Mark.tree "Nested"
+        (Mark.block "Nested"
             identity
-            Mark.int
+            (Mark.tree
+                identity
+                Mark.int
+            )
         )
 
 
@@ -326,9 +328,12 @@ iconListDoc : Mark.Document (List Icons)
 iconListDoc =
     Mark.document
         (renderEnumWithIcon (renderIcon []))
-        (Mark.tree "WithIcons"
+        (Mark.block "WithIcons"
             identity
-            Mark.int
+            (Mark.tree
+                identity
+                Mark.int
+            )
         )
 
 
@@ -336,9 +341,12 @@ nestedString : Mark.Document (List Icons)
 nestedString =
     Mark.document
         (renderEnumWithIcon (renderIcon []))
-        (Mark.tree "WithIcons"
+        (Mark.block "WithIcons"
             identity
-            Mark.string
+            (Mark.tree
+                identity
+                Mark.string
+            )
         )
 
 

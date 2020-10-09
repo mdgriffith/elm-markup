@@ -136,9 +136,9 @@ type Icon
 
 
 {-| -}
-tree : String -> List Tree -> Block
-tree name treeContents =
-    ExpectTree name
+tree : List Tree -> Block
+tree treeContents =
+    ExpectTree
         (List.map convertToTreeExpectation treeContents)
 
 

@@ -7,6 +7,8 @@ module Mark.Internal.Parser exposing
     , getFailableBlock
     , getPosition
     , getRangeAndSource
+    , iconParser
+    , indentationString
     , indentedString
     , int
     , manyOf
@@ -194,7 +196,7 @@ indentedString indentation found =
                 (\str ->
                     Parser.Loop (found ++ str)
                 )
-                |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
+                |. Parser.token (Parser.Token (indentationString indentation) (ExpectingIndentation indentation))
                 |= Parser.getChompedString
                     (Parser.chompWhile
                         (\c -> c /= '\n')
@@ -229,7 +231,7 @@ raggedIndentedStringAbove indentation found =
                     Parser.Done found
 
                 else
-                    Parser.Loop (found ++ String.repeat indentCount " " ++ str)
+                    Parser.Loop (found ++ indentationString indentCount ++ str)
             )
             |= Parser.oneOf (indentationBetween (indentation + 1) (indentation + 4))
             |= Parser.getChompedString
@@ -256,7 +258,7 @@ indentationBetween lower higher =
             (\numSpaces ->
                 Parser.succeed numSpaces
                     |. Parser.token
-                        (Parser.Token (String.repeat numSpaces " ")
+                        (Parser.Token (indentationString numSpaces)
                             (ExpectingIndentation numSpaces)
                         )
             )
@@ -723,7 +725,7 @@ finalizeString context str =
                             ContinueWith add ->
                                 ( str ++ add, False )
                     )
-                    |. Parser.backtrackable (Parser.token (Parser.Token ("\n" ++ String.repeat indentation " ") Newline))
+                    |. Parser.backtrackable (Parser.token (Parser.Token ("\n" ++ indentationString indentation) Newline))
                     |= Parser.oneOf
                         ([ Parser.map (always (StopWith "")) (Parser.end End)
                          , Parser.map (always (StopWith "")) newline
@@ -1468,7 +1470,7 @@ manyOf indentation blocks cursor =
                             , seed = newSeed
                             }
                     )
-                    |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
+                    |. Parser.token (Parser.Token (indentationString indentation) (ExpectingIndentation indentation))
                     |= makeBlocksParser blocks cursor.seed
                 , Parser.succeed
                     (Parser.Loop
@@ -1573,6 +1575,23 @@ type alias FlatCursor =
     , range : Range
     , content : Description
     }
+
+
+peek : String -> Parser c p thing -> Parser c p thing
+peek name parser =
+    Parser.succeed
+        (\start val end src ->
+            let
+                _ =
+                    Debug.log name
+                        (String.slice start.offset end.offset src)
+            in
+            val
+        )
+        |= getPosition
+        |= parser
+        |= getPosition
+        |= Parser.getSource
 
 
 {-| Results in a flattened version of the parsed list.
@@ -1794,6 +1813,28 @@ type Indented thing
     | EmptyLine
 
 
+indentationString n =
+    case n of
+        0 ->
+            ""
+
+        4 ->
+            "    "
+
+        8 ->
+            "        "
+
+        12 ->
+            "            "
+
+        16 ->
+            "                "
+
+        _ ->
+            -- this just allocates a bunch more than is needed
+            String.repeat n " "
+
+
 {-| -}
 parseFields :
     String
@@ -1825,7 +1866,7 @@ parseFields recordName fieldNames fields =
                         |= Parser.oneOf
                             [ Parser.succeed identity
                                 |. Parser.token
-                                    (Parser.Token (String.repeat indentation " ")
+                                    (Parser.Token (indentationString indentation)
                                         (ExpectingIndentation indentation)
                                     )
                                 |= Parser.getChompedString (Parser.chompWhile (\c -> c /= '\n'))
@@ -1900,7 +1941,7 @@ indentOrSkip :
 indentOrSkip indentation successParser =
     Parser.oneOf
         [ Parser.succeed identity
-            |. Parser.token (Parser.Token (String.repeat indentation " ") (ExpectingIndentation indentation))
+            |. Parser.token (Parser.Token (indentationString indentation) (ExpectingIndentation indentation))
             |= Parser.oneOf
                 [ Parser.map (always EmptyLine) newline
                 , Parser.succeed
@@ -2132,9 +2173,9 @@ expectIndentation base previous =
     Parser.succeed Tuple.pair
         |= Parser.oneOf
             ([ Parser.succeed (previous + 4)
-                |. Parser.token (Parser.Token (String.repeat (previous + 4) " ") (ExpectingIndentation (previous + 4)))
+                |. Parser.token (Parser.Token (indentationString (previous + 4)) (ExpectingIndentation (previous + 4)))
              , Parser.succeed previous
-                |. Parser.token (Parser.Token (String.repeat previous " ") (ExpectingIndentation previous))
+                |. Parser.token (Parser.Token (indentationString previous) (ExpectingIndentation previous))
              ]
                 ++ descending base previous
             )
@@ -2189,7 +2230,7 @@ descending base prev =
                             base + (x * 4)
                     in
                     Parser.succeed level
-                        |. Parser.token (Parser.Token (String.repeat level " ") (ExpectingIndentation level))
+                        |. Parser.token (Parser.Token (indentationString level) (ExpectingIndentation level))
                 )
                 (List.range 0 (((prev - 4) - base) // 4))
             )

@@ -447,10 +447,10 @@ document view child =
 
 -}
 documentWith :
-    (metadata -> body -> document)
+    (metadata -> block -> document)
     ->
-        { metadata : Block metadata
-        , body : Block body
+        { metadata : Record metadata
+        , body : Block block
         }
     -> Document document
 documentWith renderer { metadata, body } =
@@ -458,7 +458,7 @@ documentWith renderer { metadata, body } =
         identity
         (startWith
             renderer
-            metadata
+            (toBlock metadata)
             body
         )
 
@@ -1108,18 +1108,16 @@ Here's how to render the above list:
 
 -}
 tree :
-    String
-    -> (Enumerated item -> result)
+    (Enumerated item -> result)
     -> Block item
     -> Block result
-tree name view contentBlock =
+tree view contentBlock =
     let
         blockExpectation =
             getBlockExpectation contentBlock
 
         expectation =
             ExpectTree
-                name
                 [ TreeExpectation
                     { icon = Desc.Bullet
                     , content = [ blockExpectation ]
@@ -1128,7 +1126,7 @@ tree name view contentBlock =
                 ]
     in
     Block
-        { kind = Named name
+        { kind = Value
         , expect = expectation
         , converter =
             \description ->
@@ -1172,28 +1170,40 @@ tree name view contentBlock =
                 ( newSeed
                 , Parse.withIndent
                     (\baseIndent ->
-                        Parser.succeed identity
-                            |. Parser.keyword
-                                (Parser.Token name
-                                    (Error.ExpectingBlockName name)
-                                )
-                            |. Parser.chompWhile (\c -> c == ' ')
-                            |. Parse.skipBlankLineWith ()
-                            |= Parser.map
-                                (\( pos, result ) ->
-                                    DescribeTree
-                                        { id = newId
-                                        , name = name
-                                        , children = Parse.buildTree (baseIndent + 4) result
-                                        , range = pos
-                                        , expected = expectation
-                                        }
-                                )
-                                (Parse.withRange
-                                    (Parser.loop
-                                        ( { base = baseIndent + 4
-                                          , prev = baseIndent + 4
-                                          , seed = indentedSeed
+                        let
+                            ( secondSeed, itemParser ) =
+                                getParser context indentedSeed contentBlock
+                        in
+                        Parser.map
+                            (\( pos, builtTree ) ->
+                                DescribeTree
+                                    { id = newId
+                                    , children = builtTree
+                                    , range = pos
+                                    , expected = expectation
+                                    }
+                            )
+                            (Parse.withRange
+                                (Parser.succeed
+                                    (\start icon first end remaining ->
+                                        Parse.buildTree
+                                            baseIndent
+                                            ({ icon = Just icon
+                                             , indent = baseIndent
+                                             , range = { start = start, end = end }
+                                             , content = first
+                                             }
+                                                :: remaining
+                                            )
+                                    )
+                                    |= Parse.getPosition
+                                    |= Parse.iconParser
+                                    |= itemParser
+                                    |= Parse.getPosition
+                                    |= Parser.loop
+                                        ( { base = baseIndent
+                                          , prev = baseIndent
+                                          , seed = secondSeed
                                           }
                                         , []
                                         )
@@ -1201,8 +1211,8 @@ tree name view contentBlock =
                                             ParseInTree
                                             contentBlock
                                         )
-                                    )
                                 )
+                            )
                     )
                 )
         }

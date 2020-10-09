@@ -269,7 +269,6 @@ type Description
         }
     | DescribeTree
         { id : Id
-        , name : String
         , range : Range
         , children : List (Nested Description)
         , expected : Expectation
@@ -372,7 +371,7 @@ type Expectation
     | ExpectFloat Float
     | ExpectTextBlock (List InlineExpectation)
     | ExpectString String
-    | ExpectTree String (List TreeExpectation)
+    | ExpectTree (List TreeExpectation)
     | ExpectNothing
 
 
@@ -917,7 +916,7 @@ matchExpected subExp expected =
         ( ExpectString _, ExpectString _ ) ->
             True
 
-        ( ExpectTree oneContent _, ExpectTree twoContent _ ) ->
+        ( ExpectTree _, ExpectTree _ ) ->
             True
 
         _ ->
@@ -1216,7 +1215,6 @@ writeDescription description cursor =
 
         DescribeTree tree ->
             cursor
-                |> write ("|> " ++ tree.name)
                 |> advanceTo tree.range
                 |> (\curs -> List.foldl writeNested curs tree.children)
 
@@ -1636,7 +1634,7 @@ create current =
             , seed = newSeed
             }
 
-        ExpectTree name branches ->
+        ExpectTree branches ->
             let
                 range =
                     { start = current.base
@@ -1674,8 +1672,7 @@ create current =
             { pos = moveNewline current.base
             , desc =
                 DescribeTree
-                    { name = name
-                    , children = children
+                    { children = children
                     , id = parentId
                     , range = range
                     , expected = current.expectation
@@ -2308,7 +2305,7 @@ humanReadableExpectations expect =
         ExpectString _ ->
             "A String"
 
-        ExpectTree content _ ->
+        ExpectTree _ ->
             "A tree"
 
 

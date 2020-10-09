@@ -68,10 +68,13 @@ idRecord =
 
 list : Mark.Block (List ( Id.Id, String ))
 list =
-    Mark.tree "List"
-        renderList
-        (Mark.withId (\i b -> [ Tuple.pair i b ]) <|
-            Mark.map (String.join "--" << List.map Tuple.second) text
+    Mark.block "List"
+        identity
+        (Mark.tree
+            renderList
+            (Mark.withId (\i b -> [ Tuple.pair i b ]) <|
+                Mark.map (String.join "--" << List.map Tuple.second) text
+            )
         )
 
 
