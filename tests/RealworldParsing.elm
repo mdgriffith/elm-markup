@@ -46,6 +46,23 @@ suite =
                 Expect.equal
                     elmOptimizeLevelTwoTODOTiny
                     stringified
+        , test "parse just metadata" <|
+            \_ ->
+                let
+                    parsed =
+                        Mark.metadata
+                            document
+                            elmOptimizeLevelTwoTODO
+                in
+                Expect.true
+                    "Parsed successfully"
+                    (case parsed of
+                        Ok p ->
+                            True
+
+                        Err _ ->
+                            False
+                    )
         ]
 
 
@@ -222,7 +239,7 @@ document =
             }
         )
         -- We have some required metadata that starts our document.
-        { id = "document-id"
+        { id = \_ -> "document-id"
         , metadata = metadata
         , body =
             Mark.manyOf

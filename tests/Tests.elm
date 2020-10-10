@@ -133,7 +133,7 @@ inlineOrder =
 withMetaData =
     Mark.documentWith
         Tuple.pair
-        { id = "none"
+        { id = \_ -> "none"
         , metadata =
             Mark.record "Meta"
                 (\one two -> { one = one, two = two })
@@ -267,7 +267,7 @@ sectionDoc =
         )
 
 
-nested : Mark.Document (List Indexed)
+nested : Mark.Document () (List Indexed)
 nested =
     Mark.document
         (renderEnumWith (renderIndex []))
@@ -280,7 +280,7 @@ nested =
         )
 
 
-nestedOrdering : Mark.Document (List Ordered)
+nestedOrdering : Mark.Document () (List Ordered)
 nestedOrdering =
     Mark.document
         (renderEnumWith (renderContent []))
@@ -325,7 +325,7 @@ renderIcon stack icon i (Mark.Item node) =
     Icons icon (renderEnumWithIcon (renderIcon (i :: stack)) node.children)
 
 
-iconListDoc : Mark.Document (List Icons)
+iconListDoc : Mark.Document () (List Icons)
 iconListDoc =
     Mark.document
         (renderEnumWithIcon (renderIcon []))
@@ -338,7 +338,7 @@ iconListDoc =
         )
 
 
-nestedString : Mark.Document (List Icons)
+nestedString : Mark.Document () (List Icons)
 nestedString =
     Mark.document
         (renderEnumWithIcon (renderIcon []))

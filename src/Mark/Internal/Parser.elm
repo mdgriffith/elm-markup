@@ -16,6 +16,7 @@ module Mark.Internal.Parser exposing
     , newlineWith
     , oneOf
     , parseInlineFields
+    , peek
     , raggedIndentedStringAbove
     , record
     , skipBlankLineWith
@@ -342,6 +343,9 @@ gatherParsers context =
                 }
 
 
+unexpectedInOneOf :
+    List Expectation
+    -> Parser Context Problem (Result Error.Error value)
 unexpectedInOneOf expectations =
     withIndent
         (\indentation ->
@@ -353,6 +357,11 @@ unexpectedInOneOf expectations =
         )
 
 
+getFailableBlock :
+    ParseContext
+    -> Seed
+    -> Block data
+    -> ( Seed, Parser Context Problem (Result Error.Error Description) )
 getFailableBlock context seed (Block details) =
     case details.kind of
         Named name ->

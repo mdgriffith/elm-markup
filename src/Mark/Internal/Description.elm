@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , minusPosition, resetBlockStart, resetFoundStart
+    , emptyRange, minusPosition, resetBlockStart, resetFoundStart
     )
 
 {-|
@@ -46,18 +46,16 @@ module Mark.Internal.Description exposing
 -}
 
 import Mark.Internal.Error as Error
-import Mark.Internal.Format as Format
 import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Outcome exposing (..)
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
 {-| -}
-type Document data
+type Document meta data
     = Document
-        { initialSeed : Id.Seed
-        , currentSeed : Id.Seed
-        , expect : Expectation
+        { expect : Expectation
+        , metadata : Parser Error.Context Error.Problem (Result Error.UnexpectedDetails meta)
         , parser : Parser Error.Context Error.Problem Parsed
         , converter : Parsed -> Outcome Error.AstError (Uncertain data) data
         }
@@ -2139,7 +2137,7 @@ errorsToList ( fst, remain ) =
 
 {-| -}
 compile :
-    Document data
+    Document metadata data
     -> String
     ->
         Result
@@ -2222,7 +2220,7 @@ Render can't add additional errors.
 
 -}
 render :
-    Document data
+    Document meta data
     -> Parsed
     -> Outcome (List Error.Rendered) { errors : List Error.Rendered, result : data } data
 render (Document blocks) ((Parsed parsedDetails) as parsed) =

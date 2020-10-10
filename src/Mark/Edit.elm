@@ -293,7 +293,7 @@ makeDeleteBlock id index indentation pos desc =
 
 
 {-| -}
-update : Document data -> Edit -> Parsed -> Result (List Mark.Error.Error) Parsed
+update : Document meta data -> Edit -> Parsed -> Result (List Mark.Error.Error) Parsed
 update doc edit (Parsed original) =
     let
         editFn =

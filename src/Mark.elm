@@ -9,7 +9,7 @@ module Mark exposing
     , oneOf, manyOf
     , tree, Enumerated(..), Item(..), Icon(..)
     , Outcome(..), Partial
-    , compile, parse, Parsed, toString, render
+    , metadata, compile, parse, Parsed, toString, render
     , map, verify, onError
     , withId, documentId, idToString, stringToId
     )
@@ -65,7 +65,7 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 @docs Outcome, Partial
 
-@docs compile, parse, Parsed, toString, render
+@docs metadata, compile, parse, Parsed, toString, render
 
 
 # Constraining and Recovering Blocks
@@ -103,10 +103,23 @@ toString =
 
 
 {-| -}
-parse : Document data -> String -> Outcome (List Mark.Error.Error) (Partial Parsed) Parsed
+parse : Document metadata data -> String -> Outcome (List Mark.Error.Error) (Partial Parsed) Parsed
 parse doc source =
     Desc.compile doc source
         |> moveParsedToResult
+
+
+{-| -}
+metadata : Document metadata document -> String -> Result Mark.Error.Error metadata
+metadata (Desc.Document doc) source =
+    case Parser.run doc.metadata source of
+        Ok parsed ->
+            parsed
+                |> Result.mapError
+                    (Error.render source)
+
+        Err irrecoverableParsingErrors ->
+            Err (Error.renderParsingErrors source irrecoverableParsingErrors)
 
 
 moveParsedToResult :
@@ -150,14 +163,14 @@ moveParsedToResult result =
 
 
 {-| -}
-render : Document data -> Parsed -> Outcome (List Mark.Error.Error) (Partial data) data
+render : Document meta data -> Parsed -> Outcome (List Mark.Error.Error) (Partial data) data
 render doc ((Parsed parsedDetails) as parsed) =
     Desc.render doc parsed
         |> rewrapOutcome
 
 
 {-| -}
-compile : Document data -> String -> Outcome (List Mark.Error.Error) (Partial data) data
+compile : Document meta data -> String -> Outcome (List Mark.Error.Error) (Partial data) data
 compile doc source =
     Desc.compile doc source
         |> flattenErrors
@@ -210,8 +223,8 @@ startDocRange =
 
 
 {-| -}
-type alias Document data =
-    Desc.Document data
+type alias Document meta data =
+    Desc.Document meta data
 
 
 {-| -}
@@ -346,31 +359,26 @@ and ultimately render it as
 document :
     (child -> result)
     -> Block child
-    -> Document result
-document =
-    createDocument "none"
+    -> Document () result
+document fn body =
+    createDocument (\_ -> "none")
+        fn
+        (Parser.succeed (Ok ()))
+        body
 
 
 createDocument :
-    String
-    -> (child -> result)
+    (meta -> String)
+    -> (child -> data)
+    -> Parser Error.Context Error.Problem (Result Error.UnexpectedDetails meta)
     -> Block child
-    -> Document result
-createDocument docId view child =
-    let
-        expectation =
-            getBlockExpectation child
-
-        seed =
-            Id.initialSeed docId
-
-        ( currentSeed, blockParser ) =
-            Parse.getFailableBlock Desc.ParseBlock seed child
-    in
+    -> Document meta data
+createDocument toDocumentId view meta child =
     Document
-        { expect = expectation
-        , initialSeed = seed
-        , currentSeed = currentSeed
+        { expect =
+            getBlockExpectation child
+        , metadata =
+            meta
         , converter =
             \(Parsed parsed) ->
                 case parsed.found of
@@ -391,42 +399,63 @@ createDocument docId view child =
                     Unexpected unexpected ->
                         Outcome.Almost (Uncertain ( unexpected, [] ))
         , parser =
-            Parser.succeed
-                (\source result ->
-                    case result of
-                        Ok details ->
-                            Parsed
-                                { errors =
-                                    List.map (Error.render source) (getUnexpecteds details.value)
-                                , found = Found details.range details.value
-                                , expected = getBlockExpectation child
-                                , initialSeed = seed
-                                , currentSeed = currentSeed
-                                }
+            Parser.getSource
+                |> Parser.andThen
+                    (\src ->
+                        let
+                            docId =
+                                case Parser.run meta src of
+                                    Ok (Ok m) ->
+                                        toDocumentId m
 
-                        Err details ->
-                            Parsed
-                                { errors =
-                                    [ Error.render source
-                                        { range = details.range
-                                        , problem = details.error
-                                        }
-                                    ]
-                                , found =
-                                    Unexpected
-                                        { range = details.range
-                                        , problem = details.error
-                                        }
-                                , expected = getBlockExpectation child
-                                , initialSeed = seed
-                                , currentSeed = currentSeed
-                                }
-                )
-                |. Parser.chompWhile (\c -> c == '\n')
-                |= Parser.getSource
-                |= Parse.withRangeResult (Parser.withIndent 0 blockParser)
-                |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
-                |. Parser.end End
+                                    _ ->
+                                        -- This should return an error!
+                                        -- it means the metadata is invalid
+                                        ""
+
+                            seed =
+                                Id.initialSeed docId
+
+                            ( currentSeed, blockParser ) =
+                                Parse.getFailableBlock Desc.ParseBlock seed child
+                        in
+                        Parser.succeed
+                            (\source result ->
+                                case result of
+                                    Ok details ->
+                                        Parsed
+                                            { errors =
+                                                List.map (Error.render source) (getUnexpecteds details.value)
+                                            , found = Found details.range details.value
+                                            , expected = getBlockExpectation child
+                                            , initialSeed = seed
+                                            , currentSeed = currentSeed
+                                            }
+
+                                    Err details ->
+                                        Parsed
+                                            { errors =
+                                                [ Error.render source
+                                                    { range = details.range
+                                                    , problem = details.error
+                                                    }
+                                                ]
+                                            , found =
+                                                Unexpected
+                                                    { range = details.range
+                                                    , problem = details.error
+                                                    }
+                                            , expected = getBlockExpectation child
+                                            , initialSeed = seed
+                                            , currentSeed = currentSeed
+                                            }
+                            )
+                            |. Parser.chompWhile (\c -> c == '\n')
+                            |= Parser.getSource
+                            |= Parse.withRangeResult (Parser.withIndent 0 blockParser)
+                            |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
+                            |. Parser.end End
+                    )
         }
 
 
@@ -459,19 +488,62 @@ createDocument docId view child =
 documentWith :
     (metadata -> block -> document)
     ->
-        { id : String
+        { id : metadata -> String
         , metadata : Record metadata
         , body : Block block
         }
-    -> Document document
-documentWith renderer { id, metadata, body } =
-    createDocument id
+    -> Document metadata document
+documentWith renderer config =
+    let
+        metadataBlock =
+            toBlock config.metadata
+    in
+    createDocument config.id
         identity
+        (getMetadataParser metadataBlock)
         (startWith
             renderer
-            (toBlock metadata)
-            body
+            metadataBlock
+            config.body
         )
+
+
+getMetadataParser metadataBlock =
+    let
+        ( _, metadataParser ) =
+            Parse.getFailableBlock Desc.ParseBlock (Id.initialSeed "") metadataBlock
+    in
+    Parser.andThen
+        (\result ->
+            case result of
+                Err problem ->
+                    Parser.succeed
+                        (Err
+                            { problem = problem
+                            , range = Desc.emptyRange
+                            }
+                        )
+
+                Ok description ->
+                    case renderBlock metadataBlock description of
+                        Outcome.Success meta ->
+                            Parser.succeed (Ok meta)
+
+                        Outcome.Failure astError ->
+                            Parser.succeed
+                                (Err
+                                    { problem = Error.DocumentMismatch
+                                    , range = Desc.emptyRange
+                                    }
+                                )
+
+                        Outcome.Almost (Uncertain ( unexpected, otherUnexpecteds )) ->
+                            Parser.succeed (Err unexpected)
+
+                        Outcome.Almost (Recovered ( unexpected, otherUnexpecteds ) renderedChild) ->
+                            Parser.succeed (Err unexpected)
+        )
+        (Parser.withIndent 0 metadataParser)
 
 
 {-| Change the result of a block by applying a function to it.
