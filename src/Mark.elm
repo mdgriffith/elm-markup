@@ -11,7 +11,7 @@ module Mark exposing
     , Outcome(..), Partial
     , compile, parse, Parsed, toString, render
     , map, verify, onError
-    , withId, idToString, stringToId
+    , withId, documentId, idToString, stringToId
     )
 
 {-|
@@ -72,7 +72,7 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 @docs map, verify, onError
 
-@docs withId, idToString, stringToId
+@docs withId, documentId, idToString, stringToId
 
 -}
 
@@ -347,13 +347,22 @@ document :
     (child -> result)
     -> Block child
     -> Document result
-document view child =
+document =
+    createDocument "none"
+
+
+createDocument :
+    String
+    -> (child -> result)
+    -> Block child
+    -> Document result
+createDocument docId view child =
     let
         expectation =
             getBlockExpectation child
 
         seed =
-            Id.initialSeed
+            Id.initialSeed docId
 
         ( currentSeed, blockParser ) =
             Parse.getFailableBlock Desc.ParseBlock seed child
@@ -423,24 +432,25 @@ document view child =
 
 {-| Capture some metadata at the start of your document, followed by the body.
 
-    import Mark.Record as Record
+    import Mark
 
     Mark.documentWith
         (\metadata body ->
-            { metadata = metadata
+            { id = .id
+            , metadata = metadata
             , body = body
             }
         )
         { metadata =
-            Record.record
-                (\author publishedAt ->
+            Mark.record
+                (\id author publishedAt ->
                     { author = author
                     , publishedAt = publishedAt
                     }
                 )
-                |> Record.field "author" Mark.string
-                |> Record.field "publishedAt" Mark.string
-                |> Record.toBlock
+                |> Mark.field "id" Mark.string
+                |> Mark.field "author" Mark.string
+                |> Mark.field "publishedAt" Mark.string
         , body =
             --...
         }
@@ -449,12 +459,13 @@ document view child =
 documentWith :
     (metadata -> block -> document)
     ->
-        { metadata : Record metadata
+        { id : String
+        , metadata : Record metadata
         , body : Block block
         }
     -> Document document
-documentWith renderer { metadata, body } =
-    document
+documentWith renderer { id, metadata, body } =
+    createDocument id
         identity
         (startWith
             renderer
@@ -568,6 +579,12 @@ verify fn (Block details) =
                     Outcome.Failure f ->
                         Outcome.Failure f
         }
+
+
+{-| -}
+documentId : Mark.Edit.Id -> String
+documentId (Id.Id str _) =
+    str
 
 
 {-| Get an `Id` associated with a `Block`, which can be used to make updates through `Mark.Edit`.

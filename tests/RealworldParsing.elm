@@ -222,7 +222,8 @@ document =
             }
         )
         -- We have some required metadata that starts our document.
-        { metadata = metadata
+        { id = "document-id"
+        , metadata = metadata
         , body =
             Mark.manyOf
                 [ header

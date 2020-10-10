@@ -32,7 +32,7 @@ create exp =
             { indent = 0
             , base = startingPoint
             , expectation = exp
-            , seed = Id.initialSeed
+            , seed = Id.initialSeed "none"
             }
 
 
@@ -42,7 +42,7 @@ createIndented exp =
             { indent = 1
             , base = startingPoint
             , expectation = exp
-            , seed = Id.initialSeed
+            , seed = Id.initialSeed "none"
             }
 
 
@@ -215,7 +215,7 @@ suite =
 
 
 manyIndentedHellosId =
-    Id.Id [ 0 ]
+    Id.Id "none" [ 0 ]
 
 
 stringText =
@@ -255,8 +255,8 @@ styledText =
 threeHellos =
     Description.Parsed
         { errors = []
-        , initialSeed = Id.initialSeed
-        , currentSeed = Id.initialSeed
+        , initialSeed = Id.initialSeed "none"
+        , currentSeed = Id.initialSeed "none"
         , found =
             Description.Found
                 { start = startingPoint
@@ -282,14 +282,14 @@ edits =
                             Mark.Edit.update
                                 manyHelloDoc
                                 (Mark.Edit.insertAt
-                                    (Id.Id [ 0 ])
+                                    (Id.Id "none" [ 0 ])
                                     2
                                     (Mark.New.string "world")
                                 )
                                 (Description.Parsed
                                     { errors = []
-                                    , initialSeed = Id.initialSeed
-                                    , currentSeed = Id.initialSeed
+                                    , initialSeed = Id.initialSeed "none"
+                                    , currentSeed = Id.initialSeed "none"
                                     , found =
                                         Description.Found
                                             { start = startingPoint
@@ -323,7 +323,7 @@ edits =
                             Mark.Edit.update
                                 manyTextDocNoBlock
                                 (Mark.Edit.insertAt
-                                    (Id.Id [ 0 ])
+                                    (Id.Id "none" [ 0 ])
                                     2
                                     (Mark.New.string "world")
                                 )
@@ -338,7 +338,7 @@ edits =
                             Mark.Edit.update
                                 manyTextDocNoBlock
                                 (Mark.Edit.insertAt
-                                    (Id.Id [ 0 ])
+                                    (Id.Id "none" [ 0 ])
                                     1
                                     (Mark.New.string "world")
                                 )
@@ -353,7 +353,7 @@ edits =
                             Mark.Edit.update
                                 manyTextDocNoBlock
                                 (Mark.Edit.insertAt
-                                    (Id.Id [ 0 ])
+                                    (Id.Id "none" [ 0 ])
                                     0
                                     (Mark.New.string "world")
                                 )
@@ -368,7 +368,7 @@ edits =
                             Mark.Edit.update
                                 manyTextDocNoBlock
                                 (Mark.Edit.insertAt
-                                    (Id.Id [ 0 ])
+                                    (Id.Id "none" [ 0 ])
                                     3
                                     (Mark.New.string "world")
                                 )
@@ -382,7 +382,7 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.delete (Id.Id [ 0 ]) 0)
+                                (Mark.Edit.delete (Id.Id "none" [ 0 ]) 0)
                                 threeHellos
                     in
                     Expect.equal (Result.map Description.toString new)
@@ -393,7 +393,7 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.delete (Id.Id [ 0 ]) 1)
+                                (Mark.Edit.delete (Id.Id "none" [ 0 ]) 1)
                                 threeHellos
                     in
                     Expect.equal (Result.map Description.toString new)
@@ -404,7 +404,7 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.delete (Id.Id [ 0 ]) 2)
+                                (Mark.Edit.delete (Id.Id "none" [ 0 ]) 2)
                                 threeHellos
                     in
                     Expect.equal (Result.map Description.toString new)
@@ -423,7 +423,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 0 ])
+                                            (Id.Id "none" [ 0 ])
                                             3
                                             8
                                             bold
@@ -447,7 +447,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 0 ])
+                                            (Id.Id "none" [ 0 ])
                                             3
                                             11
                                             { bold = False
@@ -474,7 +474,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 0 ])
+                                            (Id.Id "none" [ 0 ])
                                             3
                                             13
                                             { bold = False
@@ -501,7 +501,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id [ 0 ])
+                                            (Id.Id "none" [ 0 ])
                                             3
                                             8
                                             { bold = True

@@ -659,7 +659,7 @@ styledTextLoop options context meaningful found =
                                                     { kind = selection
                                                     , range =
                                                         range
-                                                    , record = DescribeNothing (Tuple.first (Id.step Id.initialSeed))
+                                                    , record = DescribeNothing (Tuple.first (Id.step (Id.initialSeed "ignore")))
                                                     }
 
                                             Just (Ok foundFields) ->
@@ -905,7 +905,7 @@ attrContainer recordBlocks =
                         (\rec ->
                             let
                                 recordParser =
-                                    getParser ParseInline Id.initialSeed rec
+                                    getParser ParseInline (Id.initialSeed "ignore") rec
                             in
                             Tolerant.try (Tuple.second recordParser)
                         )

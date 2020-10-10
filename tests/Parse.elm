@@ -42,7 +42,7 @@ styleParser =
         , replacements = []
         }
         Description.ParseInline
-        Id.initialSeed
+        (Id.initialSeed "none")
         { column = 1, line = 1, offset = 0 }
         emptyStyles
 
@@ -58,7 +58,7 @@ text =
                             , replacements = []
                             }
                             Description.ParseInline
-                            Id.initialSeed
+                            (Id.initialSeed "none")
                             { column = 1, line = 1, offset = 0 }
                             emptyStyles
                         )
@@ -66,7 +66,7 @@ text =
                     )
                     (Ok
                         (Description.DescribeText
-                            { id = Id.Id [ 0 ]
+                            { id = Id.Id "none" [ 0 ]
                             , range = { end = { column = 28, line = 1, offset = 27 }, start = { column = 1, line = 1, offset = 0 } }
                             , text =
                                 [ Description.Styled { end = { column = 12, line = 1, offset = 11 }, start = { column = 1, line = 1, offset = 0 } }
@@ -92,7 +92,7 @@ text =
                             , replacements = []
                             }
                             Description.ParseInline
-                            Id.initialSeed
+                            (Id.initialSeed "none")
                             { column = 1, line = 1, offset = 0 }
                             emptyStyles
                         )
@@ -100,7 +100,7 @@ text =
                     )
                     (Ok
                         (Description.DescribeText
-                            { id = Id.Id [ 0 ]
+                            { id = Id.Id "none" [ 0 ]
                             , range =
                                 { end = { column = 29, line = 1, offset = 28 }
                                 , start = { column = 1, line = 1, offset = 0 }
@@ -147,7 +147,7 @@ text =
                             , replacements = []
                             }
                             Description.ParseInline
-                            Id.initialSeed
+                            (Id.initialSeed "none")
                             { column = 1, line = 1, offset = 0 }
                             emptyStyles
                         )
@@ -155,7 +155,7 @@ text =
                     )
                     (Ok
                         (Description.DescribeText
-                            { id = Id.Id [ 0 ]
+                            { id = Id.Id "none" [ 0 ]
                             , range =
                                 { end = { column = 14, line = 1, offset = 13 }
                                 , start = { column = 1, line = 1, offset = 0 }
@@ -196,7 +196,7 @@ text =
                             , replacements = []
                             }
                             Description.ParseInline
-                            Id.initialSeed
+                            (Id.initialSeed "none")
                             { column = 1, line = 1, offset = 0 }
                             emptyStyles
                         )
@@ -204,7 +204,7 @@ text =
                     )
                     (Ok
                         (Description.DescribeText
-                            { id = Id.Id [ 0 ]
+                            { id = Id.Id "none" [ 0 ]
                             , range =
                                 { end = { column = 16, line = 1, offset = 15 }
                                 , start = { column = 1, line = 1, offset = 0 }
@@ -248,7 +248,7 @@ text =
         --                         ]
         --                     , replacements = []
         --                     }
-        --                     Id.initialSeed
+        --                     (Id.initialSeed "none")
         --                     { column = 1, line = 1, offset = 0 }
         --                     emptyStyles
         --                     []
@@ -258,7 +258,7 @@ text =
         --             (Ok
         --                 (Description.DescribeText
         --                     { id =
-        --                         Id.Id [ 0 ]
+        --                         Id.Id "none" [ 0 ]
         --                     , range = { end = { column = 43, line = 1, offset = 42 }, start = { column = 1, line = 1, offset = 0 } }
         --                     , text =
         --                         [ Description.Styled
@@ -315,7 +315,7 @@ text =
         --                         ]
         --                     , replacements = []
         --                     }
-        --                     Id.initialSeed
+        --                     (Id.initialSeed "none")
         --                     { column = 1, line = 1, offset = 0 }
         --                     emptyStyles
         --                     []
@@ -324,7 +324,7 @@ text =
         --             )
         --             (Ok
         --                 (Description.DescribeText
-        --                     { id = Id.Id [ 0 ]
+        --                     { id = Id.Id "none" [ 0 ]
         --                     , range = { end = { column = 60, line = 1, offset = 59 }, start = { column = 1, line = 1, offset = 0 } }
         --                     , text =
         --                         [ Description.Styled
@@ -402,7 +402,7 @@ basicWithInlineResult =
     Ok
         (Description.DescribeText
             { id =
-                Id.Id [ 0 ]
+                Id.Id "none" [ 0 ]
             , range = { end = { column = 71, line = 1, offset = 70 }, start = { column = 1, line = 1, offset = 0 } }
             , text =
                 [ Description.Styled
@@ -462,7 +462,7 @@ basicWithInlineResult =
 styleTransfer =
     Description.DescribeText
         { id =
-            Id.Id [ 0 ]
+            Id.Id "none" [ 0 ]
         , range = { end = { column = 73, line = 1, offset = 72 }, start = { column = 1, line = 1, offset = 0 } }
         , text =
             [ Description.Styled

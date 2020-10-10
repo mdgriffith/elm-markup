@@ -55,11 +55,11 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 {-| -}
 type Document data
     = Document
-        { converter : Parsed -> Outcome Error.AstError (Uncertain data) data
-        , initialSeed : Id.Seed
+        { initialSeed : Id.Seed
         , currentSeed : Id.Seed
         , expect : Expectation
         , parser : Parser Error.Context Error.Problem Parsed
+        , converter : Parsed -> Outcome Error.AstError (Uncertain data) data
         }
 
 
@@ -78,6 +78,93 @@ type Parsed
 type Found item
     = Found Range item
     | Unexpected Error.UnexpectedDetails
+
+
+{-| -}
+type Description
+    = DescribeBlock
+        { id : Id
+        , name : String
+        , found : Found Description
+        , expected : Expectation
+        }
+    | Record
+        { id : Id
+        , name : String
+        , found : Found (List ( String, Found Description ))
+        , expected : Expectation
+        }
+    | OneOf
+        { id : Id
+        , choices : List Expectation
+        , child : Found Description
+        }
+    | ManyOf
+        { id : Id
+        , range : Range
+        , choices : List Expectation
+        , children : List (Found Description)
+        }
+    | StartsWith
+        { range : Range
+        , id : Id
+        , first :
+            { found : Description
+            , expected : Expectation
+            }
+        , second :
+            { found : Description
+            , expected : Expectation
+            }
+        }
+    | DescribeTree
+        { id : Id
+        , range : Range
+        , children : List (Nested Description)
+        , expected : Expectation
+        }
+      -- Primitives
+    | DescribeBoolean
+        { id : Id
+        , found : Found Bool
+        }
+    | DescribeInteger
+        { id : Id
+        , found : Found Int
+        }
+    | DescribeFloat
+        { id : Id
+        , found : Found ( String, Float )
+        }
+    | DescribeText
+        { id : Id
+        , range : Range
+        , text : List TextDescription
+        }
+    | DescribeString Id Range String
+    | DescribeNothing Id
+
+
+type AnnotationType
+    = EmptyAnnotation
+    | SelectText (List Text)
+    | SelectString String
+
+
+{-| -}
+type TextDescription
+    = Styled Range Text
+    | InlineBlock
+        { kind : AnnotationType
+        , range : Range
+        , record : Description
+        }
+
+
+{-| A text fragment with some styling.
+-}
+type Text
+    = Text Styling String
 
 
 {-| -}
@@ -228,93 +315,6 @@ recordName desc =
 
         _ ->
             Nothing
-
-
-{-| -}
-type Description
-    = DescribeBlock
-        { id : Id
-        , name : String
-        , found : Found Description
-        , expected : Expectation
-        }
-    | Record
-        { id : Id
-        , name : String
-        , found : Found (List ( String, Found Description ))
-        , expected : Expectation
-        }
-    | OneOf
-        { id : Id
-        , choices : List Expectation
-        , child : Found Description
-        }
-    | ManyOf
-        { id : Id
-        , range : Range
-        , choices : List Expectation
-        , children : List (Found Description)
-        }
-    | StartsWith
-        { range : Range
-        , id : Id
-        , first :
-            { found : Description
-            , expected : Expectation
-            }
-        , second :
-            { found : Description
-            , expected : Expectation
-            }
-        }
-    | DescribeTree
-        { id : Id
-        , range : Range
-        , children : List (Nested Description)
-        , expected : Expectation
-        }
-      -- Primitives
-    | DescribeBoolean
-        { id : Id
-        , found : Found Bool
-        }
-    | DescribeInteger
-        { id : Id
-        , found : Found Int
-        }
-    | DescribeFloat
-        { id : Id
-        , found : Found ( String, Float )
-        }
-    | DescribeText
-        { id : Id
-        , range : Range
-        , text : List TextDescription
-        }
-    | DescribeString Id Range String
-    | DescribeNothing Id
-
-
-type AnnotationType
-    = EmptyAnnotation
-    | SelectText (List Text)
-    | SelectString String
-
-
-{-| -}
-type TextDescription
-    = Styled Range Text
-    | InlineBlock
-        { kind : AnnotationType
-        , range : Range
-        , record : Description
-        }
-
-
-{-| A text fragment with some styling.
--}
-type Text
-    = Text Styling String
 
 
 {-| -}
@@ -1540,7 +1540,7 @@ inlineExpectationToDesc exp cursor =
                         , end = end
                         }
                     , record =
-                        DescribeNothing (Tuple.first (Id.step Id.initialSeed))
+                        DescribeNothing (Tuple.first (Id.step (Id.initialSeed "none")))
 
                     -- TODO: MAKE CONVERSION TO DESCRIPTION!
                     -- List.map expectationToAttr attrs

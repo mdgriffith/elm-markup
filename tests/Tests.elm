@@ -133,7 +133,8 @@ inlineOrder =
 withMetaData =
     Mark.documentWith
         Tuple.pair
-        { metadata =
+        { id = "none"
+        , metadata =
             Mark.record "Meta"
                 (\one two -> { one = one, two = two })
                 |> Mark.field "one" Mark.string

@@ -14,9 +14,9 @@ module Mark.Internal.Id exposing
 {-| -}
 
 
-initialSeed : Seed
-initialSeed =
-    Seed [ 0 ]
+initialSeed : String -> Seed
+initialSeed doc =
+    Seed doc [ 0 ]
 
 
 {-| We might want to move to a list based ID.
@@ -48,25 +48,29 @@ So
 
 -}
 type Seed
-    = Seed (List Int)
+    = Seed String (List Int)
 
 
-toString (Id ids) =
+type Id
+    = Id String (List Int)
+
+
+toString (Id str ids) =
     ids
         |> List.map String.fromInt
-        |> String.join "-"
-        |> (\x -> "m-" ++ x)
+        |> String.join "."
+        |> (\x -> "m." ++ str ++ "." ++ x)
 
 
 fromString str =
-    case String.split "-" str of
-        "m" :: remain ->
+    case String.split "." str of
+        "m" :: docId :: remain ->
             let
                 parsed =
                     List.filterMap String.toInt remain
             in
             if List.length parsed == List.length remain then
-                Just (Id parsed)
+                Just (Id docId parsed)
 
             else
                 Nothing
@@ -77,24 +81,24 @@ fromString str =
 
 {-| -}
 indent : Seed -> Seed
-indent (Seed seed) =
-    Seed (0 :: seed)
+indent (Seed doc seed) =
+    Seed doc (0 :: seed)
 
 
 {-| -}
 dedent : Int -> Seed -> Seed
-dedent num (Seed seed) =
-    Seed (List.drop num seed)
+dedent num (Seed doc seed) =
+    Seed doc (List.drop num seed)
 
 
 step : Seed -> ( Id, Seed )
-step (Seed seed) =
+step (Seed doc seed) =
     case seed of
         [] ->
-            ( Id [ 0 ], Seed [ 0 ] )
+            ( Id doc [ 0 ], Seed doc [ 0 ] )
 
         current :: remain ->
-            ( Id seed, Seed (current + 1 :: remain) )
+            ( Id doc seed, Seed doc (current + 1 :: remain) )
 
 
 thread : Seed -> List (Seed -> ( Seed, thing )) -> ( Seed, List thing )
@@ -109,7 +113,3 @@ threadThrough current ( seed, past ) =
             current seed
     in
     ( newSeed, result :: past )
-
-
-type Id
-    = Id (List Int)
