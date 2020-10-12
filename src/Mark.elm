@@ -754,10 +754,8 @@ onError newValue (Block details) =
 
 Will parse the following and render it using `Html.text`
 
-```markup
-|> MyBlock
-    Here is an unformatted string!
-```
+    |> MyBlock
+        Here is an unformatted string!
 
 **Note** block names should be capitalized. In the future this may be enforced.
 
@@ -1142,24 +1140,20 @@ In `elm-markup` you can make a nested section either `Bulleted` or `Numbered` by
 
 The rest of the icons at that level are ignored. So this:
 
-```markup
-|> List
-    1. First
-    -- Second
-    -- Third
-```
+    |> List
+        1. First
+        -- Second
+        -- Third
 
 Is a numbered list. And this:
 
-```markup
-|> List
-    -- First
-        1. sublist one
-        -- sublist two
-        -- sublist three
-    -- Second
-    -- Third
-```
+    |> List
+        -- First
+            1. sublist one
+            -- sublist two
+            -- sublist three
+        -- Second
+        -- Third
 
 is a bulleted list with a numbered list inside of it.
 
@@ -1841,15 +1835,11 @@ Let's say we wanted to embed an inline piece of elm code. We could write
 
 Which would capture the following
 
-```markup
-Here's an inline function: `\you -> Awesome`{elm}.
-```
+    Here's an inline function: `\you -> Awesome`{elm}.
 
 **Note** A verbatim can be written without a name or attributes and will capture the contents as a literal string, ignoring any special characters.
 
-```markup
-Let's take a look at `http://elm-lang.com`.
-```
+    Let's take a look at `http://elm-lang.com`.
 
 -}
 verbatim : String -> (String -> result) -> Record result
