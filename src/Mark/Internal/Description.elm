@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , emptyRange, minusPosition, resetBlockStart, resetFoundStart
+    , emptyRange, lookup, minusPosition, resetBlockStart, resetFoundStart
     )
 
 {-|
@@ -57,7 +57,7 @@ type Document meta data
         { expect : Expectation
         , metadata : Parser Error.Context Error.Problem (Result Error.UnexpectedDetails meta)
         , parser : Parser Error.Context Error.Problem Parsed
-        , converter : Parsed -> Outcome Error.AstError (Uncertain data) data
+        , converter : Parsed -> Outcome Error.AstError (Uncertain (List data)) (List data)
         }
 
 
@@ -2143,16 +2143,16 @@ compile :
         Result
             (Outcome (List Error.Rendered)
                 { errors : List Error.Rendered
-                , result : data
+                , result : List data
                 }
-                data
+                (List data)
             )
             ( Parsed
             , Outcome (List Error.Rendered)
                 { errors : List Error.Rendered
-                , result : data
+                , result : List data
                 }
-                data
+                (List data)
             )
 compile (Document blocks) source =
     case Parser.run blocks.parser source of
@@ -2212,6 +2212,224 @@ compile (Document blocks) source =
                     ]
 
 
+{-| In order for block lookups to work and for the block to be renderable, we need to retrieve a block, but keep the general structure.
+
+So, if we have `ManyOf [ One,Two ]`, and our ID matches `Two`, we need to return `ManyOf [Two]`, not just `Two`.
+
+Then our rendering function will still work.
+
+-}
+lookup : Id.Id -> Document meta block -> Parsed -> Outcome (List Error.Rendered) (Partial block) block
+lookup id (Document doc) (Parsed parsed) =
+    case findFound id parsed.found of
+        Nothing ->
+            Failure [ Error.compilerError ]
+
+        Just found ->
+            case doc.converter (Parsed { parsed | found = found }) of
+                Success rendered ->
+                    case rendered of
+                        top :: _ ->
+                            Success top
+
+                        _ ->
+                            Failure [ Error.compilerError ]
+
+                Almost (Uncertain ( err, remainError )) ->
+                    -- Failure (List.map (Error.render source) (err :: remainError))
+                    Failure [ Error.compilerError ]
+
+                Almost (Recovered ( err, remainError ) result) ->
+                    -- Almost
+                    --     { errors = List.map (Error.render source) (err :: remainError)
+                    --     , result = result
+                    --     }
+                    Failure [ Error.compilerError ]
+
+                Failure noMatch ->
+                    Failure [ Error.compilerError ]
+
+
+firstFound : Id.Id -> List (Found Description) -> Maybe (Found Description)
+firstFound id options =
+    case options of
+        [] ->
+            Nothing
+
+        top :: remain ->
+            case findFound id top of
+                Nothing ->
+                    firstFound id remain
+
+                found ->
+                    found
+
+
+firstNested : Id.Id -> List (Nested Description) -> Maybe (Nested Description)
+firstNested id options =
+    case options of
+        [] ->
+            Nothing
+
+        top :: remain ->
+            case findNested id top of
+                Nothing ->
+                    firstNested id remain
+
+                found ->
+                    found
+
+
+{-| We could dive deeper here, and check children
+-}
+findNested : Id.Id -> Nested Description -> Maybe (Nested Description)
+findNested id ((Nested details) as nested) =
+    if List.any (\b -> getId b == id) details.content then
+        Just nested
+
+    else
+        Nothing
+
+
+findFound : Id.Id -> Found Description -> Maybe (Found Description)
+findFound id block =
+    case block of
+        Found rng desc ->
+            case find id desc of
+                Nothing ->
+                    Nothing
+
+                Just found ->
+                    Just (Found rng found)
+
+        Unexpected _ ->
+            Nothing
+
+
+find : Id.Id -> Description -> Maybe Description
+find targetId desc =
+    case desc of
+        DescribeBlock details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                Nothing
+
+        Record details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                Nothing
+
+        OneOf details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                case findFound targetId details.child of
+                    Nothing ->
+                        Nothing
+
+                    Just found ->
+                        Just
+                            (OneOf
+                                { details
+                                    | child = found
+                                }
+                            )
+
+        ManyOf details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                case firstFound targetId details.children of
+                    Nothing ->
+                        Nothing
+
+                    Just block ->
+                        Just
+                            (ManyOf
+                                { details
+                                    | children = [ block ]
+                                }
+                            )
+
+        StartsWith details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                case find targetId details.first.found of
+                    Nothing ->
+                        find targetId details.second.found
+
+                    found ->
+                        found
+
+        DescribeTree details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                case firstNested targetId details.children of
+                    Nothing ->
+                        Nothing
+
+                    Just block ->
+                        Just
+                            (DescribeTree
+                                { details
+                                    | children = [ block ]
+                                }
+                            )
+
+        -- Primitives
+        DescribeBoolean details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                Nothing
+
+        DescribeInteger details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                Nothing
+
+        DescribeFloat details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                Nothing
+
+        DescribeText details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                Nothing
+
+        DescribeString id range string ->
+            if id == targetId then
+                Just desc
+
+            else
+                Nothing
+
+        DescribeNothing id ->
+            if id == targetId then
+                Just desc
+
+            else
+                Nothing
+
+
 {-| Render is a little odd.
 
 We should always expect `Parsed` to either already have our error messages, or to succeed.
@@ -2222,7 +2440,7 @@ Render can't add additional errors.
 render :
     Document meta data
     -> Parsed
-    -> Outcome (List Error.Rendered) { errors : List Error.Rendered, result : data } data
+    -> Outcome (List Error.Rendered) { errors : List Error.Rendered, result : List data } (List data)
 render (Document blocks) ((Parsed parsedDetails) as parsed) =
     case parsedDetails.errors of
         [] ->

@@ -12,6 +12,7 @@ module Mark exposing
     , metadata, compile, parse, Parsed, toString, render
     , map, verify, onError
     , withId, documentId, idToString, stringToId
+    , lookup
     )
 
 {-|
@@ -74,6 +75,8 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 @docs withId, documentId, idToString, stringToId
 
+@docs lookup
+
 -}
 
 import Mark.Edit
@@ -84,6 +87,7 @@ import Mark.Internal.Id as Id exposing (..)
 import Mark.Internal.Index as Index
 import Mark.Internal.Outcome as Outcome
 import Mark.Internal.Parser as Parse
+import Mark.New exposing (block)
 import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 
@@ -163,14 +167,14 @@ moveParsedToResult result =
 
 
 {-| -}
-render : Document meta data -> Parsed -> Outcome (List Mark.Error.Error) (Partial data) data
+render : Document meta data -> Parsed -> Outcome (List Mark.Error.Error) (Partial (List data)) (List data)
 render doc ((Parsed parsedDetails) as parsed) =
     Desc.render doc parsed
         |> rewrapOutcome
 
 
 {-| -}
-compile : Document meta data -> String -> Outcome (List Mark.Error.Error) (Partial data) data
+compile : Document meta data -> String -> Outcome (List Mark.Error.Error) (Partial (List data)) (List data)
 compile doc source =
     Desc.compile doc source
         |> flattenErrors
@@ -357,23 +361,20 @@ and ultimately render it as
 
 -}
 document :
-    (child -> result)
-    -> Block child
-    -> Document () result
-document fn body =
+    List (Block block)
+    -> Document () block
+document blocks =
     createDocument (\_ -> "none")
-        fn
         (Parser.succeed (Ok ()))
-        body
+        (manyOf blocks)
 
 
 createDocument :
     (meta -> String)
-    -> (child -> data)
     -> Parser Error.Context Error.Problem (Result Error.UnexpectedDetails meta)
-    -> Block child
+    -> Block (List data)
     -> Document meta data
-createDocument toDocumentId view meta child =
+createDocument toDocumentId meta child =
     Document
         { expect =
             getBlockExpectation child
@@ -383,18 +384,7 @@ createDocument toDocumentId view meta child =
             \(Parsed parsed) ->
                 case parsed.found of
                     Found range childDesc ->
-                        case renderBlock child childDesc of
-                            Outcome.Success renderedChild ->
-                                Outcome.Success (view renderedChild)
-
-                            Outcome.Failure err ->
-                                Outcome.Failure err
-
-                            Outcome.Almost (Uncertain unexpected) ->
-                                Outcome.Almost (Uncertain unexpected)
-
-                            Outcome.Almost (Recovered errors renderedChild) ->
-                                Outcome.Almost (Recovered errors (view renderedChild))
+                        renderBlock child childDesc
 
                     Unexpected unexpected ->
                         Outcome.Almost (Uncertain ( unexpected, [] ))
@@ -464,13 +454,8 @@ createDocument toDocumentId view meta child =
     import Mark
 
     Mark.documentWith
-        (\metadata body ->
-            { id = .id
-            , metadata = metadata
-            , body = body
-            }
-        )
-        { metadata =
+        { id = \metadata -> metadata.id
+        , metadata =
             Mark.record
                 (\id author publishedAt ->
                     { author = author
@@ -480,31 +465,34 @@ createDocument toDocumentId view meta child =
                 |> Mark.field "id" Mark.string
                 |> Mark.field "author" Mark.string
                 |> Mark.field "publishedAt" Mark.string
-        , body =
-            --...
+        , blocks =
+            [
+
+            ]
         }
+
+**Note** - You can also specify an `id`, which is a document identifier and is included in `Mark.Edit.Id`. This is really only necessary if you're building an editor that can edit multiple documents at once.
+
+Otherwise, feel free to simple put `id = \_ -> "doc"`
 
 -}
 documentWith :
-    (metadata -> block -> document)
-    ->
-        { id : metadata -> String
-        , metadata : Record metadata
-        , body : Block block
-        }
-    -> Document metadata document
-documentWith renderer config =
+    { id : metadata -> String
+    , metadata : Record metadata
+    , blocks : List (Block block)
+    }
+    -> Document metadata block
+documentWith config =
     let
         metadataBlock =
             toBlock config.metadata
     in
     createDocument config.id
-        identity
         (getMetadataParser metadataBlock)
         (startWith
-            renderer
+            (\m blocks -> blocks)
             metadataBlock
-            config.body
+            (manyOf config.blocks)
         )
 
 
@@ -657,6 +645,14 @@ verify fn (Block details) =
 documentId : Mark.Edit.Id -> String
 documentId (Id.Id str _) =
     str
+
+
+{-| Look up a specific block in your document by id.
+-}
+lookup : Mark.Edit.Id -> Document meta block -> Parsed -> Outcome (List Mark.Error.Error) (Partial block) block
+lookup id doc parsed =
+    Desc.lookup id doc parsed
+        |> rewrapOutcome
 
 
 {-| Get an `Id` associated with a `Block`, which can be used to make updates through `Mark.Edit`.
