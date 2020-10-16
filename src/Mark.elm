@@ -384,7 +384,7 @@ createDocument toDocumentId meta child =
             \(Parsed parsed) ->
                 case parsed.found of
                     Found range childDesc ->
-                        renderBlock child childDesc
+                        Desc.renderBlock child childDesc
 
                     Unexpected unexpected ->
                         Outcome.Almost (Uncertain ( unexpected, [] ))
@@ -937,19 +937,6 @@ manyBlankLines lineCount =
 oneOf : List (Block a) -> Block a
 oneOf blocks =
     let
-        matchBlock description blck found =
-            case found of
-                Outcome.Failure _ ->
-                    case renderBlock blck description of
-                        Outcome.Failure _ ->
-                            found
-
-                        otherwise ->
-                            otherwise
-
-                _ ->
-                    found
-
         expectations =
             List.map getBlockExpectation blocks
     in
@@ -961,8 +948,8 @@ oneOf blocks =
                 case desc of
                     OneOf details ->
                         case details.child of
-                            Found rng found ->
-                                List.foldl (matchBlock found) (Outcome.Failure NoMatch) blocks
+                            Found rng childDesc ->
+                                Desc.findMatch childDesc blocks
 
                             Unexpected unexpected ->
                                 uncertain unexpected
@@ -988,38 +975,31 @@ manyOf blocks =
         , converter =
             \desc ->
                 let
-                    matchBlock description blck found =
-                        case found of
-                            Outcome.Failure _ ->
-                                case renderBlock blck description of
-                                    Outcome.Failure _ ->
-                                        found
+                    getRendered id choices existingResult children =
+                        case children of
+                            [] ->
+                                mapSuccessAndRecovered List.reverse existingResult
 
-                                    otherwise ->
-                                        otherwise
+                            top :: remain ->
+                                case top of
+                                    Unexpected unexpected ->
+                                        uncertain unexpected
 
-                            _ ->
-                                found
-
-                    getRendered id choices found ( existingResult, index ) =
-                        case found of
-                            Unexpected unexpected ->
-                                ( uncertain unexpected
-                                , index + 1
-                                )
-
-                            Found range child ->
-                                ( mergeWith (::)
-                                    (List.foldl (matchBlock child) (Outcome.Failure NoMatch) blocks)
-                                    existingResult
-                                , index + 1
-                                )
+                                    Found range child ->
+                                        getRendered id
+                                            choices
+                                            (mergeWith (::)
+                                                (Desc.findMatch child blocks)
+                                                existingResult
+                                            )
+                                            remain
                 in
                 case desc of
                     ManyOf many ->
-                        List.foldl (getRendered many.id many.choices) ( Outcome.Success [], 0 ) many.children
-                            |> Tuple.first
-                            |> mapSuccessAndRecovered List.reverse
+                        getRendered many.id
+                            many.choices
+                            (Outcome.Success [])
+                            many.children
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -1028,6 +1008,9 @@ manyOf blocks =
                 let
                     ( parentId, newSeed ) =
                         Id.step seed
+
+                    indentedSeed =
+                        Id.indent seed
                 in
                 ( newSeed
                 , Parser.succeed
@@ -1046,7 +1029,7 @@ manyOf blocks =
                                     { parsedSomething = False
                                     , found = []
                                     , seed =
-                                        seed
+                                        indentedSeed
                                     }
                                     (Parse.manyOf indentation blocks)
                             )
