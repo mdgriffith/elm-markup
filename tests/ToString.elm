@@ -227,29 +227,24 @@ stringText =
 
 manyHelloDoc =
     Mark.document
-        identity
-        (Mark.block "Indented"
+        [ Mark.block "Indented"
             identity
             (Mark.manyOf
                 [ Mark.string
                 ]
             )
-        )
+        ]
 
 
 manyTextDocNoBlock =
     Mark.document
-        identity
-        (Mark.manyOf
-            [ Mark.string
-            ]
-        )
+        [ Mark.string
+        ]
 
 
 styledText =
     Mark.document
-        identity
-        stringText
+        [ stringText ]
 
 
 threeHellos =
@@ -275,40 +270,41 @@ threeHellos =
 edits =
     describe "Edit"
         [ describe "Inserts + Deletes"
-            [ test "Indented - Insert at 2" <|
-                \_ ->
-                    let
-                        new =
-                            Mark.Edit.update
-                                manyHelloDoc
-                                (Mark.Edit.insertAt
-                                    (Id.Id "none" [ 0 ])
-                                    2
-                                    (Mark.New.string "world")
-                                )
-                                (Description.Parsed
-                                    { errors = []
-                                    , initialSeed = Id.initialSeed "none"
-                                    , currentSeed = Id.initialSeed "none"
-                                    , found =
-                                        Description.Found
-                                            { start = startingPoint
-                                            , end =
-                                                { column = 1, line = 50, offset = 200 }
-                                            }
-                                            (manyIndentedHellos ())
-                                    , expected =
-                                        Description.ExpectBlock "Indented" <|
-                                            Description.ExpectManyOf
-                                                [ Description.ExpectString "hello"
-                                                , Description.ExpectString "hello"
-                                                , Description.ExpectString "hello"
-                                                ]
-                                    }
-                                )
-                    in
-                    Expect.equal (Result.map Description.toString new)
-                        (Ok """|> Indented
+            [ only <|
+                test "Indented - Insert at 2" <|
+                    \_ ->
+                        let
+                            new =
+                                Mark.Edit.update
+                                    manyHelloDoc
+                                    (Mark.Edit.insertAt
+                                        (Id.Id "none" [ 0 ])
+                                        2
+                                        (Mark.New.string "world")
+                                    )
+                                    (Description.Parsed
+                                        { errors = []
+                                        , initialSeed = Id.initialSeed "none"
+                                        , currentSeed = Id.initialSeed "none"
+                                        , found =
+                                            Description.Found
+                                                { start = startingPoint
+                                                , end =
+                                                    { column = 1, line = 50, offset = 200 }
+                                                }
+                                                (manyIndentedHellos ())
+                                        , expected =
+                                            Description.ExpectBlock "Indented" <|
+                                                Description.ExpectManyOf
+                                                    [ Description.ExpectString "hello"
+                                                    , Description.ExpectString "hello"
+                                                    , Description.ExpectString "hello"
+                                                    ]
+                                        }
+                                    )
+                        in
+                        Expect.equal (Result.map Description.toString new)
+                            (Ok """|> Indented
     hello
 
     hello
@@ -423,7 +419,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id "none" [ 0 ])
+                                            (Id.Id "none" [ 0, 0 ])
                                             3
                                             8
                                             bold
@@ -447,7 +443,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id "none" [ 0 ])
+                                            (Id.Id "none" [ 0, 0 ])
                                             3
                                             11
                                             { bold = False
@@ -474,7 +470,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id "none" [ 0 ])
+                                            (Id.Id "none" [ 0, 0 ])
                                             3
                                             13
                                             { bold = False
@@ -501,7 +497,7 @@ edits =
                                     Mark.Edit.update
                                         styledText
                                         (Mark.Edit.restyle
-                                            (Id.Id "none" [ 0 ])
+                                            (Id.Id "none" [ 0, 0 ])
                                             3
                                             8
                                             { bold = True

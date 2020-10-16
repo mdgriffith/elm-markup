@@ -17,8 +17,7 @@ text =
 
 inlines =
     Mark.document
-        identity
-        (Mark.textWith
+        [ Mark.textWith
             { view =
                 \style content ->
                     [ ( style, content ) ]
@@ -45,7 +44,7 @@ inlines =
                     |> Mark.field "color" redOrBlue
                 ]
             }
-        )
+        ]
 
 
 redOrBlue =
@@ -67,8 +66,7 @@ redOrBlue =
 
 inlineMultipleVerbatim =
     Mark.document
-        identity
-        (Mark.textWith
+        [ Mark.textWith
             { view =
                 \styling str ->
                     [ str ]
@@ -98,13 +96,12 @@ inlineMultipleVerbatim =
                     |> Mark.field "two" Mark.string
                 ]
             }
-        )
+        ]
 
 
 inlineOrder =
     Mark.document
-        identity
-        (Mark.textWith
+        [ Mark.textWith
             { view = \_ _ -> Nothing
             , replacements =
                 [ Mark.replacement "..." "…"
@@ -127,170 +124,150 @@ inlineOrder =
                     |> Mark.field "two" Mark.string
                 ]
             }
-        )
+        ]
 
 
 withMetaData =
     Mark.documentWith
-        Tuple.pair
         { id = \_ -> "none"
         , metadata =
             Mark.record "Meta"
                 (\one two -> { one = one, two = two })
                 |> Mark.field "one" Mark.string
                 |> Mark.field "two" Mark.string
-        , body =
-            Mark.manyOf
-                [ text
-                ]
+        , blocks =
+            [ text
+            ]
         }
 
 
 topLevelText =
     Mark.document
-        identity
-        text
+        [ text ]
 
 
 textDoc =
     Mark.document
-        identity
-        (Mark.block "Test"
+        [ Mark.block "Test"
             identity
             text
-        )
+        ]
 
 
 recordDoc =
     Mark.document
-        identity
-        (Mark.record "Test"
+        [ Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
             |> Mark.field "one" Mark.string
             |> Mark.field "two" Mark.string
             |> Mark.field "three" Mark.string
             |> Mark.toBlock
-        )
+        ]
 
 
 recordManyTextDoc =
     Mark.document
-        identity
-        (Mark.record "Test"
+        [ Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
             |> Mark.field "one" Mark.string
             |> Mark.field "two" Mark.string
             |> Mark.field "three" (Mark.manyOf [ text ])
             |> Mark.toBlock
-        )
+        ]
 
 
 floatDoc =
     Mark.document
-        identity
-        (Mark.record "Test"
+        [ Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
             |> Mark.field "one" Mark.float
             |> Mark.field "two" Mark.float
             |> Mark.field "three" Mark.float
             |> Mark.toBlock
-        )
+        ]
 
 
 codeDoc =
     Mark.document
-        identity
-        (Mark.block "Monospace"
+        [ Mark.block "Monospace"
             identity
             Mark.string
-        )
+        ]
 
 
 singleOneOf =
     Mark.document
-        identity
-        (Mark.oneOf
-            [ Mark.block "Monospace"
-                identity
-                Mark.string
-            ]
-        )
+        [ Mark.block "Monospace"
+            identity
+            Mark.string
+        ]
 
 
 codeAndTextDoc =
     Mark.document
-        (\blocks ->
-            String.join ":" blocks
-        )
-        (Mark.manyOf
-            [ Mark.block "Monospace"
-                identity
-                Mark.string
-            , Mark.map (always "text") text
-            ]
-        )
+        [ Mark.block "Monospace"
+            identity
+            Mark.string
+        , Mark.map (always "text") text
+        ]
 
 
 intDoc =
     Mark.document
-        identity
-        (Mark.record "Test"
+        [ Mark.record "Test"
             (\one two three -> { one = one, two = two, three = three })
             |> Mark.field "one" Mark.int
             |> Mark.field "two" Mark.int
             |> Mark.field "three" Mark.int
             |> Mark.toBlock
-        )
+        ]
 
 
 sectionDoc =
     Mark.document
-        identity
-        (Mark.manyOf
-            [ Mark.map (always "text") text
-            , Mark.record "Test"
-                (\one two three -> "record:one,two,three")
-                |> Mark.field "one" Mark.string
-                |> Mark.field "two" Mark.string
-                |> Mark.field "three" Mark.string
-                |> Mark.toBlock
-            , Mark.block "Section"
-                (\x -> "section:" ++ String.join "," x)
-                (Mark.manyOf
-                    [ Mark.block "Embedded"
-                        (always "embedded")
-                        text
-                    , Mark.map (always "text") text
-                    ]
-                )
-            ]
-        )
+        [ Mark.map (always "text") text
+        , Mark.record "Test"
+            (\one two three -> "record:one,two,three")
+            |> Mark.field "one" Mark.string
+            |> Mark.field "two" Mark.string
+            |> Mark.field "three" Mark.string
+            |> Mark.toBlock
+        , Mark.block "Section"
+            (\x -> "section:" ++ String.join "," x)
+            (Mark.manyOf
+                [ Mark.block "Embedded"
+                    (always "embedded")
+                    text
+                , Mark.map (always "text") text
+                ]
+            )
+        ]
 
 
 nested : Mark.Document () (List Indexed)
 nested =
     Mark.document
-        (renderEnumWith (renderIndex []))
-        (Mark.block "Nested"
+        [ Mark.block "Nested"
             identity
             (Mark.tree
                 identity
                 (Mark.map (always True) Mark.int)
             )
-        )
+            |> Mark.map (renderEnumWith (renderIndex []))
+        ]
 
 
 nestedOrdering : Mark.Document () (List Ordered)
 nestedOrdering =
     Mark.document
-        (renderEnumWith (renderContent []))
-        (Mark.block "Nested"
+        [ Mark.block "Nested"
             identity
             (Mark.tree
                 identity
                 Mark.int
             )
-        )
+            |> Mark.map (renderEnumWith (renderContent []))
+        ]
 
 
 type Indexed
@@ -328,27 +305,27 @@ renderIcon stack icon i (Mark.Item node) =
 iconListDoc : Mark.Document () (List Icons)
 iconListDoc =
     Mark.document
-        (renderEnumWithIcon (renderIcon []))
-        (Mark.block "WithIcons"
+        [ Mark.block "WithIcons"
             identity
             (Mark.tree
                 identity
                 Mark.int
             )
-        )
+            |> Mark.map (renderEnumWithIcon (renderIcon []))
+        ]
 
 
 nestedString : Mark.Document () (List Icons)
 nestedString =
     Mark.document
-        (renderEnumWithIcon (renderIcon []))
-        (Mark.block "WithIcons"
+        [ Mark.block "WithIcons"
             identity
             (Mark.tree
                 identity
                 Mark.string
             )
-        )
+            |> Mark.map (renderEnumWithIcon (renderIcon []))
+        ]
 
 
 simpleNestedOrderedDoc =
@@ -440,28 +417,25 @@ emptyStyles =
 
 sectionWithRecordDoc =
     Mark.document
-        identity
-        (Mark.manyOf
-            [ text
-                |> Mark.map (always "text")
-            , Mark.record "Test"
-                (\one two three -> "record:one,two,three")
-                |> Mark.field "one" Mark.string
-                |> Mark.field "two" Mark.string
-                |> Mark.field "three" Mark.string
-                |> Mark.toBlock
-            , Mark.block "Section"
-                (\x -> "embedded:" ++ String.join "," x)
-                (Mark.manyOf
-                    [ Mark.block "Embedded"
-                        (always "block")
-                        text
-                    , text
-                        |> Mark.map (always "text")
-                    ]
-                )
-            ]
-        )
+        [ text
+            |> Mark.map (always "text")
+        , Mark.record "Test"
+            (\one two three -> "record:one,two,three")
+            |> Mark.field "one" Mark.string
+            |> Mark.field "two" Mark.string
+            |> Mark.field "three" Mark.string
+            |> Mark.toBlock
+        , Mark.block "Section"
+            (\x -> "embedded:" ++ String.join "," x)
+            (Mark.manyOf
+                [ Mark.block "Embedded"
+                    (always "block")
+                    text
+                , text
+                    |> Mark.map (always "text")
+                ]
+            )
+        ]
 
 
 getProblem renderedError =
@@ -520,31 +494,25 @@ suite =
                 \_ ->
                     Expect.equal
                         (toResult
-                            (Mark.document identity text)
+                            (Mark.document [ text ])
                             "Some text\nand some more text\n\n"
                         )
                         (Ok
-                            [ ( emptyStyles, "Some text\nand some more text" )
+                            [ [ ( emptyStyles, "Some text\nand some more text" )
+                              ]
                             ]
-                        )
-            , test "Double newlines signify a new paragraph" <|
-                \_ ->
-                    -- This is an error because we're expecting one paragraph, not two.
-                    Expect.err
-                        (toResult
-                            (Mark.document identity text)
-                            "Some text\n\nand some moretext"
                         )
             , test "Inline elements should maintain their source order." <|
                 \_ ->
                     Expect.equal
                         (toResult inlines "[my]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
-                            [ [ ( emptyStyles, "my" ) ]
-                            , [ ( emptyStyles, " highlighted " ) ]
-                            , [ ( emptyStyles, "sentence" ) ]
-                            , [ ( emptyStyles, " " ) ]
-                            , [ ( emptyStyles, "order" ) ]
+                            [ [ [ ( emptyStyles, "my" ) ]
+                              , [ ( emptyStyles, " highlighted " ) ]
+                              , [ ( emptyStyles, "sentence" ) ]
+                              , [ ( emptyStyles, " " ) ]
+                              , [ ( emptyStyles, "order" ) ]
+                              ]
                             ]
                         )
             , test "Basic Verbatim Element." <|
@@ -552,8 +520,9 @@ suite =
                     Expect.equal
                         (toResult inlines "my `verbatim string`{verb}")
                         (Ok
-                            [ [ ( emptyStyles, "my " ) ]
-                            , [ ( emptyStyles, "verbatim string" ) ]
+                            [ [ [ ( emptyStyles, "my " ) ]
+                              , [ ( emptyStyles, "verbatim string" ) ]
+                              ]
                             ]
                         )
             , test "Verbatim element without attributes" <|
@@ -561,8 +530,9 @@ suite =
                     Expect.equal
                         (toResult inlines "my `verbatim string`")
                         (Ok
-                            [ [ Tuple.pair emptyStyles "my " ]
-                            , [ Tuple.pair emptyStyles "verbatim string" ]
+                            [ [ [ Tuple.pair emptyStyles "my " ]
+                              , [ Tuple.pair emptyStyles "verbatim string" ]
+                              ]
                             ]
                         )
             , test "Verbatim element with attributes" <|
@@ -571,13 +541,14 @@ suite =
                         (toResult inlineMultipleVerbatim
                             "my `verbatim string`  `verbatim 2`{verb2|one=one, two=two}"
                         )
-                        (Ok [ [ "my " ], [ "verbatim string" ], [ "  " ], [ "verbatim 2", "one", "two" ] ])
+                        (Ok [ [ [ "my " ], [ "verbatim string" ], [ "  " ], [ "verbatim 2", "one", "two" ] ] ])
             , test "Inline attribute order(source order)" <|
                 \_ ->
                     Expect.equal
                         (toResult inlineOrder "[test]{order|one = one, two = two}")
                         (Ok
-                            [ Just ( "one", "two" )
+                            [ [ Just ( "one", "two" )
+                              ]
                             ]
                         )
             , test "Inline attribute order(not source order)" <|
@@ -585,29 +556,31 @@ suite =
                     Expect.equal
                         (toResult inlineOrder "[test]{order|two = two, one = one}")
                         (Ok
-                            [ Just ( "one", "two" )
+                            [ [ Just ( "one", "two" )
+                              ]
                             ]
                         )
             , test "Basic replacement" <|
                 \_ ->
                     Expect.equal
                         (toResult inlines "my test//text")
-                        (Ok [ [ Tuple.pair emptyStyles "my test/text" ] ])
+                        (Ok [ [ [ Tuple.pair emptyStyles "my test/text" ] ] ])
             , test "replace dash" <|
                 \_ ->
                     Expect.equal
                         (toResult inlines "my test--text")
-                        (Ok [ [ Tuple.pair emptyStyles "my test–text" ] ])
+                        (Ok [ [ [ Tuple.pair emptyStyles "my test–text" ] ] ])
             , test "Inline elements should maintain escaped italics" <|
                 \_ ->
                     Expect.equal
                         (toResult inlines "[my //]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
-                            [ [ Tuple.pair emptyStyles "my /" ]
-                            , [ Tuple.pair emptyStyles " highlighted " ]
-                            , [ Tuple.pair emptyStyles "sentence" ]
-                            , [ Tuple.pair emptyStyles " " ]
-                            , [ Tuple.pair emptyStyles "order" ]
+                            [ [ [ Tuple.pair emptyStyles "my /" ]
+                              , [ Tuple.pair emptyStyles " highlighted " ]
+                              , [ Tuple.pair emptyStyles "sentence" ]
+                              , [ Tuple.pair emptyStyles " " ]
+                              , [ Tuple.pair emptyStyles "order" ]
+                              ]
                             ]
                         )
             , test "Inline elements should maintain multiple replacements" <|
@@ -615,11 +588,12 @@ suite =
                     Expect.equal
                         (toResult inlines "[my ////]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
-                            [ [ Tuple.pair emptyStyles "my //" ]
-                            , [ Tuple.pair emptyStyles " highlighted " ]
-                            , [ Tuple.pair emptyStyles "sentence" ]
-                            , [ Tuple.pair emptyStyles " " ]
-                            , [ Tuple.pair emptyStyles "order" ]
+                            [ [ [ Tuple.pair emptyStyles "my //" ]
+                              , [ Tuple.pair emptyStyles " highlighted " ]
+                              , [ Tuple.pair emptyStyles "sentence" ]
+                              , [ Tuple.pair emptyStyles " " ]
+                              , [ Tuple.pair emptyStyles "order" ]
+                              ]
                             ]
                         )
             , test "Inline elements should maintain escaped characters" <|
@@ -627,11 +601,12 @@ suite =
                     Expect.equal
                         (toResult inlines "[my \\/]{highlight} highlighted [sentence]{highlight} [order]{highlight}")
                         (Ok
-                            [ [ Tuple.pair emptyStyles "my /" ]
-                            , [ Tuple.pair emptyStyles " highlighted " ]
-                            , [ Tuple.pair emptyStyles "sentence" ]
-                            , [ Tuple.pair emptyStyles " " ]
-                            , [ Tuple.pair emptyStyles "order" ]
+                            [ [ [ Tuple.pair emptyStyles "my /" ]
+                              , [ Tuple.pair emptyStyles " highlighted " ]
+                              , [ Tuple.pair emptyStyles "sentence" ]
+                              , [ Tuple.pair emptyStyles " " ]
+                              , [ Tuple.pair emptyStyles "order" ]
+                              ]
                             ]
                         )
             , test "Incorrect inline element name" <|
@@ -670,7 +645,7 @@ suite =
         And my indented line.
 
 """)
-                        (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.")
+                        (Ok [ "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line." ])
             , test "Parse code block and then normal text" <|
                 \_ ->
                     Expect.equal
@@ -682,22 +657,27 @@ suite =
         And my indented line.
 Then some text.
 """)
-                        (Ok "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line.:text")
+                        (Ok
+                            [ "Here is my first line.\nHere is my second.\nHere is my third.\nHere is my fourth.\n    And my indented line."
+                            , "text"
+                            ]
+                        )
             ]
         , describe "Nested"
             [ test "Simple list parsing.  No Nesting." <|
                 \_ ->
                     Expect.equal
                         (toResult nested simpleNestedDoc)
-                        (Ok [ Indexed 0 [], Indexed 1 [], Indexed 2 [] ])
+                        (Ok [ [ Indexed 0 [], Indexed 1 [], Indexed 2 [] ] ])
             , test "Simple list parsing, maintains order" <|
                 \_ ->
                     Expect.equal
                         (toResult nestedOrdering simpleNestedOrderedDoc)
                         (Ok
-                            [ Ordered [ 1, 2 ] []
-                            , Ordered [ 3, 4, 5 ] []
-                            , Ordered [ 6 ] []
+                            [ [ Ordered [ 1, 2 ] []
+                              , Ordered [ 3, 4, 5 ] []
+                              , Ordered [ 6 ] []
+                              ]
                             ]
                         )
             , test "Complex list parsing, maintains order" <|
@@ -705,12 +685,13 @@ Then some text.
                     Expect.equal
                         (toResult nestedOrdering complexNestedOrderedDoc)
                         (Ok
-                            [ Ordered [ 1, 2 ] []
-                            , Ordered [ 3, 4 ]
-                                [ Ordered [ 5, 6 ] []
-                                , Ordered [ 7, 8 ] []
-                                ]
-                            , Ordered [ 9 ] []
+                            [ [ Ordered [ 1, 2 ] []
+                              , Ordered [ 3, 4 ]
+                                    [ Ordered [ 5, 6 ] []
+                                    , Ordered [ 7, 8 ] []
+                                    ]
+                              , Ordered [ 9 ] []
+                              ]
                             ]
                         )
 
@@ -730,17 +711,18 @@ Then some text.
                     Expect.equal
                         (toResult iconListDoc iconSetting)
                         (Ok
-                            [ Icons Mark.Number
-                                [ Icons Mark.Bullet []
-                                , Icons Mark.Bullet []
-                                , Icons Mark.Bullet []
-                                , Icons Mark.Bullet
-                                    [ Icons Mark.Number []
-                                    , Icons Mark.Number []
+                            [ [ Icons Mark.Number
+                                    [ Icons Mark.Bullet []
+                                    , Icons Mark.Bullet []
+                                    , Icons Mark.Bullet []
+                                    , Icons Mark.Bullet
+                                        [ Icons Mark.Number []
+                                        , Icons Mark.Number []
+                                        ]
                                     ]
-                                ]
-                            , Icons Mark.Number [ Icons Mark.Bullet [] ]
-                            , Icons Mark.Number []
+                              , Icons Mark.Number [ Icons Mark.Bullet [] ]
+                              , Icons Mark.Number []
+                              ]
                             ]
                         )
             , test "Nested list parsing" <|
@@ -748,14 +730,15 @@ Then some text.
                     Expect.equal
                         (toResult nested complexNestedDoc)
                         (Ok
-                            [ Indexed 0
-                                [ Indexed 0 []
-                                , Indexed 1 []
-                                , Indexed 2 []
-                                , Indexed 3 [ Indexed 0 [] ]
-                                ]
-                            , Indexed 1 [ Indexed 0 [] ]
-                            , Indexed 2 []
+                            [ [ Indexed 0
+                                    [ Indexed 0 []
+                                    , Indexed 1 []
+                                    , Indexed 2 []
+                                    , Indexed 3 [ Indexed 0 [] ]
+                                    ]
+                              , Indexed 1 [ Indexed 0 [] ]
+                              , Indexed 2 []
+                              ]
                             ]
                         )
             , test "Nested list dedenting correctly" <|
@@ -763,16 +746,17 @@ Then some text.
                     Expect.equal
                         (toResult nested dedentingNestedDoc)
                         (Ok
-                            [ Indexed 0
-                                [ Indexed 0 []
-                                , Indexed 1 []
-                                , Indexed 2 []
-                                , Indexed 3 [ Indexed 0 [] ]
-                                , Indexed 4 [ Indexed 0 [] ]
-                                , Indexed 5 []
-                                ]
-                            , Indexed 1 [ Indexed 0 [] ]
-                            , Indexed 2 []
+                            [ [ Indexed 0
+                                    [ Indexed 0 []
+                                    , Indexed 1 []
+                                    , Indexed 2 []
+                                    , Indexed 3 [ Indexed 0 [] ]
+                                    , Indexed 4 [ Indexed 0 [] ]
+                                    , Indexed 5 []
+                                    ]
+                              , Indexed 1 [ Indexed 0 [] ]
+                              , Indexed 2 []
+                              ]
                             ]
                         )
             ]
@@ -796,7 +780,7 @@ Then some text.
 """
 
                         result =
-                            Ok [ Tuple.pair emptyStyles "Here’s my extra line" ]
+                            Ok [ [ Tuple.pair emptyStyles "Here’s my extra line" ] ]
                     in
                     Expect.equal (toResult textDoc doc1)
                         result
@@ -810,7 +794,7 @@ Then some text.
 """
 
                         result =
-                            Ok [ Tuple.pair emptyStyles "Here’s my extra line\nAnd some additional stuff." ]
+                            Ok [ [ Tuple.pair emptyStyles "Here’s my extra line\nAnd some additional stuff." ] ]
                     in
                     Expect.equal (toResult textDoc doc1)
                         result
@@ -823,7 +807,7 @@ Then some text.
 """
                     in
                     Expect.equal (toResult singleOneOf doc1)
-                        (Ok "Here's my extra line")
+                        (Ok [ "Here's my extra line" ])
             , test "Mulitline Text" <|
                 \_ ->
                     let
@@ -833,7 +817,7 @@ Then some text.
 """
                     in
                     Expect.equal (toResult codeDoc doc1)
-                        (Ok "Here's my extra line")
+                        (Ok [ "Here's my extra line" ])
             , test "Incorrect Indentation" <|
                 \_ ->
                     let
@@ -862,16 +846,14 @@ Each with their own /styling/.
 
                         result =
                             Ok
-                                ( { one = "Test data", two = "other data" }
-                                , [ [ Tuple.pair emptyStyles "Then a bunch of"
-                                    ]
-                                  , [ Tuple.pair emptyStyles "paragraphs." ]
-                                  , [ Tuple.pair emptyStyles "Each with their own "
-                                    , Tuple.pair { bold = False, italic = True, strike = False } "styling"
-                                    , Tuple.pair emptyStyles "."
-                                    ]
+                                [ [ Tuple.pair emptyStyles "Then a bunch of"
                                   ]
-                                )
+                                , [ Tuple.pair emptyStyles "paragraphs." ]
+                                , [ Tuple.pair emptyStyles "Each with their own "
+                                  , Tuple.pair { bold = False, italic = True, strike = False } "styling"
+                                  , Tuple.pair emptyStyles "."
+                                  ]
+                                ]
                     in
                     Expect.equal
                         (toResult withMetaData doc1)
@@ -937,29 +919,29 @@ Finally, a sentence
             [ test "Verify an int" <|
                 \_ ->
                     Expect.equal
-                        (toResult (Mark.document identity Mark.int) "5")
-                        (Ok 5)
+                        (toResult (Mark.document [ Mark.int ]) "5")
+                        (Ok [ 5 ])
             , test "Verify a range on an int" <|
                 \_ ->
                     Expect.equal
                         (toResult
-                            (Mark.document identity
-                                (Mark.int
+                            (Mark.document
+                                [ Mark.int
                                     |> Mark.verify
                                         (\x ->
                                             Ok x
                                         )
-                                )
+                                ]
                             )
                             "5"
                         )
-                        (Ok 5)
+                        (Ok [ 5 ])
             , test "Fail a range on an int" <|
                 \_ ->
                     Expect.equal
                         (toResult
-                            (Mark.document identity
-                                (Mark.int
+                            (Mark.document
+                                [ Mark.int
                                     |> Mark.verify
                                         (\x ->
                                             Err
@@ -968,7 +950,7 @@ Finally, a sentence
                                                     []
                                                 }
                                         )
-                                )
+                                ]
                             )
                             "5"
                         )
@@ -1001,7 +983,7 @@ Finally, a sentence
                     in
                     Expect.equal
                         (toResult recordDoc doc1)
-                        (Ok { one = "hello", three = "!", two = "world" })
+                        (Ok [ { one = "hello", three = "!", two = "world" } ])
             , test "Commas allowed in record fields" <|
                 \_ ->
                     let
@@ -1014,7 +996,7 @@ Finally, a sentence
                     in
                     Expect.equal
                         (toResult recordDoc doc1)
-                        (Ok { one = "hello, world", three = "!", two = "how are you?" })
+                        (Ok [ { one = "hello, world", three = "!", two = "how are you?" } ])
             , test "Extra line between two fields" <|
                 \_ ->
                     let
@@ -1026,7 +1008,7 @@ Finally, a sentence
 """
                     in
                     Expect.equal (toResult recordDoc doc1)
-                        (Ok { one = "hello", three = "!", two = "world" })
+                        (Ok [ { one = "hello", three = "!", two = "world" } ])
             , test "Records with many text as a field" <|
                 \_ ->
                     let
@@ -1039,7 +1021,13 @@ Finally, a sentence
 """
                     in
                     Expect.equal (toResult recordManyTextDoc doc1)
-                        (Ok { one = "hello", three = [ [ Tuple.pair emptyStyles "Here is a bunch of text" ] ], two = "world" })
+                        (Ok
+                            [ { one = "hello"
+                              , three = [ [ Tuple.pair emptyStyles "Here is a bunch of text" ] ]
+                              , two = "world"
+                              }
+                            ]
+                        )
             , test "Records with many text as a field (starting on same line)" <|
                 \_ ->
                     let
@@ -1053,11 +1041,12 @@ Finally, a sentence
                     Expect.equal
                         (toResult recordManyTextDoc doc1)
                         (Ok
-                            { one = "hello"
-                            , three =
-                                [ [ Tuple.pair emptyStyles "Here is a bunch of text" ] ]
-                            , two = "world"
-                            }
+                            [ { one = "hello"
+                              , three =
+                                    [ [ Tuple.pair emptyStyles "Here is a bunch of text" ] ]
+                              , two = "world"
+                              }
+                            ]
                         )
             , test "Records with multiple lines in field" <|
                 \_ ->
@@ -1075,13 +1064,14 @@ Finally, a sentence
                     in
                     Expect.equal (toResult recordManyTextDoc doc1)
                         (Ok
-                            { one = "hello"
-                            , three =
-                                [ [ Tuple.pair emptyStyles "Here is a bunch of text" ]
-                                , [ Tuple.pair emptyStyles "And some more on another line" ]
-                                ]
-                            , two = "world"
-                            }
+                            [ { one = "hello"
+                              , three =
+                                    [ [ Tuple.pair emptyStyles "Here is a bunch of text" ]
+                                    , [ Tuple.pair emptyStyles "And some more on another line" ]
+                                    ]
+                              , two = "world"
+                              }
+                            ]
                         )
             , test "Incorrect Indentation" <|
                 \_ ->
@@ -1173,7 +1163,7 @@ Finally, a sentence
                         """
                     in
                     Expect.equal (Mark.compile floatDoc doc1)
-                        (Mark.Success { one = 15.25, two = -1, three = 2 })
+                        (Mark.Success [ { one = 15.25, two = -1, three = 2 } ])
             , test "Ints are parsed as expected" <|
                 \_ ->
                     let
@@ -1185,6 +1175,6 @@ Finally, a sentence
                         """
                     in
                     Expect.equal (Mark.compile intDoc doc1)
-                        (Mark.Success { one = 15, two = -1, three = 2 })
+                        (Mark.Success [ { one = 15, two = -1, three = 2 } ])
             ]
         ]

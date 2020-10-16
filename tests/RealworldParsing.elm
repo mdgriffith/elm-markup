@@ -228,38 +228,37 @@ Project →
 
 document =
     Mark.documentWith
-        (\meta body ->
-            { metadata = meta
-            , body =
-                Html.h1 []
-                    [ Html.text meta.icon
-                    , Html.span [ Attr.style "margin-left" "10px" ] meta.title
-                    ]
-                    :: body
-            }
-        )
+        -- (\meta body ->
+        --     { metadata = meta
+        --     , body =
+        --         Html.h1 []
+        --             [ Html.text meta.icon
+        --             , Html.span [ Attr.style "margin-left" "10px" ] meta.title
+        --             ]
+        --             :: body
+        --     }
+        -- )
         -- We have some required metadata that starts our document.
         { id = \_ -> "document-id"
         , metadata = metadata
-        , body =
-            Mark.manyOf
-                [ header
-                , h2
-                , h3
-                , image
-                , list
-                , code
-                , Mark.map (always (Html.text "record")) (Mark.toBlock metadata)
-                , Mark.withId
-                    (\id els ->
-                        Html.p
-                            [ Attr.id (Mark.idToString id)
-                            , Attr.class "editor-box"
-                            ]
-                            els
-                    )
-                    text
-                ]
+        , blocks =
+            [ header
+            , h2
+            , h3
+            , image
+            , list
+            , code
+            , Mark.map (always (Html.text "record")) (Mark.toBlock metadata)
+            , Mark.withId
+                (\id els ->
+                    Html.p
+                        [ Attr.id (Mark.idToString id)
+                        , Attr.class "editor-box"
+                        ]
+                        els
+                )
+                text
+            ]
         }
 
 

@@ -15,38 +15,35 @@ import Test exposing (..)
 
 sectionDoc =
     Mark.document
-        identity
-        (Mark.manyOf
-            [ Mark.withId (\i b -> [ Tuple.pair i b ]) <|
-                Mark.map (String.join ":" << List.map Tuple.second) text
-            , idRecord
-            , Mark.withId
-                (\x y ->
-                    ( x, "section block" ) :: y
-                )
-              <|
-                Mark.block "Section"
-                    List.concat
-                    (Mark.manyOf
-                        [ Mark.withId
-                            (\x y ->
-                                ( x, "embedded block" ) :: y
+        [ Mark.withId (\i b -> [ Tuple.pair i b ]) <|
+            Mark.map (String.join ":" << List.map Tuple.second) text
+        , idRecord
+        , Mark.withId
+            (\x y ->
+                ( x, "section block" ) :: y
+            )
+          <|
+            Mark.block "Section"
+                List.concat
+                (Mark.manyOf
+                    [ Mark.withId
+                        (\x y ->
+                            ( x, "embedded block" ) :: y
+                        )
+                      <|
+                        Mark.block "Embedded"
+                            identity
+                            (Mark.withId (\i b -> [ Tuple.pair i ("!!" ++ b) ]) <|
+                                Mark.map (String.join ":" << List.map Tuple.second) text
                             )
-                          <|
-                            Mark.block "Embedded"
-                                identity
-                                (Mark.withId (\i b -> [ Tuple.pair i ("!!" ++ b) ]) <|
-                                    Mark.map (String.join ":" << List.map Tuple.second) text
-                                )
-                        , Mark.withId (\i b -> [ Tuple.pair i b ]) <|
-                            Mark.map (String.join ":" << List.map Tuple.second) text
-                        ]
-                    )
-            , Mark.withId
-                (\x y -> ( x, "list block" ) :: y)
-                list
-            ]
-        )
+                    , Mark.withId (\i b -> [ Tuple.pair i b ]) <|
+                        Mark.map (String.join ":" << List.map Tuple.second) text
+                    ]
+                )
+        , Mark.withId
+            (\x y -> ( x, "list block" ) :: y)
+            list
+        ]
 
 
 idRecord =

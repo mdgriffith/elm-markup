@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , emptyRange, lookup, minusPosition, resetBlockStart, resetFoundStart
+    , emptyRange, findMatch, lookup, matchBlock, minusPosition, resetBlockStart, resetFoundStart
     )
 
 {-|
@@ -793,6 +793,24 @@ inlineExample kind (Block block) =
             "[" ++ selection ++ "]" ++ containerAsString
 
 
+findMatch description blcks =
+    case blcks of
+        [] ->
+            Failure Error.NoMatch
+
+        blck :: remain ->
+            if matchBlock description blck then
+                renderBlock blck description
+
+            else
+                findMatch description remain
+
+
+matchBlock : Description -> Block a -> Bool
+matchBlock desc (Block details) =
+    match desc details.expect
+
+
 match : Description -> Expectation -> Bool
 match description exp =
     case description of
@@ -808,7 +826,7 @@ match description exp =
             case exp of
                 ExpectBlock expectedName expectedChild ->
                     if expectedName == details.name then
-                        matchExpected details.expected expectedChild
+                        matchExpected details.expected exp
 
                     else
                         False
