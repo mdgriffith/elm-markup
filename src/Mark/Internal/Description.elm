@@ -293,6 +293,7 @@ type BlockKind
     | AnnotationNamed String
 
 
+blockKindToContext : BlockKind -> ParseContext
 blockKindToContext kind =
     case kind of
         Value ->
@@ -308,6 +309,7 @@ blockKindToContext kind =
             ParseInline
 
 
+blockKindToSelection : BlockKind -> AnnotationType
 blockKindToSelection kind =
     case kind of
         Value ->
