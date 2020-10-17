@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , emptyRange, findMatch, lookup, matchBlock, minusPosition, resetBlockStart, resetFoundStart
+    , BlockOutcome, emptyRange, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, resetBlockStart, resetFoundStart
     )
 
 {-|
@@ -57,8 +57,14 @@ type Document meta data
         { expect : Expectation
         , metadata : Parser Error.Context Error.Problem (Result Error.UnexpectedDetails meta)
         , parser : Parser Error.Context Error.Problem Parsed
-        , converter : Parsed -> Outcome Error.AstError (Uncertain (List data)) (List data)
+        , converter : Parsed -> BlockOutcome (List data)
         }
+
+
+type alias WithAttr data =
+    { data : data
+    , attrs : List Attribute
+    }
 
 
 {-| -}
@@ -69,7 +75,15 @@ type Parsed
         , expected : Expectation
         , initialSeed : Id.Seed
         , currentSeed : Id.Seed
+        , attributes : List Attribute
         }
+
+
+type alias Attribute =
+    { name : String
+    , value : String
+    , block : Id.Id
+    }
 
 
 {-| -}
@@ -256,10 +270,14 @@ A value is just a raw parser.
 type Block data
     = Block
         { kind : BlockKind
-        , converter : Description -> Outcome Error.AstError (Uncertain data) data
+        , converter : Description -> BlockOutcome data
         , expect : Expectation
         , parser : ParseContext -> Id.Seed -> ( Id.Seed, Parser Error.Context Error.Problem Description )
         }
+
+
+type alias BlockOutcome data =
+    Outcome Error.AstError (Uncertain (WithAttr data)) (WithAttr data)
 
 
 type ParseContext
@@ -421,18 +439,26 @@ uncertain err =
 
 mapSuccessAndRecovered :
     (success -> otherSuccess)
-    -> Outcome f (Uncertain success) success
-    -> Outcome f (Uncertain otherSuccess) otherSuccess
+    -> BlockOutcome success
+    -> BlockOutcome otherSuccess
 mapSuccessAndRecovered fn outcome =
     case outcome of
         Success s ->
-            Success (fn s)
+            Success
+                { data = fn s.data
+                , attrs = s.attrs
+                }
 
         Almost (Uncertain u) ->
             Almost (Uncertain u)
 
         Almost (Recovered e a) ->
-            Almost (Recovered e (fn a))
+            Almost
+                (Recovered e
+                    { data = fn a.data
+                    , attrs = a.attrs
+                    }
+                )
 
         Failure f ->
             Failure f
@@ -447,7 +473,7 @@ type Record data
         , fieldConverter :
             Description
             -> AnnotationType
-            -> Outcome Error.AstError (Uncertain (FieldConverter data)) (FieldConverter data)
+            -> BlockOutcome (FieldConverter data)
         , fields : List FieldParser
         }
 
@@ -601,7 +627,7 @@ textDescriptionRange textDesc =
             details.range
 
 
-renderBlock : Block data -> Description -> Outcome Error.AstError (Uncertain data) data
+renderBlock : Block data -> Description -> BlockOutcome data
 renderBlock fromBlock =
     case fromBlock of
         Block { converter } ->
@@ -2175,53 +2201,74 @@ compile :
 compile (Document blocks) source =
     case Parser.run blocks.parser source of
         Ok ((Parsed parsedDetails) as parsed) ->
-            (Ok << Tuple.pair parsed) <|
-                case parsedDetails.errors of
-                    [] ->
-                        case blocks.converter parsed of
-                            Success rendered ->
-                                Success rendered
+            -- (Ok << Tuple.pair parsed) <|
+            case parsedDetails.errors of
+                [] ->
+                    case blocks.converter parsed of
+                        Success rendered ->
+                            Ok
+                                ( Parsed { parsedDetails | attributes = rendered.attrs }
+                                , Success rendered.data
+                                )
 
-                            Almost (Recovered errors rendered) ->
-                                Almost
+                        Almost (Recovered errors rendered) ->
+                            Ok
+                                ( Parsed { parsedDetails | attributes = rendered.attrs }
+                                , Almost
                                     { errors = List.map (Error.render source) (errorsToList errors)
-                                    , result = rendered
+                                    , result = rendered.data
                                     }
+                                )
 
-                            Almost (Uncertain errors) ->
-                                -- now we're certain :/
-                                Failure (List.map (Error.render source) (errorsToList errors))
+                        Almost (Uncertain errors) ->
+                            -- now we're certain :/
+                            Ok ( parsed, Failure (List.map (Error.render source) (errorsToList errors)) )
 
-                            Failure Error.NoMatch ->
-                                -- Invalid Ast.
-                                -- This should never happen because
-                                -- we definitely have the same document in both parsing and converting.
-                                Failure
+                        Failure Error.NoMatch ->
+                            -- Invalid Ast.
+                            -- This should never happen because
+                            -- we definitely have the same document in both parsing and converting.
+                            Ok
+                                ( parsed
+                                , Failure
                                     [ Error.documentMismatch ]
+                                )
 
-                    _ ->
-                        case blocks.converter parsed of
-                            Success rendered ->
-                                Almost
+                _ ->
+                    case blocks.converter parsed of
+                        Success rendered ->
+                            Ok
+                                ( Parsed { parsedDetails | attributes = rendered.attrs }
+                                , Almost
                                     { errors = parsedDetails.errors
-                                    , result = rendered
+                                    , result = rendered.data
                                     }
+                                )
 
-                            Almost (Uncertain ( err, remainError )) ->
-                                Failure (List.map (Error.render source) (err :: remainError))
+                        Almost (Uncertain ( err, remainError )) ->
+                            Ok
+                                ( parsed
+                                , Failure (List.map (Error.render source) (err :: remainError))
+                                )
 
-                            Almost (Recovered ( err, remainError ) result) ->
-                                Almost
+                        Almost (Recovered ( err, remainError ) rendered) ->
+                            Ok
+                                ( Parsed { parsedDetails | attributes = rendered.attrs }
+                                , Almost
                                     { errors =
                                         List.map (Error.render source) (err :: remainError)
-                                    , result = result
+                                    , result = rendered.data
                                     }
+                                )
 
-                            Failure noMatch ->
-                                Failure
+                        Failure noMatch ->
+                            Ok
+                                ( parsed
+                                , Failure
                                     (Error.documentMismatch
                                         :: parsedDetails.errors
                                     )
+                                )
 
         Err deadEnds ->
             Err <|
@@ -2246,7 +2293,7 @@ lookup id (Document doc) (Parsed parsed) =
         Just found ->
             case doc.converter (Parsed { parsed | found = found }) of
                 Success rendered ->
-                    case rendered of
+                    case rendered.data of
                         top :: _ ->
                             Success top
 
@@ -2464,7 +2511,7 @@ render (Document blocks) ((Parsed parsedDetails) as parsed) =
         [] ->
             case blocks.converter parsed of
                 Success rendered ->
-                    Success rendered
+                    Success rendered.data
 
                 Almost (Uncertain ( err, remainError )) ->
                     -- Failure (List.map (Error.render source) (err :: remainError))
@@ -2485,7 +2532,7 @@ render (Document blocks) ((Parsed parsedDetails) as parsed) =
                 Success rendered ->
                     Almost
                         { errors = parsedDetails.errors
-                        , result = rendered
+                        , result = rendered.data
                         }
 
                 Almost (Uncertain _) ->
@@ -2494,7 +2541,7 @@ render (Document blocks) ((Parsed parsedDetails) as parsed) =
                 Almost (Recovered _ result) ->
                     Almost
                         { errors = parsedDetails.errors
-                        , result = result
+                        , result = result.data
                         }
 
                 Failure noMatch ->
@@ -2544,25 +2591,162 @@ humanReadableExpectations expect =
 
 
 mergeWith fn one two =
-    case ( one, two ) of
-        ( Success renderedOne, Success renderedTwo ) ->
-            Success (fn renderedOne renderedTwo)
+    case one of
+        Success renderedOne ->
+            case two of
+                Success renderedTwo ->
+                    Success (fn renderedOne renderedTwo)
 
-        ( Almost (Recovered firstErrs fst), Almost (Recovered secondErrs snd) ) ->
-            Almost
-                (Recovered
-                    (mergeErrors firstErrs secondErrs)
-                    (fn fst snd)
-                )
+                Almost (Recovered errors second) ->
+                    Almost
+                        (Recovered
+                            errors
+                            (fn renderedOne second)
+                        )
 
-        ( Almost (Uncertain unexpected), _ ) ->
-            Almost (Uncertain unexpected)
+                _ ->
+                    Failure Error.NoMatch
 
-        ( _, Almost (Uncertain unexpected) ) ->
+        Almost (Recovered firstErrs fst) ->
+            case two of
+                Almost (Recovered secondErrs snd) ->
+                    Almost
+                        (Recovered
+                            (mergeErrors firstErrs secondErrs)
+                            (fn fst snd)
+                        )
+
+                _ ->
+                    Failure Error.NoMatch
+
+        Almost (Uncertain unexpected) ->
             Almost (Uncertain unexpected)
 
         _ ->
-            Failure Error.NoMatch
+            case two of
+                Almost (Uncertain unexpected) ->
+                    Almost (Uncertain unexpected)
+
+                _ ->
+                    Failure Error.NoMatch
+
+
+mergeWithAttrs : (one -> two -> final) -> BlockOutcome one -> BlockOutcome two -> BlockOutcome final
+mergeWithAttrs fn one two =
+    case one of
+        Success first ->
+            case two of
+                Success second ->
+                    Success
+                        { data = fn first.data second.data
+                        , attrs = first.attrs ++ second.attrs
+                        }
+
+                Almost (Recovered errors second) ->
+                    Almost
+                        (Recovered
+                            errors
+                            { data = fn first.data second.data
+                            , attrs = first.attrs ++ second.attrs
+                            }
+                        )
+
+                _ ->
+                    Failure Error.NoMatch
+
+        Almost (Recovered firstErrs first) ->
+            case two of
+                Success second ->
+                    Almost
+                        (Recovered firstErrs
+                            { data = fn first.data second.data
+                            , attrs = first.attrs ++ second.attrs
+                            }
+                        )
+
+                Almost (Recovered secondErrs second) ->
+                    Almost
+                        (Recovered
+                            (mergeErrors firstErrs secondErrs)
+                            { data = fn first.data second.data
+                            , attrs = first.attrs ++ second.attrs
+                            }
+                        )
+
+                _ ->
+                    Failure Error.NoMatch
+
+        Almost (Uncertain unexpected) ->
+            Almost (Uncertain unexpected)
+
+        _ ->
+            case two of
+                Almost (Uncertain unexpected) ->
+                    Almost (Uncertain unexpected)
+
+                _ ->
+                    Failure Error.NoMatch
+
+
+type alias ListOutcome data =
+    Outcome Error.AstError (Uncertain (List (WithAttr data))) (List (WithAttr data))
+
+
+mergeListWithAttrs : (List one -> List two -> final) -> ListOutcome one -> ListOutcome two -> BlockOutcome final
+mergeListWithAttrs fn one two =
+    case one of
+        Success first ->
+            case two of
+                Success second ->
+                    Success
+                        { data = fn (List.map .data first) (List.map .data second)
+                        , attrs = List.concatMap .attrs first ++ List.concatMap .attrs second
+                        }
+
+                Almost (Recovered errors second) ->
+                    Almost
+                        (Recovered
+                            errors
+                            { data = fn (List.map .data first) (List.map .data second)
+                            , attrs = List.concatMap .attrs first ++ List.concatMap .attrs second
+                            }
+                        )
+
+                _ ->
+                    Failure Error.NoMatch
+
+        Almost (Recovered firstErrs first) ->
+            case two of
+                Success second ->
+                    Almost
+                        (Recovered firstErrs
+                            { data = fn (List.map .data first) (List.map .data second)
+                            , attrs = List.concatMap .attrs first ++ List.concatMap .attrs second
+                            }
+                        )
+
+                Almost (Recovered secondErrs second) ->
+                    Almost
+                        (Recovered
+                            (mergeErrors firstErrs secondErrs)
+                            { data = fn (List.map .data first) (List.map .data second)
+                            , attrs = List.concatMap .attrs first ++ List.concatMap .attrs second
+                            }
+                        )
+
+                _ ->
+                    Failure Error.NoMatch
+
+        Almost (Uncertain unexpected) ->
+            Almost (Uncertain unexpected)
+
+        _ ->
+            case two of
+                Almost (Uncertain unexpected) ->
+                    Almost (Uncertain unexpected)
+
+                _ ->
+                    Failure Error.NoMatch
 
 
 mergeErrors ( h1, r1 ) ( h2, r2 ) =

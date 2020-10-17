@@ -11,7 +11,7 @@ module Mark exposing
     , Outcome(..), Partial
     , metadata, compile, parse, Parsed, toString, render
     , map, verify, onError
-    , withId, documentId, idToString, stringToId
+    , withId, withAttr, documentId, idToString, stringToId
     , lookup
     )
 
@@ -73,7 +73,7 @@ Along with basic [`styling`](#text) and [`replacements`](#replacement), we also 
 
 @docs map, verify, onError
 
-@docs withId, documentId, idToString, stringToId
+@docs withId, withAttr, documentId, idToString, stringToId
 
 @docs lookup
 
@@ -420,6 +420,7 @@ createDocument toDocumentId meta child =
                                             , expected = getBlockExpectation child
                                             , initialSeed = seed
                                             , currentSeed = currentSeed
+                                            , attributes = []
                                             }
 
                                     Err details ->
@@ -438,6 +439,7 @@ createDocument toDocumentId meta child =
                                             , expected = getBlockExpectation child
                                             , initialSeed = seed
                                             , currentSeed = currentSeed
+                                            , attributes = []
                                             }
                             )
                             |. Parser.chompWhile (\c -> c == '\n')
@@ -515,7 +517,7 @@ getMetadataParser metadataBlock =
                 Ok description ->
                     case renderBlock metadataBlock description of
                         Outcome.Success meta ->
-                            Parser.succeed (Ok meta)
+                            Parser.succeed (Ok meta.data)
 
                         Outcome.Failure astError ->
                             Parser.succeed
@@ -610,9 +612,9 @@ verify fn (Block details) =
             \desc ->
                 case details.converter desc of
                     Outcome.Success a ->
-                        case fn a of
+                        case fn a.data of
                             Ok new ->
-                                Outcome.Success new
+                                Outcome.Success { data = new, attrs = a.attrs }
 
                             Err newErr ->
                                 uncertain
@@ -623,9 +625,9 @@ verify fn (Block details) =
                                     }
 
                     Outcome.Almost (Recovered err a) ->
-                        case fn a of
+                        case fn a.data of
                             Ok new ->
-                                Outcome.Almost (Recovered err new)
+                                Outcome.Almost (Recovered err { data = new, attrs = a.attrs })
 
                             Err newErr ->
                                 uncertain
@@ -676,9 +678,69 @@ withId fn (Block details) =
                     id =
                         Desc.getId desc
                 in
-                mapSuccessAndRecovered
+                Desc.mapSuccessAndRecovered
                     (fn id)
                     (details.converter desc)
+        , parser = details.parser
+        , expect = details.expect
+        }
+
+
+{-| Get an `Id` associated with a `Block`, which can be used to make updates through `Mark.Edit`.
+
+        Mark.string
+            |> Mark.withAttr
+                (\str -> ("link", str))
+
+-}
+withAttr : (a -> ( String, String )) -> Block a -> Block a
+withAttr fn (Block details) =
+    Block
+        { kind = details.kind
+        , converter =
+            \desc ->
+                let
+                    id =
+                        Desc.getId desc
+                in
+                case details.converter desc of
+                    Outcome.Success deets ->
+                        let
+                            new =
+                                case fn deets.data of
+                                    ( key, value ) ->
+                                        { name = key
+                                        , value = value
+                                        , block = id
+                                        }
+                        in
+                        Outcome.Success
+                            { data = deets.data
+                            , attrs = new :: deets.attrs
+                            }
+
+                    Outcome.Almost (Uncertain x) ->
+                        Outcome.Almost (Uncertain x)
+
+                    Outcome.Almost (Recovered errs deets) ->
+                        let
+                            new =
+                                case fn deets.data of
+                                    ( key, value ) ->
+                                        { name = key
+                                        , value = value
+                                        , block = id
+                                        }
+                        in
+                        Outcome.Almost
+                            (Recovered errs
+                                { data = deets.data
+                                , attrs = new :: deets.attrs
+                                }
+                            )
+
+                    Outcome.Failure errs ->
+                        Outcome.Failure errs
         , parser = details.parser
         , expect = details.expect
         }
@@ -735,7 +797,7 @@ onError newValue (Block details) =
 
                     Outcome.Almost (Uncertain x) ->
                         Outcome.Almost
-                            (Recovered x newValue)
+                            (Recovered x { data = newValue, attrs = [] })
 
                     Outcome.Failure f ->
                         Outcome.Failure f
@@ -880,9 +942,9 @@ startWith fn startBlock endBlock =
             \desc ->
                 case desc of
                     StartsWith details ->
-                        mergeWith fn
-                            (renderBlock startBlock details.first.found)
-                            (renderBlock endBlock details.second.found)
+                        Desc.mergeWithAttrs fn
+                            (Desc.renderBlock startBlock details.first.found)
+                            (Desc.renderBlock endBlock details.second.found)
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -988,7 +1050,7 @@ manyOf blocks =
                                     Found range child ->
                                         getRendered id
                                             choices
-                                            (mergeWith (::)
+                                            (Desc.mergeWithAttrs (::)
                                                 (Desc.findMatch child blocks)
                                                 existingResult
                                             )
@@ -998,7 +1060,7 @@ manyOf blocks =
                     ManyOf many ->
                         getRendered many.id
                             many.choices
-                            (Outcome.Success [])
+                            (Outcome.Success { data = [], attrs = [] })
                             many.children
 
                     _ ->
@@ -1199,23 +1261,50 @@ tree view contentBlock =
                                 getNestedIcon
                                 (renderTreeNodeSmall contentBlock)
                             |> (\( _, icon, outcome ) ->
-                                    mapSuccessAndRecovered
-                                        (\nodes ->
-                                            view
-                                                --details.id
-                                                (Enumerated
-                                                    { icon =
-                                                        case icon of
-                                                            Desc.Bullet ->
-                                                                Bullet
+                                    case outcome of
+                                        Outcome.Success nodes ->
+                                            Outcome.Success
+                                                { data =
+                                                    view
+                                                        (Enumerated
+                                                            { icon =
+                                                                case icon of
+                                                                    Desc.Bullet ->
+                                                                        Bullet
 
-                                                            Desc.AutoNumber _ ->
-                                                                Number
-                                                    , items = nodes
+                                                                    Desc.AutoNumber _ ->
+                                                                        Number
+                                                            , items = List.map .data nodes
+                                                            }
+                                                        )
+                                                , attrs = List.concatMap .attrs nodes
+                                                }
+
+                                        Outcome.Almost (Uncertain u) ->
+                                            Outcome.Almost (Uncertain u)
+
+                                        Outcome.Almost (Recovered errs nodes) ->
+                                            Outcome.Almost
+                                                (Recovered errs
+                                                    { data =
+                                                        view
+                                                            (Enumerated
+                                                                { icon =
+                                                                    case icon of
+                                                                        Desc.Bullet ->
+                                                                            Bullet
+
+                                                                        Desc.AutoNumber _ ->
+                                                                            Number
+                                                                , items = List.map .data nodes
+                                                                }
+                                                            )
+                                                    , attrs = List.concatMap .attrs nodes
                                                     }
                                                 )
-                                        )
-                                        outcome
+
+                                        Outcome.Failure f ->
+                                            Outcome.Failure f
                                )
 
                     _ ->
@@ -1290,7 +1379,7 @@ renderTreeNodeSmall :
     -> Desc.Icon
     -> Index.Index
     -> Nested Description
-    -> Outcome.Outcome Error.AstError (Uncertain (Item item)) (Item item)
+    -> Desc.BlockOutcome (Item item)
 renderTreeNodeSmall contentBlock icon index (Nested cursor) =
     let
         ( newIndex, childrenIcon, renderedChildren ) =
@@ -1307,7 +1396,7 @@ renderTreeNodeSmall contentBlock icon index (Nested cursor) =
                 )
                 cursor.content
     in
-    mergeWith
+    Desc.mergeListWithAttrs
         (\content children ->
             Item
                 { index = Index.toList index
@@ -1532,8 +1621,13 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
         , converter =
             \desc ->
                 case details.fieldConverter desc annotationType of
-                    Outcome.Success ( pos, fieldDescriptions, rendered ) ->
-                        Outcome.Success rendered
+                    Outcome.Success fields ->
+                        case fields.data of
+                            ( pos, fieldDescriptions, rendered ) ->
+                                Outcome.Success
+                                    { data = rendered
+                                    , attrs = fields.attrs
+                                    }
 
                     Outcome.Failure fail ->
                         Outcome.Failure fail
@@ -1541,8 +1635,15 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
                     Outcome.Almost (Desc.Uncertain e) ->
                         Outcome.Almost (Desc.Uncertain e)
 
-                    Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
-                        Outcome.Almost (Desc.Recovered e rendered)
+                    Outcome.Almost (Desc.Recovered e fields) ->
+                        case fields.data of
+                            ( pos, fieldDescriptions, rendered ) ->
+                                Outcome.Almost
+                                    (Desc.Recovered e
+                                        { data = rendered
+                                        , attrs = fields.attrs
+                                        }
+                                    )
         , parser =
             \context seed ->
                 let
@@ -1563,7 +1664,7 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
 
 
 type alias Cursor data =
-    { outcome : Outcome.Outcome Error.AstError (Uncertain data) data
+    { outcome : BlockOutcome data
     , lastOffset : Int
     }
 
@@ -1583,18 +1684,32 @@ renderText :
     , inlines : List (Desc.AnnotationType -> Block rendered)
     }
     -> Description
-    -> TextOutcome (List rendered)
+    -> BlockOutcome (List rendered)
 renderText options description =
     case description of
         DescribeText details ->
-            details.text
-                |> List.foldl (convertTextDescription details.id options)
-                    { outcome = Outcome.Success []
-                    , lastOffset = 0
-                    }
-                |> .outcome
+            let
+                outcome =
+                    details.text
+                        |> List.foldl (convertTextDescription details.id options)
+                            { outcome = Outcome.Success { data = [], attrs = [] }
+                            , lastOffset = 0
+                            }
+                        |> .outcome
+            in
+            outcome
                 |> mapSuccessAndRecovered List.reverse
 
+        -- case outcome of
+        --     Outcome.Success s ->
+        --         Outcome.Success (List.reverse s)
+        --     Outcome.Almost (Uncertain u) ->
+        --         Outcome.Almost (Uncertain u)
+        --     Outcome.Almost (Recovered errs data) ->
+        --         Outcome.Almost
+        --             (Recovered errs (List.reverse data))
+        --     Outcome.Failure f ->
+        --         Outcome.Failure f
         _ ->
             Outcome.Failure Error.NoMatch
 
@@ -1622,18 +1737,20 @@ convertTextDescription id options comp cursor =
     case comp of
         Styled range (Desc.Text styling str) ->
             { outcome =
-                mergeWith (::)
+                mergeWithAttrs (::)
                     (Outcome.Success
-                        (options.view
-                            { id = id
-                            , selection =
-                                { anchor = cursor.lastOffset
-                                , focus = cursor.lastOffset + blockLength
+                        { data =
+                            options.view
+                                { id = id
+                                , selection =
+                                    { anchor = cursor.lastOffset
+                                    , focus = cursor.lastOffset + blockLength
+                                    }
                                 }
-                            }
-                            styling
-                            str
-                        )
+                                styling
+                                str
+                        , attrs = []
+                        }
                     )
                     cursor.outcome
             , lastOffset =
@@ -1687,7 +1804,7 @@ convertTextDescription id options comp cursor =
 
                 Just matched ->
                     { outcome =
-                        mergeWith (::)
+                        Desc.mergeWithAttrs (::)
                             (matched.converter details.record)
                             cursor.outcome
                     , lastOffset = cursor.lastOffset + blockLength
@@ -1756,7 +1873,14 @@ annotation name view =
                         if details.name == name then
                             case details.found of
                                 Desc.Found pos fieldDescriptions ->
-                                    Outcome.Success ( pos, fieldDescriptions, view (selectedText selected) )
+                                    Outcome.Success
+                                        { data =
+                                            ( pos
+                                            , fieldDescriptions
+                                            , view (selectedText selected)
+                                            )
+                                        , attrs = []
+                                        }
 
                                 Desc.Unexpected unexpected ->
                                     Desc.uncertain unexpected
@@ -1834,7 +1958,10 @@ verbatim name view =
                         if details.name == name then
                             case details.found of
                                 Desc.Found pos fieldDescriptions ->
-                                    Outcome.Success ( pos, fieldDescriptions, view (selectedString selected) )
+                                    Outcome.Success
+                                        { attrs = []
+                                        , data = ( pos, fieldDescriptions, view (selectedString selected) )
+                                        }
 
                                 Desc.Unexpected unexpected ->
                                     Desc.uncertain unexpected
@@ -1889,7 +2016,7 @@ string =
             \desc ->
                 case desc of
                     DescribeString id range str ->
-                        Outcome.Success (String.trim str)
+                        Outcome.Success { data = String.trim str, attrs = [] }
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -2006,7 +2133,7 @@ bool =
 foundToOutcome found =
     case found of
         Found rng i ->
-            Outcome.Success i
+            Outcome.Success { data = i, attrs = [] }
 
         Unexpected unexpected ->
             Outcome.Almost (Uncertain ( unexpected, [] ))
@@ -2055,7 +2182,7 @@ float =
                 case desc of
                     DescribeFloat details ->
                         foundToOutcome details.found
-                            |> Outcome.mapSuccess Tuple.second
+                            |> Desc.mapSuccessAndRecovered Tuple.second
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -2181,7 +2308,7 @@ record name view =
                         if details.name == name && ann == Desc.EmptyAnnotation then
                             case details.found of
                                 Desc.Found pos fieldDescriptions ->
-                                    Outcome.Success ( pos, fieldDescriptions, view )
+                                    Outcome.Success { data = ( pos, fieldDescriptions, view ), attrs = [] }
 
                                 Desc.Unexpected unexpected ->
                                     Desc.uncertain unexpected
@@ -2209,41 +2336,45 @@ field name value (Desc.ProtoRecord details) =
         , fieldConverter =
             \desc ann ->
                 case details.fieldConverter desc ann of
-                    Outcome.Success ( pos, fieldDescriptions, rendered ) ->
-                        case getField newField fieldDescriptions of
-                            Just outcome ->
-                                mapSuccessAndRecovered
-                                    (\myField ->
-                                        ( pos
-                                        , fieldDescriptions
-                                        , rendered myField
-                                        )
-                                    )
-                                    outcome
+                    Outcome.Success fields ->
+                        case fields.data of
+                            ( pos, fieldDescriptions, rendered ) ->
+                                case getField newField fieldDescriptions of
+                                    Just outcome ->
+                                        mapSuccessAndRecovered
+                                            (\myField ->
+                                                ( pos
+                                                , fieldDescriptions
+                                                , rendered myField
+                                                )
+                                            )
+                                            outcome
 
-                            Nothing ->
-                                Desc.uncertain
-                                    { problem = Error.MissingFields [ fieldName newField ]
-                                    , range = pos
-                                    }
+                                    Nothing ->
+                                        Desc.uncertain
+                                            { problem = Error.MissingFields [ fieldName newField ]
+                                            , range = pos
+                                            }
 
-                    Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
-                        case getField newField fieldDescriptions of
-                            Just outcome ->
-                                mapSuccessAndRecovered
-                                    (\myField ->
-                                        ( pos
-                                        , fieldDescriptions
-                                        , rendered myField
-                                        )
-                                    )
-                                    outcome
+                    Outcome.Almost (Desc.Recovered e fields) ->
+                        case fields.data of
+                            ( pos, fieldDescriptions, rendered ) ->
+                                case getField newField fieldDescriptions of
+                                    Just outcome ->
+                                        mapSuccessAndRecovered
+                                            (\myField ->
+                                                ( pos
+                                                , fieldDescriptions
+                                                , rendered myField
+                                                )
+                                            )
+                                            outcome
 
-                            Nothing ->
-                                Desc.uncertain
-                                    { problem = Error.MissingFields [ fieldName newField ]
-                                    , range = pos
-                                    }
+                                    Nothing ->
+                                        Desc.uncertain
+                                            { problem = Error.MissingFields [ fieldName newField ]
+                                            , range = pos
+                                            }
 
                     Outcome.Failure fail ->
                         Outcome.Failure fail
@@ -2259,10 +2390,12 @@ fieldName (Field name _) =
     name
 
 
+{-| TODO: convert to recursion
+-}
 getField :
     Field value
     -> List ( String, Desc.Found Desc.Description )
-    -> Maybe (Outcome.Outcome Error.AstError (Uncertain value) value)
+    -> Maybe (Desc.BlockOutcome value)
 getField (Field name fieldBlock) fields =
     List.foldl (matchField name fieldBlock) Nothing fields
 
@@ -2271,8 +2404,8 @@ matchField :
     String
     -> Block value
     -> ( String, Desc.Found Desc.Description )
-    -> Maybe (Outcome.Outcome Error.AstError (Uncertain value) value)
-    -> Maybe (Outcome.Outcome Error.AstError (Uncertain value) value)
+    -> Maybe (Desc.BlockOutcome value)
+    -> Maybe (Desc.BlockOutcome value)
 matchField targetName targetBlock ( name, foundDescription ) existing =
     case existing of
         Just _ ->
@@ -2306,8 +2439,10 @@ toBlock (Desc.ProtoRecord details) =
         , converter =
             \desc ->
                 case details.fieldConverter desc Desc.EmptyAnnotation of
-                    Outcome.Success ( pos, fieldDescriptions, rendered ) ->
-                        Outcome.Success rendered
+                    Outcome.Success fields ->
+                        case fields.data of
+                            ( pos, fieldDescriptions, rendered ) ->
+                                Outcome.Success { data = rendered, attrs = fields.attrs }
 
                     Outcome.Failure fail ->
                         Outcome.Failure fail
@@ -2315,8 +2450,15 @@ toBlock (Desc.ProtoRecord details) =
                     Outcome.Almost (Desc.Uncertain e) ->
                         Outcome.Almost (Desc.Uncertain e)
 
-                    Outcome.Almost (Desc.Recovered e ( pos, fieldDescriptions, rendered )) ->
-                        Outcome.Almost (Desc.Recovered e rendered)
+                    Outcome.Almost (Desc.Recovered e fields) ->
+                        case fields.data of
+                            ( pos, fieldDescriptions, rendered ) ->
+                                Outcome.Almost
+                                    (Desc.Recovered e
+                                        { data = rendered
+                                        , attrs = fields.attrs
+                                        }
+                                    )
         , parser =
             \context seed ->
                 let
