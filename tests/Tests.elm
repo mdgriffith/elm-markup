@@ -336,6 +336,7 @@ simpleNestedOrderedDoc =
         4
         5
     --- 6
+    --- 7
 """
 
 
@@ -347,9 +348,15 @@ complexNestedOrderedDoc =
         4
         --- 5
             6
+            --- 12
         --- 7
             8
+        --- 13
+        --- 14
     --- 9
+    --- 10
+        --- 18
+
 """
 
 
@@ -378,9 +385,9 @@ complexNestedDoc =
 dedentingNestedDoc =
     """|> Nested
     - 1
-        - 1
-        - 1
-        - 1
+        - 2
+        - 3
+        - 4
         - 1
             - 1
         - 1
@@ -677,6 +684,7 @@ Then some text.
                             [ [ Ordered [ 1, 2 ] []
                               , Ordered [ 3, 4, 5 ] []
                               , Ordered [ 6 ] []
+                              , Ordered [ 7 ] []
                               ]
                             ]
                         )
@@ -687,25 +695,12 @@ Then some text.
                         (Ok
                             [ [ Ordered [ 1, 2 ] []
                               , Ordered [ 3, 4 ]
-                                    [ Ordered [ 5, 6 ] []
-                                    , Ordered [ 7, 8 ] []
-                                    ]
+                                    [ Ordered [ 5, 6 ] [ Ordered [ 12 ] [] ], Ordered [ 7, 8 ] [], Ordered [ 13 ] [], Ordered [ 14 ] [] ]
                               , Ordered [ 9 ] []
+                              , Ordered [ 10 ] [ Ordered [ 18 ] [] ]
                               ]
                             ]
                         )
-
-            -- TODO: THis should be true, but is probably pretty rare
-            -- , test "Complex list parsing, string and int are isomorphic" <|
-            --     \_ ->
-            --         Expect.equal
-            --             (toResult iconListDoc iconSetting)
-            --             (toResult nestedString iconSetting)
-            -- , test "Isomorphic int and string in simple case" <|
-            --     \_ ->
-            --         Expect.equal
-            --             (toResult iconListDoc iconSetting)
-            --             (toResult nestedString iconSetting)
             , test "Icons set by first element" <|
                 \_ ->
                     Expect.equal

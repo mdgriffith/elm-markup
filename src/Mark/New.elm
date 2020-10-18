@@ -138,25 +138,26 @@ type Icon
 {-| -}
 tree : List Tree -> Block
 tree treeContents =
-    ExpectTree
-        (List.map convertToTreeExpectation treeContents)
+    -- ExpectTree
+    --     (List.map convertToTreeExpectation treeContents)
+    Debug.todo "Expectation were doing double duty as expectations and founds.  Let's fix that for real."
 
 
-{-| This is necessary to make the types work out, but would be nice to remove.
--}
-convertToTreeExpectation (Tree details) =
-    TreeExpectation
-        { icon =
-            case details.icon of
-                Bullet ->
-                    Desc.Bullet
 
-                Number ->
-                    Desc.AutoNumber 1
-        , content = details.content
-        , children =
-            List.map convertToTreeExpectation details.children
-        }
+-- {-| This is necessary to make the types work out, but would be nice to remove.
+-- -}
+-- convertToTreeExpectation (Tree details) =
+--     TreeExpectation
+--         { icon =
+--             case details.icon of
+--                 Bullet ->
+--                     Desc.Bullet
+--                 Number ->
+--                     Desc.AutoNumber 1
+--         , content = details.content
+--         , children =
+--             List.map convertToTreeExpectation details.children
+--         }
 
 
 {-| -}

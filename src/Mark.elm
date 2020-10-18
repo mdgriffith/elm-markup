@@ -270,10 +270,12 @@ getUnexpecteds description =
                 ++ getUnexpecteds details.second.found
 
         DescribeTree details ->
-            -- TODO: Get unexpecteds!!
-            []
+            List.concatMap spelunkUnexpectedsFromFound details.children
 
-        -- List.concatMap getNestedUnexpecteds (Tuple.second details.found)
+        DescribeItem details ->
+            List.concatMap spelunkUnexpectedsFromFound details.content
+                ++ List.concatMap spelunkUnexpectedsFromFound details.children
+
         -- Primitives
         DescribeBoolean details ->
             unexpectedFromFound details.found
@@ -1241,13 +1243,7 @@ tree view contentBlock =
             getBlockExpectation contentBlock
 
         expectation =
-            ExpectTree
-                [ TreeExpectation
-                    { icon = Desc.Bullet
-                    , content = [ blockExpectation ]
-                    , children = []
-                    }
-                ]
+            ExpectTree blockExpectation
     in
     Block
         { kind = Value
@@ -1258,7 +1254,7 @@ tree view contentBlock =
                     DescribeTree details ->
                         details.children
                             |> reduceRender Index.zero
-                                getNestedIcon
+                                getItemIcon
                                 (renderTreeNodeSmall contentBlock)
                             |> (\( _, icon, outcome ) ->
                                     case outcome of
@@ -1335,42 +1331,78 @@ tree view contentBlock =
                                     }
                             )
                             (Parse.withRange
-                                (Parser.succeed
-                                    (\start icon first end remaining ->
-                                        Parse.buildTree
-                                            baseIndent
-                                            ({ icon = Just icon
-                                             , indent = baseIndent
-                                             , range = { start = start, end = end }
-                                             , content = first
-                                             }
-                                                :: remaining
-                                            )
-                                    )
-                                    |= Parse.getPosition
-                                    |= Parse.iconParser
-                                    |= itemParser
-                                    |= Parse.getPosition
-                                    |= Parser.loop
-                                        ( { base = baseIndent
-                                          , prev = baseIndent
-                                          , seed = secondSeed
-                                          }
-                                        , []
-                                        )
-                                        (Parse.tree
-                                            ParseInTree
-                                            contentBlock
-                                        )
-                                )
+                                (parseTree baseIndent secondSeed contentBlock itemParser)
                             )
                     )
                 )
         }
 
 
-getNestedIcon (Nested cursor) =
-    cursor.icon
+parseTree baseIndent seed contentBlock itemParser =
+    (Parser.succeed
+        (\start icon item end ->
+            { start = start
+            , end = end
+            , item = item
+            , icon = icon
+            }
+        )
+        |= Parse.getPosition
+        |= Parse.iconParser
+        |= itemParser
+        |= Parse.getPosition
+    )
+        |> Parser.andThen
+            (\details ->
+                let
+                    ( startId, startSeed ) =
+                        Id.step seed
+                in
+                Parser.loop
+                    ( { base = baseIndent
+                      , prev = baseIndent
+                      , seed = startSeed
+                      }
+                    , { previouslyAdded = Parse.AddedItem
+                      , captured = []
+                      , stack =
+                            [ { start = details.start
+                              , description =
+                                    DescribeItem
+                                        { id = startId
+                                        , icon = details.icon
+                                        , expected = getBlockExpectation contentBlock
+                                        , range =
+                                            { start = details.start
+                                            , end = details.end
+                                            }
+                                        , content =
+                                            [ Found
+                                                { start = details.start
+                                                , end = details.end
+                                                }
+                                                details.item
+                                            ]
+                                        , children = []
+                                        }
+                              }
+                            ]
+                      }
+                    )
+                    (Parse.fullTree
+                        ParseInTree
+                        contentBlock
+                    )
+            )
+
+
+getItemIcon desc =
+    case desc of
+        Found _ (DescribeItem item) ->
+            item.icon
+
+        _ ->
+            Desc.Bullet
 
 
 {-| -}
@@ -1378,45 +1410,62 @@ renderTreeNodeSmall :
     Block item
     -> Desc.Icon
     -> Index.Index
-    -> Nested Description
+    -> Found Description
     -> Desc.BlockOutcome (Item item)
-renderTreeNodeSmall contentBlock icon index (Nested cursor) =
-    let
-        ( newIndex, childrenIcon, renderedChildren ) =
-            reduceRender (Index.indent index)
-                getNestedIcon
-                (renderTreeNodeSmall contentBlock)
-                cursor.children
+renderTreeNodeSmall contentBlock icon index found =
+    case found of
+        Found _ (DescribeItem item) ->
+            let
+                ( newIndex, childrenIcon, renderedChildren ) =
+                    reduceRender (Index.indent index)
+                        getItemIcon
+                        (renderTreeNodeSmall contentBlock)
+                        item.children
 
-        ( _, _, renderedContent ) =
-            reduceRender (Index.dedent newIndex)
-                (always Desc.Bullet)
-                (\icon_ i content ->
-                    renderBlock contentBlock content
-                )
-                cursor.content
-    in
-    Desc.mergeListWithAttrs
-        (\content children ->
-            Item
-                { index = Index.toList index
-                , content = content
-                , children =
-                    Enumerated
-                        { icon =
-                            case childrenIcon of
-                                Desc.Bullet ->
-                                    Bullet
+                ( contentIndex, _, renderedContent ) =
+                    reduceRender (Index.dedent newIndex)
+                        (always Desc.Bullet)
+                        (\icon_ i foundItem ->
+                            case foundItem of
+                                Found _ content ->
+                                    renderBlock contentBlock content
 
-                                Desc.AutoNumber _ ->
-                                    Number
-                        , items =
-                            children
+                                Unexpected details ->
+                                    Desc.uncertain details
+                        )
+                        item.content
+            in
+            Desc.mergeListWithAttrs
+                (\content children ->
+                    Item
+                        { index = Index.toList index
+                        , content = content
+                        , children =
+                            Enumerated
+                                { icon =
+                                    case childrenIcon of
+                                        Desc.Bullet ->
+                                            Bullet
+
+                                        Desc.AutoNumber _ ->
+                                            Number
+                                , items =
+                                    children
+                                }
                         }
-                }
-        )
-        renderedContent
-        renderedChildren
+                )
+                renderedContent
+                renderedChildren
+
+        _ ->
+            let
+                _ =
+                    Debug.log "NOOO MATCCCHHHH" "---"
+
+                _ =
+                    Debug.log "instead" found
+            in
+            Outcome.Failure Error.NoMatch
 
 
 reduceRender :

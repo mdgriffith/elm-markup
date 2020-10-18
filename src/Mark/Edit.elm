@@ -728,11 +728,40 @@ makeEdit cursor desc =
         DescribeTree details ->
             case cursor.makeEdit cursor.indentation details.range.start desc of
                 NoIdFound ->
-                    case editListNested cursor details.children of
+                    case editMany makeFoundEdit push cursor details.children of
                         EditMade maybeSeed maybePush newChildren ->
                             EditMade maybeSeed
                                 maybePush
                                 (DescribeTree
+                                    { details
+                                        | children = newChildren
+                                        , range =
+                                            case maybePush of
+                                                Nothing ->
+                                                    details.range
+
+                                                Just p ->
+                                                    pushRange p details.range
+                                    }
+                                )
+
+                        NoIdFound ->
+                            NoIdFound
+
+                        ErrorMakingEdit err ->
+                            ErrorMakingEdit err
+
+                otherwise ->
+                    otherwise
+
+        DescribeItem details ->
+            case cursor.makeEdit cursor.indentation details.range.start desc of
+                NoIdFound ->
+                    case editMany makeFoundEdit push cursor details.children of
+                        EditMade maybeSeed maybePush newChildren ->
+                            EditMade maybeSeed
+                                maybePush
+                                (DescribeItem
                                     { details
                                         | children = newChildren
                                         , range =
@@ -774,70 +803,63 @@ makeEdit cursor desc =
             NoIdFound
 
 
-editListNested cursor lsNested =
-    let
-        indentedCursor =
-            increaseIndent cursor
-    in
-    lsNested
-        |> List.foldl
-            (\foundChild ( editMade, pastChildren ) ->
-                case editMade of
-                    EditMade maybeSeed maybePush _ ->
-                        ( editMade
-                        , pushNested maybePush foundChild :: pastChildren
-                        )
 
-                    ErrorMakingEdit err ->
-                        ( ErrorMakingEdit err
-                        , foundChild :: pastChildren
-                        )
-
-                    NoIdFound ->
-                        case editNested indentedCursor foundChild of
-                            NoIdFound ->
-                                ( NoIdFound
-                                , foundChild :: pastChildren
-                                )
-
-                            ErrorMakingEdit err ->
-                                ( ErrorMakingEdit err
-                                , foundChild :: pastChildren
-                                )
-
-                            EditMade maybeSeed maybePush newChild ->
-                                ( EditMade maybeSeed maybePush []
-                                , newChild :: pastChildren
-                                )
-            )
-            ( NoIdFound, [] )
-        |> (\( editMade, updatedList ) ->
-                case editMade of
-                    EditMade maybeSeed maybePush _ ->
-                        EditMade maybeSeed maybePush (List.reverse updatedList)
-
-                    otherwise ->
-                        otherwise
-           )
-
-
-editNested cursor (Nested nestedDetails) =
-    let
-        -- TODO: This code doesn't look like it's hooked up!
-        _ =
-            editMany makeEdit
-                (\maybePush desc ->
-                    case maybePush of
-                        Nothing ->
-                            desc
-
-                        Just p ->
-                            pushDescription p desc
-                )
-                cursor
-                nestedDetails.content
-    in
-    editListNested cursor nestedDetails.children
+-- editListNested cursor lsNested =
+--     let
+--         indentedCursor =
+--             increaseIndent cursor
+--     in
+--     lsNested
+--         |> List.foldl
+--             (\foundChild ( editMade, pastChildren ) ->
+--                 case editMade of
+--                     EditMade maybeSeed maybePush _ ->
+--                         ( editMade
+--                         , pushNested maybePush foundChild :: pastChildren
+--                         )
+--                     ErrorMakingEdit err ->
+--                         ( ErrorMakingEdit err
+--                         , foundChild :: pastChildren
+--                         )
+--                     NoIdFound ->
+--                         case editNested indentedCursor foundChild of
+--                             NoIdFound ->
+--                                 ( NoIdFound
+--                                 , foundChild :: pastChildren
+--                                 )
+--                             ErrorMakingEdit err ->
+--                                 ( ErrorMakingEdit err
+--                                 , foundChild :: pastChildren
+--                                 )
+--                             EditMade maybeSeed maybePush newChild ->
+--                                 ( EditMade maybeSeed maybePush []
+--                                 , newChild :: pastChildren
+--                                 )
+--             )
+--             ( NoIdFound, [] )
+--         |> (\( editMade, updatedList ) ->
+--                 case editMade of
+--                     EditMade maybeSeed maybePush _ ->
+--                         EditMade maybeSeed maybePush (List.reverse updatedList)
+--                     otherwise ->
+--                         otherwise
+--            )
+-- editNested cursor (Nested nestedDetails) =
+--     let
+--         -- TODO: This code doesn't look like it's hooked up!
+--         _ =
+--             editMany makeEdit
+--                 (\maybePush desc ->
+--                     case maybePush of
+--                         Nothing ->
+--                             desc
+--                         Just p ->
+--                             pushDescription p desc
+--                 )
+--                 cursor
+--                 nestedDetails.content
+--     in
+--     editListNested cursor nestedDetails.children
 
 
 editFields cursor fields =
@@ -1052,26 +1074,6 @@ expandRange maybePush range =
             }
 
 
-pushNested : Push -> Nested Description -> Nested Description
-pushNested maybePush ((Nested nestedDetails) as nestedDesc) =
-    case maybePush of
-        Nothing ->
-            nestedDesc
-
-        Just to ->
-            Nested
-                { nestedDetails
-                    | content =
-                        List.map
-                            (pushDescription to)
-                            nestedDetails.content
-                    , children =
-                        List.map
-                            (pushNested maybePush)
-                            nestedDetails.children
-                }
-
-
 push : Push -> Found Description -> Found Description
 push maybePush found =
     case maybePush of
@@ -1192,8 +1194,18 @@ pushDescription to desc =
                     | range = pushRange to myTree.range
                     , children =
                         List.map
-                            (Desc.mapNested (pushDescription to))
+                            (pushFound to)
                             myTree.children
+                }
+
+        DescribeItem item ->
+            DescribeItem
+                { item
+                    | range = pushRange to item.range
+                    , children =
+                        List.map
+                            (pushFound to)
+                            item.children
                 }
 
 

@@ -1,8 +1,8 @@
 module Mark.Internal.Description exposing
     ( render, compile
-    , Found(..), Nested(..), Icon(..)
+    , Found(..), Icon(..)
     , Description(..), TextDescription(..), Text(..), Style(..)
-    , Expectation(..), InlineExpectation(..), TreeExpectation(..)
+    , Expectation(..), InlineExpectation(..)
     , Parsed(..), descriptionToString, toString, mergeWith
     , create, createInline
     , Styling, emptyStyles
@@ -10,7 +10,7 @@ module Mark.Internal.Description exposing
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar
     , Block(..), BlockKind(..), Document(..)
     , boldStyle, italicStyle, strikeStyle
-    , resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
+    , resultToFound, getId, mapFound, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
     , BlockOutcome, emptyRange, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, resetBlockStart, resetFoundStart
     )
@@ -19,11 +19,11 @@ module Mark.Internal.Description exposing
 
 @docs render, compile
 
-@docs Found, Nested, Icon
+@docs Found, Icon
 
 @docs Description, TextDescription, Text, Style
 
-@docs Expectation, InlineExpectation, TreeExpectation
+@docs Expectation, InlineExpectation
 
 @docs Parsed, descriptionToString, toString, mergeWith
 
@@ -39,7 +39,7 @@ module Mark.Internal.Description exposing
 
 @docs boldStyle, italicStyle, strikeStyle
 
-@docs resultToFound, getId, mapFound, mapNested, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
+@docs resultToFound, getId, mapFound, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
 
 @docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext, blockKindToSelection, length, match, matchExpected
 
@@ -132,8 +132,17 @@ type Description
     | DescribeTree
         { id : Id
         , range : Range
-        , children : List (Nested Description)
+        , children : List (Found Description)
         , expected : Expectation
+        }
+      -- This is an item within a tree
+    | DescribeItem
+        { id : Id
+        , icon : Icon
+        , expected : Expectation
+        , range : Range
+        , content : List (Found Description)
+        , children : List (Found Description)
         }
       -- Primitives
     | DescribeBoolean
@@ -198,28 +207,6 @@ type alias Range =
 type Icon
     = Bullet
     | AutoNumber Int
-
-
-{-| -}
-type Nested item
-    = Nested
-        { icon : Icon
-        , range : Range
-        , content : List item
-        , children :
-            List (Nested item)
-        }
-
-
-mapNested : (a -> b) -> Nested a -> Nested b
-mapNested fn (Nested nest) =
-    Nested
-        { icon = nest.icon
-        , content = List.map fn nest.content
-        , range = nest.range
-        , children =
-            List.map (mapNested fn) nest.children
-        }
 
 
 {-| With this type, we're not quite sure if we're going to be able to render or not.
@@ -389,17 +376,8 @@ type Expectation
     | ExpectFloat Float
     | ExpectTextBlock (List InlineExpectation)
     | ExpectString String
-    | ExpectTree (List TreeExpectation)
+    | ExpectTree Expectation
     | ExpectNothing
-
-
-{-| -}
-type TreeExpectation
-    = TreeExpectation
-        { icon : Icon
-        , content : List Expectation
-        , children : List TreeExpectation
-        }
 
 
 {-| -}
@@ -525,6 +503,9 @@ getId description =
         DescribeTree details ->
             details.id
 
+        DescribeItem details ->
+            details.id
+
         DescribeBoolean details ->
             details.id
 
@@ -591,6 +572,9 @@ getSize description =
 
         DescribeTree details ->
             sizeFromRange details.range
+
+        DescribeItem item ->
+            sizeFromRange item.range
 
         DescribeBoolean details ->
             sizeFromRange (getFoundSize details.found)
@@ -882,6 +866,9 @@ match description exp =
 
         DescribeTree tree ->
             matchExpected tree.expected exp
+
+        DescribeItem item ->
+            matchExpected item.expected exp
 
         DescribeBoolean foundBoolean ->
             case exp of
@@ -1260,33 +1247,13 @@ writeDescription description cursor =
         DescribeTree tree ->
             cursor
                 |> advanceTo tree.range
-                |> (\curs -> List.foldl writeNested curs tree.children)
+                |> (\curs -> List.foldl (writeFound writeDescription) curs tree.children)
 
-
-writeNested (Nested node) cursor =
-    cursor
-        |> (\curs ->
-                List.foldl
-                    (\desc ( started, c ) ->
-                        if not started then
-                            c
-                                |> advanceTo node.range
-                                |> writeIcon node.icon
-                                |> writeDescription desc
-                                |> Tuple.pair True
-
-                        else
-                            c
-                                |> writeDescription desc
-                                |> Tuple.pair True
-                    )
-                    ( False, curs )
-                    node.content
-           )
-        |> Tuple.second
-        |> indent
-        |> (\curs -> List.foldl writeNested curs node.children)
-        |> dedent
+        DescribeItem item ->
+            cursor
+                |> writeIcon item.icon
+                |> (\curs -> List.foldl (writeFound writeDescription) curs item.content)
+                |> (\curs -> List.foldl (writeFound writeDescription) curs item.children)
 
 
 textDescriptionToString existingStyles txt =
@@ -1678,51 +1645,50 @@ create current =
             , seed = newSeed
             }
 
-        ExpectTree branches ->
-            let
-                range =
-                    { start = current.base
-                    , end = lastPos
-                    }
-
-                ( parentId, newSeed ) =
-                    Id.step current.seed
-
-                ( finalSeed, lastPos, children ) =
-                    List.foldl
-                        (\branch ( seed, newBase, result ) ->
-                            let
-                                new =
-                                    createTree
-                                        branch
-                                        { indent = current.indent
-                                        , base = newBase
-                                        , seed = seed
-                                        }
-                            in
-                            ( new.seed
-                            , new.pos
-                                |> moveNewline
-                                |> moveNewline
-                                |> moveColumn (current.indent * 4)
-                            , new.desc
-                                :: result
-                            )
-                        )
-                        ( newSeed, current.base, [] )
-                        branches
-                        |> (\( s, p, c ) -> ( s, p, List.reverse c ))
-            in
-            { pos = moveNewline current.base
-            , desc =
-                DescribeTree
-                    { children = children
-                    , id = parentId
-                    , range = range
-                    , expected = current.expectation
-                    }
-            , seed = newSeed
-            }
+        ExpectTree branch ->
+            -- let
+            --     range =
+            --         { start = current.base
+            --         , end = lastPos
+            --         }
+            --     ( parentId, newSeed ) =
+            --         Id.step current.seed
+            --     ( finalSeed, lastPos, children ) =
+            --         List.foldl
+            --             (\branch ( seed, newBase, result ) ->
+            --                 let
+            --                     new =
+            --                         createTree
+            --                             branch
+            --                             { indent = current.indent
+            --                             , base = newBase
+            --                             , seed = seed
+            --                             }
+            --                 in
+            --                 ( new.seed
+            --                 , new.pos
+            --                     |> moveNewline
+            --                     |> moveNewline
+            --                     |> moveColumn (current.indent * 4)
+            --                 , new.desc
+            --                     :: result
+            --                 )
+            --             )
+            --             ( newSeed, current.base, [] )
+            --             branches
+            --             |> (\( s, p, c ) -> ( s, p, List.reverse c ))
+            -- in
+            -- { pos = moveNewline current.base
+            -- , desc =
+            --     DescribeTree
+            --         { children = children
+            --         , id = parentId
+            --         , range = range
+            --         , expected = current.expectation
+            --         }
+            -- , seed = newSeed
+            -- }
+            Debug.todo "Revisit expecteds"
 
         ExpectOneOf choices ->
             let
@@ -1995,7 +1961,7 @@ create current =
 
 
 createTree :
-    TreeExpectation
+    List Expectation
     ->
         { seed : Id.Seed
         , indent : Int
@@ -2003,75 +1969,88 @@ createTree :
         }
     ->
         { pos : Position
-        , desc : Nested Description
+        , desc : Found Description
         , seed : Id.Seed
         }
-createTree (TreeExpectation details) cursor =
-    let
-        -- create content first
-        ( contentSeed, contentLastPos, content ) =
-            List.foldl
-                (\choice ( seed, newBase, result ) ->
-                    let
-                        new =
-                            create
-                                { indent = cursor.indent
-                                , base = newBase
-                                , expectation = choice
-                                , seed = seed
-                                }
-                    in
-                    ( new.seed
-                    , new.pos
-                        |> moveNewline
-                        |> moveNewline
-                        |> moveColumn (cursor.indent * 4)
-                    , new.desc :: result
-                    )
-                )
-                ( cursor.seed, cursor.base, [] )
-                details.content
-                |> (\( s, p, c ) -> ( s, p, List.reverse c ))
-
-        -- Then create children
-        ( finalSeed, lastPos, children ) =
-            List.foldl
-                (\branch ( seed, newBase, result ) ->
-                    let
-                        new =
-                            createTree
-                                branch
-                                { indent = cursor.indent
-                                , base = newBase
-                                , seed = seed
-                                }
-                    in
-                    ( new.seed
-                    , new.pos
-                        |> moveNewline
-                        |> moveNewline
-                        |> moveColumn (cursor.indent * 4)
-                    , new.desc :: result
-                    )
-                )
-                ( contentSeed, contentLastPos, [] )
-                details.children
-                |> (\( s, p, c ) -> ( s, p, List.reverse c ))
-    in
-    { desc =
-        Nested
-            { icon = details.icon
-            , range =
-                { start = cursor.base
-                , end = lastPos
-                }
-            , content = content
-            , children =
-                children
-            }
-    , pos = lastPos
-    , seed = finalSeed
-    }
+createTree expectations cursor =
+    -- let
+    --     ( itemId, itemSeed ) =
+    --         Id.step cursor.seed
+    --     -- create content first
+    --     ( contentSeed, contentLastPos, content ) =
+    --         List.foldl
+    --             (\choice ( seed, newBase, result ) ->
+    --                 let
+    --                     new =
+    --                         create
+    --                             { indent = cursor.indent
+    --                             , base = newBase
+    --                             , expectation = choice
+    --                             , seed = seed
+    --                             }
+    --                 in
+    --                 ( new.seed
+    --                 , new.pos
+    --                     |> moveNewline
+    --                     |> moveNewline
+    --                     |> moveColumn (cursor.indent * 4)
+    --                 , Found
+    --                     { start = newBase
+    --                     , end = new.pos
+    --                     }
+    --                     new.desc
+    --                     :: result
+    --                 )
+    --             )
+    --             ( Id.indent itemSeed, cursor.base, [] )
+    --             details.content
+    --             |> (\( s, p, c ) -> ( s, p, List.reverse c ))
+    --     -- Then create children
+    --     ( finalSeed, lastPos, children ) =
+    --         List.foldl
+    --             (\branch ( seed, newBase, result ) ->
+    --                 let
+    --                     new =
+    --                         createTree
+    --                             branch
+    --                             { indent = cursor.indent
+    --                             , base = newBase
+    --                             , seed = seed
+    --                             }
+    --                 in
+    --                 ( new.seed
+    --                 , new.pos
+    --                     |> moveNewline
+    --                     |> moveNewline
+    --                     |> moveColumn (cursor.indent * 4)
+    --                 , new.desc :: result
+    --                 )
+    --             )
+    --             ( Id.indent contentSeed, contentLastPos, [] )
+    --             details.children
+    --             |> (\( s, p, c ) -> ( s, p, List.reverse c ))
+    -- in
+    -- { desc =
+    --     Found
+    --         { start = cursor.base
+    --         , end = lastPos
+    --         }
+    --         (DescribeItem
+    --             { id = itemId
+    --             , range =
+    --                 { start = cursor.base
+    --                 , end = lastPos
+    --                 }
+    --             , icon = details.icon
+    --             , content = content
+    --             , children =
+    --                 children
+    --             }
+    --         )
+    -- , pos = lastPos
+    -- , seed = finalSeed
+    -- }
+    Debug.todo "Revisit how this is done to not rely directly on Expected"
 
 
 type alias CreateFieldCursor =
@@ -2332,32 +2311,6 @@ firstFound id options =
                     found
 
 
-firstNested : Id.Id -> List (Nested Description) -> Maybe (Nested Description)
-firstNested id options =
-    case options of
-        [] ->
-            Nothing
-
-        top :: remain ->
-            case findNested id top of
-                Nothing ->
-                    firstNested id remain
-
-                found ->
-                    found
-
-
-{-| We could dive deeper here, and check children
--}
-findNested : Id.Id -> Nested Description -> Maybe (Nested Description)
-findNested id ((Nested details) as nested) =
-    if List.any (\b -> getId b == id) details.content then
-        Just nested
-
-    else
-        Nothing
-
-
 findFound : Id.Id -> Found Description -> Maybe (Found Description)
 findFound id block =
     case block of
@@ -2441,13 +2394,40 @@ find targetId desc =
                 Just desc
 
             else
-                case firstNested targetId details.children of
+                case firstFound targetId details.children of
                     Nothing ->
                         Nothing
 
                     Just block ->
                         Just
                             (DescribeTree
+                                { details
+                                    | children = [ block ]
+                                }
+                            )
+
+        DescribeItem details ->
+            if details.id == targetId then
+                Just desc
+
+            else
+                case firstFound targetId details.content of
+                    Nothing ->
+                        case firstFound targetId details.children of
+                            Nothing ->
+                                Nothing
+
+                            Just block ->
+                                Just
+                                    (DescribeItem
+                                        { details
+                                            | children = [ block ]
+                                        }
+                                    )
+
+                    Just block ->
+                        Just
+                            (DescribeItem
                                 { details
                                     | children = [ block ]
                                 }

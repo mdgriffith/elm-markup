@@ -1,9 +1,10 @@
 module Mark.Internal.Parser exposing
-    ( RecordType(..)
+    ( PreviouslyAdded(..)
+    , RecordType(..)
     , Replacement(..)
     , backtrackCharacters
-    , buildTree
     , float
+    , fullTree
     , getFailableBlock
     , getPosition
     , getRangeAndSource
@@ -21,7 +22,6 @@ module Mark.Internal.Parser exposing
     , record
     , skipBlankLineWith
     , styledText
-    , tree
     , withIndent
     , withRange
     , withRangeResult
@@ -1578,14 +1578,6 @@ type alias NestedIndex =
     }
 
 
-type alias FlatCursor =
-    { icon : Maybe Icon
-    , indent : Int
-    , range : Range
-    , content : Description
-    }
-
-
 peek : String -> Parser c p thing -> Parser c p thing
 peek name parser =
     Parser.succeed
@@ -1603,129 +1595,611 @@ peek name parser =
         |= Parser.getSource
 
 
-{-| Results in a flattened version of the parsed list.
+type alias TreeCursor =
+    { captured : List (Found Description)
 
-    ( 0, Maybe Icon, [ "item one" ] )
+    -- stack is reverse ordered.  Things a the front are closer to leaves in the tree
+    , stack :
+        List
+            { start : Position
+            , description : Description
+            }
+    , previouslyAdded : PreviouslyAdded
+    }
 
-    ( 0, Maybe Icon, [ "item two" ] )
 
-    ( 4, Maybe Icon, [ "nested item two", "additional text for nested item two" ] )
+type PreviouslyAdded
+    = AddedContent
+    | AddedItem
 
-    ( 0, Maybe Icon, [ "item three" ] )
 
-    ( 4, Maybe Icon, [ "nested item three" ] )
-
+{-| Parse a full nested tree in one go.
 -}
-tree :
+fullTree :
     ParseContext
     -> Block thing
-    -> ( NestedIndex, List FlatCursor )
-    -> Parser Context Problem (Parser.Step ( NestedIndex, List FlatCursor ) (List FlatCursor))
-tree context item ( indentation, existing ) =
+    -> ( NestedIndex, TreeCursor )
+    -> Parser Context Problem (Parser.Step ( NestedIndex, TreeCursor ) (List (Found Description)))
+fullTree context item ( indentation, existing ) =
     Parser.oneOf
-        [ Parser.end End
-            |> Parser.map
-                (\_ ->
-                    Parser.Done (List.reverse existing)
-                )
+        [ Parser.succeed (\pos -> Parser.Done (finalize existing pos))
+            |= getPosition
+            |. Parser.end End
 
         -- Whitespace Line
         , skipBlankLineWith (Parser.Loop ( indentation, existing ))
         , Parser.oneOf
             [ -- block with required indent
-              expectIndentation indentation.base indentation.prev
+              parseIndentation indentation.base indentation.prev
                 |> Parser.andThen
-                    (\newIndent ->
-                        let
-                            newSeed =
-                                if newIndent > indentation.prev then
-                                    Id.indent indentation.seed
-
-                                else if newIndent == indentation.prev then
-                                    -- This may look weird
-                                    -- but this loop is started with an indented id, which should be unique.
-                                    -- Therefore we only need to increment it after the first thing found
-                                    case existing of
-                                        [] ->
-                                            indentation.seed
-
-                                        _ ->
-                                            Id.step indentation.seed
-                                                |> Tuple.second
-
-                                else
-                                    Id.dedent ((indentation.prev - newIndent) // 4) indentation.seed
-                                        -- we're back in old land, so we have to increment to avoid a collision
-                                        |> Id.step
-                                        |> Tuple.second
-
-                            ( itemSeed, itemParser ) =
-                                getParser context newSeed item
-                        in
-                        -- If the indent has changed, then the delimiter is required
-                        Parser.withIndent newIndent <|
-                            Parser.oneOf
-                                ((Parser.succeed
-                                    (\start iconResult itemResult end ->
-                                        let
-                                            newIndex =
-                                                { prev = newIndent
-                                                , seed =
-                                                    newSeed
-                                                , base = indentation.base
-                                                }
-                                        in
-                                        Parser.Loop
-                                            ( newIndex
-                                            , { indent = newIndent
-                                              , range = { start = start, end = end }
-                                              , icon = Just iconResult
-                                              , content = itemResult
-                                              }
-                                                :: existing
-                                            )
-                                    )
-                                    |= getPosition
-                                    |= iconParser
-                                    |= Parser.withIndent (newIndent + 4) itemParser
-                                    |= getPosition
-                                 )
-                                    :: (if newIndent - 4 == indentation.prev then
-                                            [ Parser.succeed
-                                                (\start foundBlock end ->
-                                                    let
-                                                        newIndex =
-                                                            { prev = indentation.prev
-                                                            , seed = newSeed
-                                                            , base = indentation.base
-                                                            }
-                                                    in
-                                                    Parser.Loop
-                                                        ( newIndex
-                                                        , { indent = indentation.prev
-                                                          , range = { start = start, end = end }
-                                                          , icon = Nothing
-                                                          , content = foundBlock
-                                                          }
-                                                            :: existing
-                                                        )
-                                                )
-                                                |= getPosition
-                                                |= itemParser
-                                                |= getPosition
-                                            ]
-
-                                        else
-                                            []
-                                       )
-                                )
-                    )
+                    (parseIndentedItem context item indentation existing)
 
             -- We reach here because the indentation parsing was not successful,
             -- This means any issues are handled by whatever parser comes next.
-            , Parser.succeed (Parser.Done (List.reverse existing))
+            , Parser.succeed
+                (\pos ->
+                    Parser.Done (finalize existing pos)
+                )
+                |= getPosition
             ]
         ]
+
+
+finalize : TreeCursor -> Position -> List (Found Description)
+finalize cursor end =
+    case collapseAll end cursor.stack of
+        Just last ->
+            List.foldl
+                (\cap captured ->
+                    reverseTree cap :: captured
+                )
+                []
+                (last :: cursor.captured)
+
+        Nothing ->
+            List.foldl
+                (\cap captured ->
+                    reverseTree cap :: captured
+                )
+                []
+                cursor.captured
+
+
+topHasChildren stack =
+    case stack of
+        [] ->
+            False
+
+        top :: _ ->
+            case top.description of
+                DescribeItem item ->
+                    case item.children of
+                        [] ->
+                            False
+
+                        _ ->
+                            True
+
+                _ ->
+                    False
+
+
+parseIndentedItem :
+    ParseContext
+    -> Block thing
+    -> NestedIndex
+    -> TreeCursor
+    -> Int
+    -> Parser Context Problem (Parser.Step ( NestedIndex, TreeCursor ) (List (Found Description)))
+parseIndentedItem context block indentation existing newIndent =
+    let
+        iconRequired =
+            -- icon required if the indentation is at the base
+            (indentation.base == newIndent)
+                -- or if indentation hasn't changed and we've already parsed child for the top of the stack
+                || (indentation.prev
+                        == newIndent
+                        && topHasChildren existing.stack
+                   )
+
+        newSeed =
+            if newIndent > indentation.prev then
+                Id.indent indentation.seed
+
+            else if newIndent == indentation.prev then
+                -- This may look weird
+                -- but this loop is started with an indented id, which should be unique.
+                -- Therefore we only need to increment it after the first thing found
+                case existing.stack of
+                    [] ->
+                        indentation.seed
+
+                    _ ->
+                        Id.step indentation.seed
+                            |> Tuple.second
+
+            else
+                Id.dedent ((indentation.prev - newIndent) // 4) indentation.seed
+                    -- we're back in old land, so we have to increment to avoid a collision
+                    |> Id.step
+                    |> Tuple.second
+
+        ( itemId, itemSeed ) =
+            Id.step newSeed
+
+        ( finalSeed, itemParser ) =
+            getParser context itemSeed block
+
+        newIndex =
+            { prev = newIndent
+            , seed =
+                finalSeed
+            , base = indentation.base
+            }
+    in
+    -- if newIndent == indentation.prev then
+    -- If indentation has not changed
+    -- - With Icon ->
+    --     child for top of stack
+    -- - No Icon ->
+    --     if no children,
+    --         content for top of stack
+    --     else
+    --         failure
+    Parser.succeed
+        (\start maybeIcon item itemEnd ->
+            if newIndent == indentation.prev then
+                case existing.stack of
+                    [] ->
+                        Parser.Loop
+                            ( newIndex
+                            , existing
+                            )
+
+                    top :: [] ->
+                        case maybeIcon of
+                            -- no icon,
+                            -- this is a second content block
+                            Nothing ->
+                                case top.description of
+                                    DescribeItem topDetails ->
+                                        Parser.Loop
+                                            ( newIndex
+                                            , { existing
+                                                | previouslyAdded = AddedContent
+                                                , stack =
+                                                    [ { start = start
+                                                      , description =
+                                                            DescribeItem
+                                                                { topDetails
+                                                                    | content =
+                                                                        Found
+                                                                            { start = start
+                                                                            , end = itemEnd
+                                                                            }
+                                                                            item
+                                                                            :: topDetails.content
+                                                                }
+                                                      }
+                                                    ]
+                                              }
+                                            )
+
+                                    _ ->
+                                        Parser.Loop
+                                            ( newIndex
+                                            , existing
+                                            )
+
+                            Just icon ->
+                                -- same indentaion as the previous one.
+                                case existing.previouslyAdded of
+                                    AddedItem ->
+                                        -- if previous was an item, then this is a new item entirely
+                                        --
+                                        Parser.Loop
+                                            ( newIndex
+                                            , { existing
+                                                | previouslyAdded = AddedItem
+                                                , captured =
+                                                    Found
+                                                        { start = top.start
+                                                        , end = itemEnd
+                                                        }
+                                                        top.description
+                                                        :: existing.captured
+                                                , stack =
+                                                    [ { start = start
+                                                      , description =
+                                                            DescribeItem
+                                                                { id = itemId
+                                                                , icon = icon
+                                                                , expected = getBlockExpectation block
+                                                                , range =
+                                                                    { start = start, end = itemEnd }
+                                                                , content =
+                                                                    [ Found
+                                                                        { start = start
+                                                                        , end = itemEnd
+                                                                        }
+                                                                        item
+                                                                    ]
+                                                                , children = []
+                                                                }
+                                                      }
+                                                    ]
+                                              }
+                                            )
+
+                                    AddedContent ->
+                                        -- if previous was content, then this is a new nested item
+                                        --
+                                        Parser.Loop
+                                            ( newIndex
+                                            , { existing
+                                                | previouslyAdded = AddedItem
+                                                , stack =
+                                                    { start = start
+                                                    , description =
+                                                        DescribeItem
+                                                            { id = itemId
+                                                            , icon = icon
+                                                            , expected = getBlockExpectation block
+                                                            , range =
+                                                                { start = start, end = itemEnd }
+                                                            , content =
+                                                                [ Found
+                                                                    { start = start
+                                                                    , end = itemEnd
+                                                                    }
+                                                                    item
+                                                                ]
+                                                            , children = []
+                                                            }
+                                                    }
+                                                        :: existing.stack
+                                              }
+                                            )
+
+                    top :: pen :: remain ->
+                        case maybeIcon of
+                            Nothing ->
+                                -- No Icon, add to content
+                                -- Actually, this shouldn't be allowed
+                                -- But when we move to allow content everywhere, then it can be allowed
+                                case top.description of
+                                    DescribeItem topDetails ->
+                                        Parser.Loop
+                                            ( newIndex
+                                            , { existing
+                                                | previouslyAdded = AddedContent
+                                                , stack =
+                                                    { start = top.start
+                                                    , description =
+                                                        DescribeItem
+                                                            { topDetails
+                                                                | content =
+                                                                    Found
+                                                                        { start = start
+                                                                        , end = itemEnd
+                                                                        }
+                                                                        item
+                                                                        :: topDetails.content
+                                                            }
+                                                    }
+                                                        :: remain
+                                              }
+                                            )
+
+                                    _ ->
+                                        Parser.Loop
+                                            ( newIndex
+                                            , existing
+                                            )
+
+                            Just icon ->
+                                case existing.previouslyAdded of
+                                    AddedContent ->
+                                        -- "close" previous item, and add item as the new one.of
+                                        -- so top gets merged into pen
+                                        case pen.description of
+                                            DescribeItem penDetails ->
+                                                Parser.Loop
+                                                    ( newIndex
+                                                    , { existing
+                                                        | previouslyAdded = AddedItem
+                                                        , stack =
+                                                            { start = start
+                                                            , description =
+                                                                DescribeItem
+                                                                    { id = itemId
+                                                                    , icon = icon
+                                                                    , expected = getBlockExpectation block
+                                                                    , range =
+                                                                        { start = start, end = itemEnd }
+                                                                    , content =
+                                                                        [ Found { start = start, end = itemEnd } item
+                                                                        ]
+                                                                    , children = []
+                                                                    }
+                                                            }
+                                                                :: top
+                                                                :: pen
+                                                                :: remain
+                                                      }
+                                                    )
+
+                                            _ ->
+                                                Parser.Loop
+                                                    ( newIndex
+                                                    , existing
+                                                    )
+
+                                    AddedItem ->
+                                        -- Prevous thing was an item.
+                                        -- means we can fold top into pen
+                                        -- and add our new item as the top
+                                        case pen.description of
+                                            DescribeItem penDetails ->
+                                                Parser.Loop
+                                                    ( newIndex
+                                                    , { existing
+                                                        | previouslyAdded = AddedItem
+                                                        , stack =
+                                                            { start = start
+                                                            , description =
+                                                                DescribeItem
+                                                                    { id = itemId
+                                                                    , icon = icon
+                                                                    , expected = getBlockExpectation block
+                                                                    , range =
+                                                                        { start = start, end = itemEnd }
+                                                                    , content =
+                                                                        [ Found { start = start, end = itemEnd } item
+                                                                        ]
+                                                                    , children = []
+                                                                    }
+                                                            }
+                                                                :: { start = pen.start
+                                                                   , description =
+                                                                        DescribeItem
+                                                                            { penDetails
+                                                                                | children =
+                                                                                    Found
+                                                                                        { start = top.start
+                                                                                        , end = itemEnd
+                                                                                        }
+                                                                                        top.description
+                                                                                        :: penDetails.children
+                                                                            }
+                                                                   }
+                                                                -- :: top
+                                                                -- :: pen
+                                                                :: remain
+                                                      }
+                                                    )
+
+                                            _ ->
+                                                Parser.Loop
+                                                    ( newIndex
+                                                    , existing
+                                                    )
+
+            else if newIndent > indentation.prev then
+                case existing.stack of
+                    [] ->
+                        Parser.Loop
+                            ( newIndex
+                            , existing
+                            )
+
+                    top :: remain ->
+                        case top.description of
+                            DescribeItem topDetails ->
+                                case maybeIcon of
+                                    Nothing ->
+                                        -- No Icon, and indented, add to content
+                                        Parser.Loop
+                                            ( newIndex
+                                            , { existing
+                                                | previouslyAdded = AddedContent
+                                                , stack =
+                                                    { start = top.start
+                                                    , description =
+                                                        DescribeItem
+                                                            { topDetails
+                                                                | content =
+                                                                    Found
+                                                                        { start = start
+                                                                        , end = itemEnd
+                                                                        }
+                                                                        item
+                                                                        :: topDetails.content
+                                                            }
+                                                    }
+                                                        :: remain
+                                              }
+                                            )
+
+                                    Just icon ->
+                                        -- we have an icon, add to children
+                                        Parser.Loop
+                                            ( newIndex
+                                            , { existing
+                                                | previouslyAdded = AddedItem
+                                                , stack =
+                                                    { start = start
+                                                    , description =
+                                                        DescribeItem
+                                                            { id = itemId
+                                                            , icon = icon
+                                                            , expected = getBlockExpectation block
+                                                            , range =
+                                                                { start = start, end = itemEnd }
+                                                            , content =
+                                                                [ Found { start = start, end = itemEnd } item
+                                                                ]
+                                                            , children = []
+                                                            }
+                                                    }
+                                                        :: top
+                                                        :: remain
+                                              }
+                                            )
+
+                            _ ->
+                                Debug.todo "THIS SHOULD NEVER HAPPEN"
+
+            else
+                -- Dedented
+                -- multiple dedentations are allowed,
+                -- so we need to see how far we need to collapse
+                let
+                    level =
+                        case existing.previouslyAdded of
+                            AddedItem ->
+                                -- we dedented, but previous was an item
+                                -- so we need to collapse twice
+                                ((indentation.prev - newIndent) // 4) + 1
+
+                            AddedContent ->
+                                -- we dedented, but previous was
+                                (indentation.prev - newIndent) // 4
+
+                    ( collapsed, maybeCaptured ) =
+                        collapse start level existing.stack
+                in
+                Parser.Loop
+                    ( newIndex
+                    , { existing
+                        | previouslyAdded = AddedItem
+                        , stack =
+                            { start = start
+                            , description =
+                                DescribeItem
+                                    { id = itemId
+                                    , icon = Maybe.withDefault Bullet maybeIcon
+                                    , expected = getBlockExpectation block
+                                    , range =
+                                        { start = start, end = itemEnd }
+                                    , content =
+                                        [ Found { start = start, end = itemEnd } item
+                                        ]
+                                    , children = []
+                                    }
+                            }
+                                :: collapsed
+                        , captured =
+                            case maybeCaptured of
+                                Nothing ->
+                                    existing.captured
+
+                                Just capped ->
+                                    capped :: existing.captured
+                      }
+                    )
+        )
+        |= getPosition
+        |= (if iconRequired then
+                Parser.map Just iconParser
+
+            else
+                Parser.oneOf
+                    [ Parser.map Just iconParser
+                    , Parser.succeed Nothing
+                    ]
+           )
+        |= Parser.withIndent (newIndent + 4) itemParser
+        |= getPosition
+
+
+collapse :
+    Position
+    -> Int
+    ->
+        List
+            { start : Position
+            , description : Description
+            }
+    ->
+        ( List
+            { start : Position
+            , description : Description
+            }
+        , Maybe (Found Description)
+        )
+collapse end level stack =
+    if level == 0 then
+        ( stack, Nothing )
+
+    else
+        case stack of
+            [] ->
+                ( stack, Nothing )
+
+            top :: [] ->
+                ( []
+                , Just
+                    (Found
+                        { start = top.start
+                        , end = end
+                        }
+                        top.description
+                    )
+                )
+
+            top :: penultimate :: remain ->
+                case penultimate.description of
+                    DescribeItem pen ->
+                        collapse end
+                            (level - 1)
+                            ({ description =
+                                DescribeItem
+                                    { pen
+                                        | children =
+                                            Found
+                                                { start = top.start
+                                                , end = end
+                                                }
+                                                top.description
+                                                :: pen.children
+                                    }
+                             , start = penultimate.start
+                             }
+                                :: remain
+                            )
+
+                    _ ->
+                        ( stack, Nothing )
+
+
+collapseAll : Position -> List { start : Position, description : Description } -> Maybe (Found Description)
+collapseAll end stack =
+    case stack of
+        [] ->
+            Nothing
+
+        top :: [] ->
+            Just (Found { start = top.start, end = end } top.description)
+
+        top :: penultimate :: remain ->
+            case penultimate.description of
+                DescribeItem item ->
+                    collapseAll end
+                        ({ description =
+                            DescribeItem
+                                { item
+                                    | children =
+                                        item.children
+                                            ++ [ Found { start = top.start, end = end } top.description ]
+                                }
+                         , start = penultimate.start
+                         }
+                            :: remain
+                        )
+
+                _ ->
+                    Nothing
 
 
 type RecordType
@@ -1733,6 +2207,13 @@ type RecordType
     | BlockRecord
 
 
+record :
+    RecordType
+    -> Id
+    -> String
+    -> Expectation
+    -> List ( String, Parser Context Problem ( String, Found Description ) )
+    -> Parser Context Problem Description
 record recordType id recordName expectations fields =
     Parser.succeed
         (\result ->
@@ -2177,8 +2658,8 @@ Based on the previous indentation:
 If we don't match the above rules, we might want to count the mismatched number.
 
 -}
-expectIndentation : Int -> Int -> Parser Context Problem Int
-expectIndentation base previous =
+parseIndentation : Int -> Int -> Parser Context Problem Int
+parseIndentation base previous =
     Parser.succeed Tuple.pair
         |= Parser.oneOf
             ([ Parser.succeed (previous + 4)
@@ -2200,6 +2681,7 @@ expectIndentation base previous =
             )
 
 
+iconParser : Parser c Problem Icon
 iconParser =
     Parser.oneOf
         [ Parser.succeed Bullet
@@ -2245,349 +2727,31 @@ descending base prev =
             )
 
 
-buildTree : Int -> List FlatCursor -> List (Nested Description)
-buildTree baseIndent items =
-    let
-        gather item builder =
-            addItem (item.indent - baseIndent) item.icon item.content item.range builder
-
-        newTree =
-            items
-                |> List.foldl groupByIcon Nothing
-                |> finalizeGrouping
-                |> List.reverse
-                |> List.foldl gather emptyTreeBuilder
-    in
-    case newTree of
-        TreeBuilder builder ->
-            List.reverse (renderLevels builder.levels)
-
-
-finalizeGrouping :
-    Maybe GroupedCursor
-    ->
-        List
-            { indent : Int
-            , icon : Icon
-            , range : Range
-            , content : List Description
-            }
-finalizeGrouping maybeCursor =
-    case maybeCursor of
-        Nothing ->
-            []
-
-        Just cursor ->
-            case cursor.items of
-                [] ->
-                    cursor.accumulated
+reverseTree : Found Description -> Found Description
+reverseTree found =
+    case found of
+        Found range nest ->
+            case nest of
+                DescribeItem item ->
+                    Found range
+                        (DescribeItem
+                            { id = item.id
+                            , icon = item.icon
+                            , expected = item.expected
+                            , range = item.range
+                            , content = List.reverse item.content
+                            , children =
+                                List.foldl
+                                    (\cap captured ->
+                                        reverseTree cap :: captured
+                                    )
+                                    []
+                                    item.children
+                            }
+                        )
 
                 _ ->
-                    { indent = cursor.indent
-                    , icon = cursor.icon
-                    , range = cursor.range
-                    , content = cursor.items
-                    }
-                        :: cursor.accumulated
-
-
-type alias GroupedCursor =
-    { indent : Int
-    , icon : Icon
-    , items : List Description
-    , range : Range
-    , accumulated :
-        List
-            { indent : Int
-            , icon : Icon
-            , content : List Description
-            , range : Range
-            }
-    }
-
-
-groupByIcon : FlatCursor -> Maybe GroupedCursor -> Maybe GroupedCursor
-groupByIcon item maybeCursor =
-    case maybeCursor of
-        Nothing ->
-            case item.icon of
-                Just icon ->
-                    Just
-                        { indent = item.indent
-                        , icon = icon
-                        , items = [ item.content ]
-                        , range = item.range
-                        , accumulated = []
-                        }
-
-                Nothing ->
-                    -- Because of how the code runs, we have a tenuous guarantee that this branch won't execute.
-                    -- Not entirely sure how to make the types work to eliminate this.
-                    Nothing
-
-        Just cursor ->
-            Just <|
-                case item.icon of
-                    Nothing ->
-                        { indent = cursor.indent
-                        , icon = cursor.icon
-                        , items = item.content :: cursor.items
-                        , range = item.range
-                        , accumulated = cursor.accumulated
-                        }
-
-                    Just icon ->
-                        { indent = item.indent
-                        , icon = icon
-                        , items = [ item.content ]
-                        , range = item.range
-                        , accumulated =
-                            { indent = cursor.indent
-                            , icon = cursor.icon
-                            , content = cursor.items
-                            , range = item.range
-                            }
-                                :: cursor.accumulated
-                        }
-
-
-{-| A list item started with a list icon.
-
-If indent stays the same
--> add to items at the current stack
-
-if ident increases
--> create a new level in the stack
-
-if ident decreases
--> close previous group
-->
-
-    1 Icon
-        1.1 Content
-        1.2 Icon
-        1.3 Icon
-           1.3.1 Icon
-
-        1.4
-
-    2 Icon
-
-    Steps =
-    []
-
-    [ Level [ Item 1. [] ]
-    ]
-
-    [ Level [ Item 1.1 ]
-    , Level [ Item 1. [] ]
-    ]
-
-    [ Level [ Item 1.2, Item 1.1 ]
-    , Level [ Item 1. [] ]
-    ]
-
-    [ Level [ Item 1.3, Item 1.2, Item 1.1 ]
-    , Level [ Item 1. [] ]
-    ]
-
-    [ Level [ Item 1.3.1 ]
-    , Level [ Item 1.3, Item 1.2, Item 1.1 ]
-    , Level [ Item 1. [] ]
-    ]
-
-
-    [ Level [ Item 1.4, Item 1.3([ Item 1.3.1 ]), Item 1.2, Item 1.1 ]
-    , Level [ Item 1. [] ]
-    ]
-
-    [ Level [ Item 2., Item 1. (Level [ Item 1.4, Item 1.3([ Item 1.3.1 ]), Item 1.2, Item 1.1 ]) ]
-    ]
-
--}
-addItem : Int -> Icon -> List Description -> Range -> TreeBuilder -> TreeBuilder
-addItem indentation icon content range (TreeBuilder builder) =
-    let
-        newItem : Nested Description
-        newItem =
-            Nested
-                { icon = icon
-                , children = []
-                , range = range
-                , content = content
-                }
-    in
-    case builder.levels of
-        [] ->
-            TreeBuilder
-                { previousIndent = indentation
-                , levels =
-                    [ newItem ]
-                }
-
-        lvl :: remaining ->
-            if indentation == 0 then
-                -- add to current level
-                TreeBuilder
-                    { previousIndent = indentation
-                    , levels =
-                        newItem :: lvl :: remaining
-                    }
-
-            else
-                -- We've dedented, so we need to first collapse the current level
-                -- into the one below, then add an item to that level
-                TreeBuilder
-                    { previousIndent = indentation
-                    , levels =
-                        addToLevel
-                            ((abs indentation // 4) - 1)
-                            newItem
-                            lvl
-                            :: remaining
-                    }
-
-
-addToLevel index brandNewItem (Nested parent) =
-    if index <= 0 then
-        Nested
-            { parent
-                | children =
-                    brandNewItem
-                        :: parent.children
-            }
-
-    else
-        case parent.children of
-            [] ->
-                Nested parent
-
-            top :: remain ->
-                Nested
-                    { parent
-                        | children =
-                            addToLevel (index - 1) brandNewItem top
-                                :: remain
-                    }
-
-
-
-{- NESTED LIST HELPERS -}
-{- Nested Lists -}
-
-
-{-| = indentLevel icon space content
-| indentLevel content
-
-Where the second variation can only occur if the indentation is larger than the previous one.
-
-A list item started with a list icon.
-
-    If indent stays the same
-    -> add to items at the current stack
-
-    if ident increases
-    -> create a new level in the stack
-
-    if ident decreases
-    -> close previous group
-    ->
-
-    <list>
-        <*item>
-            <txt> -> add to head sections
-            <txt> -> add to head sections
-            <item> -> add to head sections
-            <item> -> add to head sections
-                <txt> -> add to content
-                <txt> -> add to content
-                <item> -> add to content
-                <item> -> add to content
-            <item> -> add to content
-
-        <*item>
-        <*item>
-
-    Section
-        [ IconSection
-            { icon = *
-            , sections =
-                [ Text
-                , Text
-                , IconSection Text
-                , IconSection
-                    [ Text
-                    , Text
-                    , item
-                    , item
-                    ]
-                ]
-            }
-        , Icon -> Content
-        , Icon -> Content
-        ]
-
--}
-type TreeBuilder
-    = TreeBuilder
-        { previousIndent : Int
-        , levels :
-            -- (mostRecent :: remaining)
-            List (Nested Description)
-        }
-
-
-emptyTreeBuilder : TreeBuilder
-emptyTreeBuilder =
-    TreeBuilder
-        { previousIndent = 0
-        , levels = []
-        }
-
-
-renderLevels : List (Nested Description) -> List (Nested Description)
-renderLevels levels =
-    case levels of
-        [] ->
-            []
+                    found
 
         _ ->
-            List.indexedMap
-                (\index level ->
-                    reverseTree { index = index, level = [] } level
-                )
-                levels
-
-
-reverseTree cursor (Nested nest) =
-    Nested
-        { icon = nest.icon
-        , range = nest.range
-        , content = List.reverse nest.content
-        , children =
-            List.foldl rev ( dive cursor, [] ) nest.children
-                |> Tuple.second
-        }
-
-
-rev nest ( cursor, found ) =
-    ( next cursor, reverseTree cursor nest :: found )
-
-
-type alias TreeIndex =
-    { index : Int
-    , level : List Int
-    }
-
-
-dive cursor =
-    { cursor
-        | index = 0
-        , level = cursor.index :: cursor.level
-    }
-
-
-next cursor =
-    { cursor
-        | index = cursor.index + 1
-    }
+            found

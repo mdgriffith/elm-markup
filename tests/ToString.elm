@@ -264,47 +264,48 @@ threeHellos =
                 , Description.ExpectString "hello"
                 , Description.ExpectString "hello"
                 ]
+        , attributes = []
         }
 
 
 edits =
     describe "Edit"
         [ describe "Inserts + Deletes"
-            [ only <|
-                test "Indented - Insert at 2" <|
-                    \_ ->
-                        let
-                            new =
-                                Mark.Edit.update
-                                    manyHelloDoc
-                                    (Mark.Edit.insertAt
-                                        (Id.Id "none" [ 0 ])
-                                        2
-                                        (Mark.New.string "world")
-                                    )
-                                    (Description.Parsed
-                                        { errors = []
-                                        , initialSeed = Id.initialSeed "none"
-                                        , currentSeed = Id.initialSeed "none"
-                                        , found =
-                                            Description.Found
-                                                { start = startingPoint
-                                                , end =
-                                                    { column = 1, line = 50, offset = 200 }
-                                                }
-                                                (manyIndentedHellos ())
-                                        , expected =
-                                            Description.ExpectBlock "Indented" <|
-                                                Description.ExpectManyOf
-                                                    [ Description.ExpectString "hello"
-                                                    , Description.ExpectString "hello"
-                                                    , Description.ExpectString "hello"
-                                                    ]
-                                        }
-                                    )
-                        in
-                        Expect.equal (Result.map Description.toString new)
-                            (Ok """|> Indented
+            [ test "Indented - Insert at 2" <|
+                \_ ->
+                    let
+                        new =
+                            Mark.Edit.update
+                                manyHelloDoc
+                                (Mark.Edit.insertAt
+                                    (Id.Id "none" [ 0 ])
+                                    2
+                                    (Mark.New.string "world")
+                                )
+                                (Description.Parsed
+                                    { errors = []
+                                    , initialSeed = Id.initialSeed "none"
+                                    , currentSeed = Id.initialSeed "none"
+                                    , found =
+                                        Description.Found
+                                            { start = startingPoint
+                                            , end =
+                                                { column = 1, line = 50, offset = 200 }
+                                            }
+                                            (manyIndentedHellos ())
+                                    , expected =
+                                        Description.ExpectBlock "Indented" <|
+                                            Description.ExpectManyOf
+                                                [ Description.ExpectString "hello"
+                                                , Description.ExpectString "hello"
+                                                , Description.ExpectString "hello"
+                                                ]
+                                    , attributes = []
+                                    }
+                                )
+                    in
+                    Expect.equal (Result.map Description.toString new)
+                        (Ok """|> Indented
     hello
 
     hello
