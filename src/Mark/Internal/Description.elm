@@ -2182,7 +2182,6 @@ compile :
 compile (Document blocks) source =
     case Parser.run blocks.parser source of
         Ok ((Parsed parsedDetails) as parsed) ->
-            -- (Ok << Tuple.pair parsed) <|
             case parsedDetails.errors of
                 [] ->
                     case blocks.converter parsed of
@@ -2633,8 +2632,11 @@ mergeWithAttrs fn one two =
                             }
                         )
 
-                _ ->
-                    Failure Error.NoMatch
+                Almost (Uncertain unexpected) ->
+                    Almost (Uncertain unexpected)
+
+                Failure err ->
+                    Failure err
 
         Almost (Recovered firstErrs first) ->
             case two of
@@ -2655,19 +2657,17 @@ mergeWithAttrs fn one two =
                             }
                         )
 
-                _ ->
-                    Failure Error.NoMatch
+                Almost (Uncertain unexpected) ->
+                    Almost (Uncertain unexpected)
+
+                Failure twoErr ->
+                    Failure twoErr
 
         Almost (Uncertain unexpected) ->
             Almost (Uncertain unexpected)
 
-        _ ->
-            case two of
-                Almost (Uncertain unexpected) ->
-                    Almost (Uncertain unexpected)
-
-                _ ->
-                    Failure Error.NoMatch
+        Failure err ->
+            Failure err
 
 
 type alias ListOutcome data =

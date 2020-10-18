@@ -1458,13 +1458,6 @@ renderTreeNodeSmall contentBlock icon index found =
                 renderedChildren
 
         _ ->
-            let
-                _ =
-                    Debug.log "NOOO MATCCCHHHH" "---"
-
-                _ =
-                    Debug.log "instead" found
-            in
             Outcome.Failure Error.NoMatch
 
 
@@ -1749,16 +1742,6 @@ renderText options description =
             outcome
                 |> mapSuccessAndRecovered List.reverse
 
-        -- case outcome of
-        --     Outcome.Success s ->
-        --         Outcome.Success (List.reverse s)
-        --     Outcome.Almost (Uncertain u) ->
-        --         Outcome.Almost (Uncertain u)
-        --     Outcome.Almost (Recovered errs data) ->
-        --         Outcome.Almost
-        --             (Recovered errs (List.reverse data))
-        --     Outcome.Failure f ->
-        --         Outcome.Failure f
         _ ->
             Outcome.Failure Error.NoMatch
 
@@ -1786,7 +1769,7 @@ convertTextDescription id options comp cursor =
     case comp of
         Styled range (Desc.Text styling str) ->
             { outcome =
-                mergeWithAttrs (::)
+                Desc.mergeWithAttrs (::)
                     (Outcome.Success
                         { data =
                             options.view
@@ -2179,6 +2162,7 @@ bool =
         }
 
 
+foundToOutcome : Found item -> Outcome.Outcome failure (Uncertain data) { data : item, attrs : List a }
 foundToOutcome found =
     case found of
         Found rng i ->
