@@ -862,7 +862,6 @@ block name view child =
                                     { found = Found details.range details.value
                                     , name = name
                                     , id = parentId
-                                    , expected = ExpectBlock name (getBlockExpectation child)
                                     }
 
                             Err details ->
@@ -874,7 +873,6 @@ block name view child =
                                             { range = details.range
                                             , problem = details.error
                                             }
-                                    , expected = ExpectBlock name (getBlockExpectation child)
                                     }
                     )
                   <|
@@ -970,11 +968,9 @@ startWith fn startBlock endBlock =
                             , id = parentId
                             , first =
                                 { found = begin
-                                , expected = getBlockExpectation startBlock
                                 }
                             , second =
                                 { found = end
-                                , expected = getBlockExpectation endBlock
                                 }
                             }
                     )
@@ -1039,7 +1035,7 @@ manyOf blocks =
         , converter =
             \desc ->
                 let
-                    getRendered id choices existingResult children =
+                    getRendered id existingResult children =
                         case children of
                             [] ->
                                 mapSuccessAndRecovered List.reverse existingResult
@@ -1051,7 +1047,6 @@ manyOf blocks =
 
                                     Found range child ->
                                         getRendered id
-                                            choices
                                             (Desc.mergeWithAttrs (::)
                                                 (Desc.findMatch child blocks)
                                                 existingResult
@@ -1061,7 +1056,6 @@ manyOf blocks =
                 case desc of
                     ManyOf many ->
                         getRendered many.id
-                            many.choices
                             (Outcome.Success { data = [], attrs = [] })
                             many.children
 
@@ -1080,8 +1074,7 @@ manyOf blocks =
                 , Parser.succeed
                     (\( range, results ) ->
                         ManyOf
-                            { choices = expectations
-                            , id = parentId
+                            { id = parentId
                             , range = range
                             , children = List.map resultToFound results
                             }
@@ -1327,7 +1320,6 @@ tree view contentBlock =
                                     { id = newId
                                     , children = builtTree
                                     , range = pos
-                                    , expected = expectation
                                     }
                             )
                             (Parse.withRange
@@ -1371,7 +1363,6 @@ parseTree baseIndent seed contentBlock itemParser =
                                     DescribeItem
                                         { id = startId
                                         , icon = details.icon
-                                        , expected = getBlockExpectation contentBlock
                                         , range =
                                             { start = details.start
                                             , end = details.end

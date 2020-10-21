@@ -208,37 +208,29 @@ replaceOption id i pos original new desc =
     case desc of
         OneOf one ->
             -- When we're replacing the OneOf, we actually want to replace it's contents.
-            if List.any (matchExpected new) one.choices then
-                let
-                    newSize =
-                        getSize created.desc
+            let
+                newSize =
+                    getSize created.desc
 
-                    existingSize =
-                        sizeFromRange (getFoundRange one.child)
-                in
-                case one.child of
-                    Found range val ->
-                        EditMade
-                            (Just created.seed)
-                            (minusSize newSize existingSize
-                                |> sizeToPush
-                            )
-                            (OneOf { one | child = Found range created.desc })
+                existingSize =
+                    sizeFromRange (getFoundRange one.child)
+            in
+            case one.child of
+                Found range val ->
+                    EditMade
+                        (Just created.seed)
+                        (minusSize newSize existingSize
+                            |> sizeToPush
+                        )
+                        (OneOf { one | child = Found range created.desc })
 
-                    Unexpected unexpected ->
-                        EditMade
-                            (Just created.seed)
-                            (minusSize newSize existingSize
-                                |> sizeToPush
-                            )
-                            (OneOf { one | child = Found unexpected.range created.desc })
-
-            else
-                ErrorMakingEdit
-                    (Error.DocumentDoesntAllow
-                        (Desc.humanReadableExpectations new)
-                        (List.map Desc.humanReadableExpectations one.choices)
-                    )
+                Unexpected unexpected ->
+                    EditMade
+                        (Just created.seed)
+                        (minusSize newSize existingSize
+                            |> sizeToPush
+                        )
+                        (OneOf { one | child = Found unexpected.range created.desc })
 
         _ ->
             if Desc.match desc new then
@@ -309,32 +301,24 @@ update doc edit (Parsed original) =
                         \indentation pos desc ->
                             case desc of
                                 ManyOf many ->
-                                    if List.any (matchExpected new) many.choices then
-                                        let
-                                            inserted =
-                                                makeInsertAt
-                                                    original.currentSeed
-                                                    index
-                                                    indentation
-                                                    many
-                                                    new
-                                        in
-                                        EditMade
-                                            (Just inserted.seed)
-                                            inserted.push
-                                            (ManyOf
-                                                { many
-                                                    | children =
-                                                        inserted.updated
-                                                }
-                                            )
-
-                                    else
-                                        ErrorMakingEdit
-                                            (Error.DocumentDoesntAllow
-                                                (Desc.humanReadableExpectations new)
-                                                (List.map Desc.humanReadableExpectations many.choices)
-                                            )
+                                    let
+                                        inserted =
+                                            makeInsertAt
+                                                original.currentSeed
+                                                index
+                                                indentation
+                                                many
+                                                new
+                                    in
+                                    EditMade
+                                        (Just inserted.seed)
+                                        inserted.push
+                                        (ManyOf
+                                            { many
+                                                | children =
+                                                    inserted.updated
+                                            }
+                                        )
 
                                 _ ->
                                     -- inserts= by index only works for `manyOf`
@@ -705,8 +689,7 @@ makeEdit cursor desc =
                             { range = expandRange maybePush details.range
                             , id = details.id
                             , second =
-                                { expected = details.second.expected
-                                , found =
+                                { found =
                                     case maybePush of
                                         Nothing ->
                                             details.second.found
@@ -1113,7 +1096,6 @@ pushDescription to desc =
                 { id = details.id
                 , name = details.name
                 , found = pushFound to details.found
-                , expected = details.expected
                 }
 
         Record details ->
@@ -1129,13 +1111,11 @@ pushDescription to desc =
                                     ( field, pushFound to foundField )
                                 )
                             )
-                , expected = details.expected
                 }
 
         OneOf one ->
             OneOf
                 { id = one.id
-                , choices = one.choices
                 , child = pushFound to one.child
                 }
 
@@ -1143,7 +1123,6 @@ pushDescription to desc =
             ManyOf
                 { id = many.id
                 , range = pushRange to many.range
-                , choices = many.choices
                 , children = List.map (pushFound to) many.children
                 }
 
@@ -1153,11 +1132,9 @@ pushDescription to desc =
                 , id = details.id
                 , first =
                     { found = pushDescription to details.first.found
-                    , expected = details.first.expected
                     }
                 , second =
                     { found = pushDescription to details.second.found
-                    , expected = details.second.expected
                     }
                 }
 
@@ -1234,7 +1211,6 @@ makeInsertAt :
     -> Int
     ->
         { children : List (Found Description)
-        , choices : List Expectation
         , id : Id
         , range : Range
         }

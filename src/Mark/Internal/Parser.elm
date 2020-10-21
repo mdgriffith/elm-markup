@@ -293,15 +293,13 @@ oneOf blocks expectations context seed =
             case result of
                 Ok details ->
                     OneOf
-                        { choices = expectations
-                        , child = Found details.range details.value
+                        { child = Found details.range details.value
                         , id = parentId
                         }
 
                 Err details ->
                     OneOf
-                        { choices = expectations
-                        , child =
+                        { child =
                             Unexpected
                                 { range = details.range
                                 , problem = details.error
@@ -1814,7 +1812,6 @@ parseIndentedItem context block indentation existing newIndent =
                                                             DescribeItem
                                                                 { id = itemId
                                                                 , icon = icon
-                                                                , expected = getBlockExpectation block
                                                                 , range =
                                                                     { start = start, end = itemEnd }
                                                                 , content =
@@ -1844,7 +1841,6 @@ parseIndentedItem context block indentation existing newIndent =
                                                         DescribeItem
                                                             { id = itemId
                                                             , icon = icon
-                                                            , expected = getBlockExpectation block
                                                             , range =
                                                                 { start = start, end = itemEnd }
                                                             , content =
@@ -1914,7 +1910,6 @@ parseIndentedItem context block indentation existing newIndent =
                                                                 DescribeItem
                                                                     { id = itemId
                                                                     , icon = icon
-                                                                    , expected = getBlockExpectation block
                                                                     , range =
                                                                         { start = start, end = itemEnd }
                                                                     , content =
@@ -1951,7 +1946,6 @@ parseIndentedItem context block indentation existing newIndent =
                                                                 DescribeItem
                                                                     { id = itemId
                                                                     , icon = icon
-                                                                    , expected = getBlockExpectation block
                                                                     , range =
                                                                         { start = start, end = itemEnd }
                                                                     , content =
@@ -2033,7 +2027,6 @@ parseIndentedItem context block indentation existing newIndent =
                                                         DescribeItem
                                                             { id = itemId
                                                             , icon = icon
-                                                            , expected = getBlockExpectation block
                                                             , range =
                                                                 { start = start, end = itemEnd }
                                                             , content =
@@ -2079,7 +2072,6 @@ parseIndentedItem context block indentation existing newIndent =
                                 DescribeItem
                                     { id = itemId
                                     , icon = Maybe.withDefault Bullet maybeIcon
-                                    , expected = getBlockExpectation block
                                     , range =
                                         { start = start, end = itemEnd }
                                     , content =
@@ -2220,8 +2212,7 @@ record recordType id recordName expectations fields =
             case result of
                 Ok details ->
                     Record
-                        { expected = expectations
-                        , id = id
+                        { id = id
                         , name = recordName
                         , found =
                             Found details.range details.value
@@ -2229,8 +2220,7 @@ record recordType id recordName expectations fields =
 
                 Err err ->
                     Record
-                        { expected = expectations
-                        , id = id
+                        { id = id
                         , name = recordName
                         , found =
                             Unexpected
@@ -2737,7 +2727,6 @@ reverseTree found =
                         (DescribeItem
                             { id = item.id
                             , icon = item.icon
-                            , expected = item.expected
                             , range = item.range
                             , content = List.reverse item.content
                             , children =

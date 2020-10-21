@@ -98,23 +98,19 @@ type Description
         { id : Id
         , name : String
         , found : Found Description
-        , expected : Expectation
         }
     | Record
         { id : Id
         , name : String
         , found : Found (List ( String, Found Description ))
-        , expected : Expectation
         }
     | OneOf
         { id : Id
-        , choices : List Expectation
         , child : Found Description
         }
     | ManyOf
         { id : Id
         , range : Range
-        , choices : List Expectation
         , children : List (Found Description)
         }
     | StartsWith
@@ -122,24 +118,20 @@ type Description
         , id : Id
         , first :
             { found : Description
-            , expected : Expectation
             }
         , second :
             { found : Description
-            , expected : Expectation
             }
         }
     | DescribeTree
         { id : Id
         , range : Range
         , children : List (Found Description)
-        , expected : Expectation
         }
       -- This is an item within a tree
     | DescribeItem
         { id : Id
         , icon : Icon
-        , expected : Expectation
         , range : Range
         , content : List (Found Description)
         , children : List (Found Description)
@@ -838,7 +830,12 @@ match description exp =
             case exp of
                 ExpectBlock expectedName expectedChild ->
                     if expectedName == details.name then
-                        matchExpected details.expected exp
+                        case details.found of
+                            Found _ child ->
+                                match child expectedChild
+
+                            Unexpected _ ->
+                                False
 
                     else
                         False
@@ -846,14 +843,43 @@ match description exp =
                 _ ->
                     False
 
-        Record details ->
-            matchExpected details.expected exp
+        Record record ->
+            case exp of
+                ExpectRecord name fields ->
+                    if record.name == name then
+                        case record.found of
+                            Found _ foundFields ->
+                                List.all (matchExpectedFields fields) foundFields
+
+                            Unexpected _ ->
+                                False
+
+                    else
+                        False
+
+                _ ->
+                    False
 
         OneOf one ->
-            matchExpected (ExpectOneOf one.choices) exp
+            case exp of
+                ExpectOneOf choices ->
+                    List.any (matchChoice one.child) choices
+
+                _ ->
+                    False
 
         ManyOf many ->
-            matchExpected (ExpectManyOf many.choices) exp
+            -- matchExpected (ExpectManyOf many.choices) exp
+            case exp of
+                ExpectOneOf choices ->
+                    List.all
+                        (\child ->
+                            List.any (matchChoice child) choices
+                        )
+                        many.children
+
+                _ ->
+                    False
 
         StartsWith details ->
             case exp of
@@ -865,10 +891,29 @@ match description exp =
                     False
 
         DescribeTree tree ->
-            matchExpected tree.expected exp
+            case exp of
+                ExpectTree nodeExpectation ->
+                    List.all
+                        (\child ->
+                            matchChoice child nodeExpectation
+                        )
+                        tree.children
+
+                _ ->
+                    False
 
         DescribeItem item ->
-            matchExpected item.expected exp
+            -- matchExpected item.expected exp
+            List.all
+                (\content ->
+                    matchChoice content exp
+                )
+                item.content
+                && List.all
+                    (\content ->
+                        matchChoice content exp
+                    )
+                    item.children
 
         DescribeBoolean foundBoolean ->
             case exp of
@@ -909,6 +954,31 @@ match description exp =
 
                 _ ->
                     False
+
+
+matchChoice : Found Description -> Expectation -> Bool
+matchChoice found exp =
+    case found of
+        Found _ desc ->
+            match desc exp
+
+        Unexpected _ ->
+            False
+
+
+matchExpectedFields : List ( String, Expectation ) -> ( String, Found Description ) -> Bool
+matchExpectedFields valid ( targetFieldName, found ) =
+    case found of
+        Unexpected unexp ->
+            False
+
+        Found _ description ->
+            let
+                innerMatch ( validFieldName, validExpectation ) =
+                    (validFieldName == targetFieldName)
+                        && match description validExpectation
+            in
+            List.any innerMatch valid
 
 
 {-| Is the first expectation a subset of the second?
@@ -1610,7 +1680,6 @@ create current =
                             , end = new.pos
                             }
                             new.desc
-                    , expected = current.expectation
                     }
             , seed = newSeed
             }
@@ -1640,7 +1709,6 @@ create current =
                             , end = moveNewline new.position
                             }
                             new.fields
-                    , expected = current.expectation
                     }
             , seed = newSeed
             }
@@ -1711,7 +1779,6 @@ create current =
             , desc =
                 OneOf
                     { id = newId
-                    , choices = choices
                     , child =
                         Found
                             { start = current.base
@@ -1771,7 +1838,6 @@ create current =
                         { start = current.base
                         , end = lastPos
                         }
-                    , choices = choices
                     , children = children
                     }
             }
@@ -1807,11 +1873,9 @@ create current =
                         }
                     , first =
                         { found = first.desc
-                        , expected = start
                         }
                     , second =
                         { found = second.desc
-                        , expected = remaining
                         }
                     }
             , seed = second.seed
