@@ -279,7 +279,7 @@ oneOf blocks expectations context seed =
                 blocks
 
         blockParser =
-            failableBlocks
+            failableBlocks parentId
                 { names = children.blockNames
                 , parsers = children.childBlocks
                 }
@@ -288,34 +288,13 @@ oneOf blocks expectations context seed =
             Id.step seed
     in
     ( children.seed
-    , Parser.succeed
-        (\result ->
-            case result of
-                Ok details ->
-                    OneOf
-                        { child = Found details.range details.value
-                        , id = parentId
-                        }
-
-                Err details ->
-                    OneOf
-                        { child =
-                            Unexpected
-                                { range = details.range
-                                , problem = details.error
-                                }
-                        , id = parentId
-                        }
-        )
-        |= withRangeResult
-            (Parser.oneOf
-                (blockParser
-                    :: List.reverse
-                        (unexpectedInOneOf expectations
-                            :: children.childValues
-                        )
+    , Parser.oneOf
+        (blockParser
+            :: List.reverse
+                (unexpectedInOneOf parentId expectations
+                    :: children.childValues
                 )
-            )
+        )
     )
 
 
@@ -336,20 +315,24 @@ gatherParsers context =
             Nothing ->
                 { blockNames = details.blockNames
                 , childBlocks = details.childBlocks
-                , childValues = Parser.map Ok parser :: details.childValues
+                , childValues = parser :: details.childValues
                 , seed = currentSeed
                 }
 
 
 unexpectedInOneOf :
-    List Expectation
-    -> Parser Context Problem (Result Error.Error value)
-unexpectedInOneOf expectations =
+    Id
+    -> List Expectation
+    -> Parser Context Problem Description
+unexpectedInOneOf id expectations =
     withIndent
         (\indentation ->
             Parser.succeed
-                (\( pos, foundWord ) ->
-                    Err (Error.FailMatchOneOf (List.map humanReadableExpectations expectations))
+                (\( range, err ) ->
+                    DescribeUnexpected id
+                        { problem = Error.FailMatchOneOf (List.map humanReadableExpectations expectations)
+                        , range = range
+                        }
                 )
                 |= withRange word
         )
@@ -359,16 +342,19 @@ getFailableBlock :
     ParseContext
     -> Seed
     -> Block data
-    -> ( Seed, Parser Context Problem (Result Error.Error Description) )
+    -> ( Seed, Parser Context Problem Description )
 getFailableBlock context seed (Block details) =
     case details.kind of
         Named name ->
             let
                 ( newSeed, blockParser ) =
                     details.parser context seed
+
+                ( id, finalSeed ) =
+                    Id.step newSeed
             in
-            ( newSeed
-            , failableBlocks
+            ( finalSeed
+            , failableBlocks id
                 { names = [ name ]
                 , parsers =
                     [ blockParser
@@ -377,13 +363,13 @@ getFailableBlock context seed (Block details) =
             )
 
         Value ->
-            Tuple.mapSecond (Parser.map Ok) (details.parser context seed)
+            details.parser context seed
 
         VerbatimNamed name ->
-            Tuple.mapSecond (Parser.map Ok) (details.parser ParseInline seed)
+            details.parser ParseInline seed
 
         AnnotationNamed name ->
-            Tuple.mapSecond (Parser.map Ok) (details.parser ParseInline seed)
+            details.parser ParseInline seed
 
 
 {-| This parser will either:
@@ -393,21 +379,28 @@ getFailableBlock context seed (Block details) =
     - Parse a `|`, fail to parse the rest and return an Error
 
 -}
-failableBlocks blocks =
-    Parser.succeed (\pos block -> Result.map (resetBlockStart pos) block)
+failableBlocks id blocks =
+    Parser.succeed resetBlockStart
         |= getPosition
         |. Parser.token (Parser.Token "|>" BlockStart)
         |. Parser.chompWhile (\c -> c == ' ')
         |= Parser.oneOf
-            (List.map (Parser.map Ok) blocks.parsers
+            (blocks.parsers
                 ++ [ withIndent
                         (\indentation ->
                             Parser.succeed
-                                (Err (Error.UnknownBlock blocks.names))
+                                (\start end ->
+                                    DescribeUnexpected id
+                                        { range = { start = start, end = end }
+                                        , problem = Error.UnknownBlock blocks.names
+                                        }
+                                )
+                                |= getPosition
                                 |. word
                                 |. Parser.chompWhile (\c -> c == ' ')
                                 |. newline
                                 |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                |= getPosition
                         )
                    ]
             )

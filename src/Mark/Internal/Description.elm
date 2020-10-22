@@ -104,11 +104,7 @@ type Description
         , name : String
         , found : Found (List ( String, Found Description ))
         }
-    | OneOf
-        { id : Id
-        , child : Found Description
-        }
-    | ManyOf
+    | Group
         { id : Id
         , range : Range
         , children : List (Found Description)
@@ -116,17 +112,8 @@ type Description
     | StartsWith
         { range : Range
         , id : Id
-        , first :
-            { found : Description
-            }
-        , second :
-            { found : Description
-            }
-        }
-    | DescribeTree
-        { id : Id
-        , range : Range
-        , children : List (Found Description)
+        , first : Description
+        , second : Description
         }
       -- This is an item within a tree
     | DescribeItem
@@ -156,6 +143,7 @@ type Description
         }
     | DescribeString Id Range String
     | DescribeNothing Id
+    | DescribeUnexpected Id Error.UnexpectedDetails
 
 
 type AnnotationType
@@ -201,20 +189,6 @@ type Icon
     | AutoNumber Int
 
 
-{-| With this type, we're not quite sure if we're going to be able to render or not.
-
-Scenarios:
-
-  - A field value of a record has multiple errors with it.
-  - It's caught and the error statue is rendered immediately.
-  - The document can be rendered, but we still have multiple errors to keep track of.
-
--}
-type Uncertain data
-    = Uncertain ( Error.UnexpectedDetails, List Error.UnexpectedDetails )
-    | Recovered ( Error.UnexpectedDetails, List Error.UnexpectedDetails ) data
-
-
 {-|
 
     A `Block data` is just a parser that results in `data`.
@@ -257,6 +231,20 @@ type Block data
 
 type alias BlockOutcome data =
     Outcome Error.AstError (Uncertain (WithAttr data)) (WithAttr data)
+
+
+{-| With this type, we're not quite sure if we're going to be able to render or not.
+
+Scenarios:
+
+  - A field value of a record has multiple errors with it.
+  - It's caught and the error statue is rendered immediately.
+  - The document can be rendered, but we still have multiple errors to keep track of.
+
+-}
+type Uncertain data
+    = Uncertain ( Error.UnexpectedDetails, List Error.UnexpectedDetails )
+    | Recovered ( Error.UnexpectedDetails, List Error.UnexpectedDetails ) data
 
 
 type ParseContext
@@ -383,6 +371,30 @@ type InlineExpectation
 
 
 {-| -}
+type New
+    = NewBlock String New
+    | NewRecord String (List ( String, New ))
+    | NewGroup (List New)
+    | NewStartsWith New New
+    | NewBoolean Bool
+    | NewInteger Int
+    | NewFloat Float
+    | NewTextBlock (List NewInline)
+    | NewString String
+    | NewTree New
+
+
+{-| -}
+type NewInline
+    = NewText Text
+    | NewInlineBlock
+        { name : String
+        , kind : AnnotationType
+        , fields : List ( String, New )
+        }
+
+
+{-| -}
 mapFound : (a -> b) -> Found a -> Found b
 mapFound fn found =
     case found of
@@ -483,16 +495,10 @@ getId description =
         Record details ->
             details.id
 
-        OneOf details ->
-            details.id
-
-        ManyOf details ->
+        Group details ->
             details.id
 
         StartsWith details ->
-            details.id
-
-        DescribeTree details ->
             details.id
 
         DescribeItem details ->
@@ -514,6 +520,9 @@ getId description =
             id
 
         DescribeNothing id ->
+            id
+
+        DescribeUnexpected id details ->
             id
 
 
@@ -553,16 +562,10 @@ getSize description =
         Record details ->
             sizeFromRange (getFoundSize details.found)
 
-        OneOf details ->
-            sizeFromRange (getFoundSize details.child)
-
-        ManyOf details ->
+        Group details ->
             sizeFromRange details.range
 
         StartsWith details ->
-            sizeFromRange details.range
-
-        DescribeTree details ->
             sizeFromRange details.range
 
         DescribeItem item ->
@@ -587,6 +590,9 @@ getSize description =
             { offset = 0
             , line = 0
             }
+
+        DescribeUnexpected id details ->
+            sizeFromRange details.range
 
 
 sizeFromRange range =
@@ -817,143 +823,132 @@ matchBlock desc (Block details) =
 
 match : Description -> Expectation -> Bool
 match description exp =
-    case description of
-        DescribeNothing _ ->
-            case exp of
-                ExpectNothing ->
+    case exp of
+        ExpectOneOf choices ->
+            List.any
+                (match description)
+                choices
+
+        _ ->
+            case description of
+                DescribeNothing _ ->
+                    case exp of
+                        ExpectNothing ->
+                            True
+
+                        _ ->
+                            False
+
+                DescribeUnexpected _ details ->
+                    -- Not totally sure if this is right :/
                     True
 
-                _ ->
-                    False
+                DescribeBlock details ->
+                    case exp of
+                        ExpectBlock expectedName expectedChild ->
+                            if expectedName == details.name then
+                                case details.found of
+                                    Found _ child ->
+                                        match child expectedChild
 
-        DescribeBlock details ->
-            case exp of
-                ExpectBlock expectedName expectedChild ->
-                    if expectedName == details.name then
-                        case details.found of
-                            Found _ child ->
-                                match child expectedChild
+                                    Unexpected _ ->
+                                        False
 
-                            Unexpected _ ->
+                            else
                                 False
 
-                    else
-                        False
+                        _ ->
+                            False
 
-                _ ->
-                    False
+                Record record ->
+                    case exp of
+                        ExpectRecord name fields ->
+                            if record.name == name then
+                                case record.found of
+                                    Found _ foundFields ->
+                                        List.all (matchExpectedFields fields) foundFields
 
-        Record record ->
-            case exp of
-                ExpectRecord name fields ->
-                    if record.name == name then
-                        case record.found of
-                            Found _ foundFields ->
-                                List.all (matchExpectedFields fields) foundFields
+                                    Unexpected _ ->
+                                        False
 
-                            Unexpected _ ->
+                            else
                                 False
 
-                    else
-                        False
+                        _ ->
+                            False
 
-                _ ->
-                    False
+                Group many ->
+                    case exp of
+                        ExpectManyOf choices ->
+                            List.all
+                                (\child ->
+                                    List.any (matchChoice child) choices
+                                )
+                                many.children
 
-        OneOf one ->
-            case exp of
-                ExpectOneOf choices ->
-                    List.any (matchChoice one.child) choices
+                        _ ->
+                            False
 
-                _ ->
-                    False
+                StartsWith details ->
+                    case exp of
+                        ExpectStartsWith startExp endExp ->
+                            match details.first startExp
+                                && match details.second endExp
 
-        ManyOf many ->
-            -- matchExpected (ExpectManyOf many.choices) exp
-            case exp of
-                ExpectOneOf choices ->
+                        _ ->
+                            False
+
+                DescribeItem item ->
                     List.all
-                        (\child ->
-                            List.any (matchChoice child) choices
+                        (\content ->
+                            matchChoice content exp
                         )
-                        many.children
+                        item.content
+                        && List.all
+                            (\content ->
+                                matchChoice content exp
+                            )
+                            item.children
 
-                _ ->
-                    False
+                DescribeBoolean foundBoolean ->
+                    case exp of
+                        ExpectBoolean _ ->
+                            True
 
-        StartsWith details ->
-            case exp of
-                ExpectStartsWith startExp endExp ->
-                    match details.first.found startExp
-                        && match details.second.found endExp
+                        _ ->
+                            False
 
-                _ ->
-                    False
+                DescribeInteger _ ->
+                    case exp of
+                        ExpectInteger _ ->
+                            True
 
-        DescribeTree tree ->
-            case exp of
-                ExpectTree nodeExpectation ->
-                    List.all
-                        (\child ->
-                            matchChoice child nodeExpectation
-                        )
-                        tree.children
+                        _ ->
+                            False
 
-                _ ->
-                    False
+                DescribeFloat _ ->
+                    case exp of
+                        ExpectFloat _ ->
+                            True
 
-        DescribeItem item ->
-            -- matchExpected item.expected exp
-            List.all
-                (\content ->
-                    matchChoice content exp
-                )
-                item.content
-                && List.all
-                    (\content ->
-                        matchChoice content exp
-                    )
-                    item.children
+                        _ ->
+                            False
 
-        DescribeBoolean foundBoolean ->
-            case exp of
-                ExpectBoolean _ ->
-                    True
+                DescribeText _ ->
+                    case exp of
+                        ExpectTextBlock _ ->
+                            True
 
-                _ ->
-                    False
+                        _ ->
+                            False
 
-        DescribeInteger _ ->
-            case exp of
-                ExpectInteger _ ->
-                    True
+                DescribeString _ _ _ ->
+                    case exp of
+                        ExpectString _ ->
+                            True
 
-                _ ->
-                    False
-
-        DescribeFloat _ ->
-            case exp of
-                ExpectFloat _ ->
-                    True
-
-                _ ->
-                    False
-
-        DescribeText _ ->
-            case exp of
-                ExpectTextBlock _ ->
-                    True
-
-                _ ->
-                    False
-
-        DescribeString _ _ _ ->
-            case exp of
-                ExpectString _ ->
-                    True
-
-                _ ->
-                    False
+                        _ ->
+                            False
 
 
 matchChoice : Found Description -> Expectation -> Bool
@@ -1219,6 +1214,11 @@ writeDescription description cursor =
         DescribeNothing _ ->
             cursor
 
+        DescribeUnexpected _ details ->
+            -- TODO: What do we expect here?
+            cursor
+                |> advanceTo details.range
+
         DescribeBlock details ->
             cursor
                 |> write ("|> " ++ details.name)
@@ -1243,11 +1243,7 @@ writeDescription description cursor =
                     details.found
                 |> dedent
 
-        OneOf one ->
-            cursor
-                |> writeFound writeDescription one.child
-
-        ManyOf many ->
+        Group many ->
             List.foldl
                 (writeFound writeDescription)
                 cursor
@@ -1255,8 +1251,8 @@ writeDescription description cursor =
 
         StartsWith details ->
             cursor
-                |> writeDescription details.first.found
-                |> writeDescription details.second.found
+                |> writeDescription details.first
+                |> writeDescription details.second
 
         DescribeBoolean details ->
             writeFound (writeWith boolToString) details.found cursor
@@ -1313,11 +1309,6 @@ writeDescription description cursor =
                             indented
                    )
                 |> Tuple.second
-
-        DescribeTree tree ->
-            cursor
-                |> advanceTo tree.range
-                |> (\curs -> List.foldl (writeFound writeDescription) curs tree.children)
 
         DescribeItem item ->
             cursor
@@ -1777,15 +1768,7 @@ create current =
             in
             { pos = new.pos
             , desc =
-                OneOf
-                    { id = newId
-                    , child =
-                        Found
-                            { start = current.base
-                            , end = new.pos
-                            }
-                            new.desc
-                    }
+                new.desc
             , seed = new.seed
             }
 
@@ -1832,7 +1815,7 @@ create current =
             { pos = moveNewline lastPos
             , seed = finalSeed
             , desc =
-                ManyOf
+                Group
                     { id = parentId
                     , range =
                         { start = current.base
@@ -1871,12 +1854,8 @@ create current =
                         { start = current.base
                         , end = second.pos
                         }
-                    , first =
-                        { found = first.desc
-                        }
-                    , second =
-                        { found = second.desc
-                        }
+                    , first = first.desc
+                    , second = second.desc
                     }
             , seed = second.seed
             }
@@ -2392,6 +2371,13 @@ findFound id block =
 find : Id.Id -> Description -> Maybe Description
 find targetId desc =
     case desc of
+        DescribeUnexpected id details ->
+            if id == targetId then
+                Just desc
+
+            else
+                Nothing
+
         DescribeBlock details ->
             if details.id == targetId then
                 Just desc
@@ -2406,24 +2392,7 @@ find targetId desc =
             else
                 Nothing
 
-        OneOf details ->
-            if details.id == targetId then
-                Just desc
-
-            else
-                case findFound targetId details.child of
-                    Nothing ->
-                        Nothing
-
-                    Just found ->
-                        Just
-                            (OneOf
-                                { details
-                                    | child = found
-                                }
-                            )
-
-        ManyOf details ->
+        Group details ->
             if details.id == targetId then
                 Just desc
 
@@ -2434,7 +2403,7 @@ find targetId desc =
 
                     Just block ->
                         Just
-                            (ManyOf
+                            (Group
                                 { details
                                     | children = [ block ]
                                 }
@@ -2445,29 +2414,12 @@ find targetId desc =
                 Just desc
 
             else
-                case find targetId details.first.found of
+                case find targetId details.first of
                     Nothing ->
-                        find targetId details.second.found
+                        find targetId details.second
 
                     found ->
                         found
-
-        DescribeTree details ->
-            if details.id == targetId then
-                Just desc
-
-            else
-                case firstFound targetId details.children of
-                    Nothing ->
-                        Nothing
-
-                    Just block ->
-                        Just
-                            (DescribeTree
-                                { details
-                                    | children = [ block ]
-                                }
-                            )
 
         DescribeItem details ->
             if details.id == targetId then

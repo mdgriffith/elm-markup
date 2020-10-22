@@ -259,18 +259,12 @@ getUnexpecteds description =
                 Unexpected unexpected ->
                     [ unexpected ]
 
-        OneOf one ->
-            spelunkUnexpectedsFromFound one.child
-
-        ManyOf many ->
+        Group many ->
             List.concatMap spelunkUnexpectedsFromFound many.children
 
         StartsWith details ->
-            getUnexpecteds details.first.found
-                ++ getUnexpecteds details.second.found
-
-        DescribeTree details ->
-            List.concatMap spelunkUnexpectedsFromFound details.children
+            getUnexpecteds details.first
+                ++ getUnexpecteds details.second
 
         DescribeItem details ->
             List.concatMap spelunkUnexpectedsFromFound details.content
@@ -294,6 +288,9 @@ getUnexpecteds description =
 
         DescribeNothing _ ->
             []
+
+        DescribeUnexpected _ details ->
+            [ details ]
 
 
 spelunkUnexpectedsFromFound found =
@@ -412,41 +409,20 @@ createDocument toDocumentId meta child =
                                 Parse.getFailableBlock Desc.ParseBlock seed child
                         in
                         Parser.succeed
-                            (\source result ->
-                                case result of
-                                    Ok details ->
-                                        Parsed
-                                            { errors =
-                                                List.map (Error.render source) (getUnexpecteds details.value)
-                                            , found = Found details.range details.value
-                                            , expected = getBlockExpectation child
-                                            , initialSeed = seed
-                                            , currentSeed = currentSeed
-                                            , attributes = []
-                                            }
-
-                                    Err details ->
-                                        Parsed
-                                            { errors =
-                                                [ Error.render source
-                                                    { range = details.range
-                                                    , problem = details.error
-                                                    }
-                                                ]
-                                            , found =
-                                                Unexpected
-                                                    { range = details.range
-                                                    , problem = details.error
-                                                    }
-                                            , expected = getBlockExpectation child
-                                            , initialSeed = seed
-                                            , currentSeed = currentSeed
-                                            , attributes = []
-                                            }
+                            (\source ( range, value ) ->
+                                Parsed
+                                    { errors =
+                                        List.map (Error.render source) (getUnexpecteds value)
+                                    , found = Found range value
+                                    , expected = getBlockExpectation child
+                                    , initialSeed = seed
+                                    , currentSeed = currentSeed
+                                    , attributes = []
+                                    }
                             )
                             |. Parser.chompWhile (\c -> c == '\n')
                             |= Parser.getSource
-                            |= Parse.withRangeResult (Parser.withIndent 0 blockParser)
+                            |= Parse.withRange (Parser.withIndent 0 blockParser)
                             |. Parser.chompWhile (\c -> c == ' ' || c == '\n')
                             |. Parser.end End
                     )
@@ -506,34 +482,24 @@ getMetadataParser metadataBlock =
             Parse.getFailableBlock Desc.ParseBlock (Id.initialSeed "") metadataBlock
     in
     Parser.andThen
-        (\result ->
-            case result of
-                Err problem ->
+        (\description ->
+            case renderBlock metadataBlock description of
+                Outcome.Success meta ->
+                    Parser.succeed (Ok meta.data)
+
+                Outcome.Failure astError ->
                     Parser.succeed
                         (Err
-                            { problem = problem
+                            { problem = Error.DocumentMismatch
                             , range = Desc.emptyRange
                             }
                         )
 
-                Ok description ->
-                    case renderBlock metadataBlock description of
-                        Outcome.Success meta ->
-                            Parser.succeed (Ok meta.data)
+                Outcome.Almost (Uncertain ( unexpected, otherUnexpecteds )) ->
+                    Parser.succeed (Err unexpected)
 
-                        Outcome.Failure astError ->
-                            Parser.succeed
-                                (Err
-                                    { problem = Error.DocumentMismatch
-                                    , range = Desc.emptyRange
-                                    }
-                                )
-
-                        Outcome.Almost (Uncertain ( unexpected, otherUnexpecteds )) ->
-                            Parser.succeed (Err unexpected)
-
-                        Outcome.Almost (Recovered ( unexpected, otherUnexpecteds ) renderedChild) ->
-                            Parser.succeed (Err unexpected)
+                Outcome.Almost (Recovered ( unexpected, otherUnexpecteds ) renderedChild) ->
+                    Parser.succeed (Err unexpected)
         )
         (Parser.withIndent 0 metadataParser)
 
@@ -609,7 +575,51 @@ verify fn (Block details) =
     Block
         { kind = details.kind
         , expect = details.expect
-        , parser = details.parser
+        , parser =
+            \ctxt seed ->
+                details.parser ctxt seed
+                    |> Tuple.mapSecond
+                        (\parser ->
+                            parser
+                                |> Parse.withRange
+                                |> Parser.andThen
+                                    (\( range, desc ) ->
+                                        -- we only care about reporting if applying `fn` was a problem
+                                        -- not other errors, which will shake out normally
+                                        case details.converter desc of
+                                            Outcome.Success a ->
+                                                case fn a.data of
+                                                    Ok new ->
+                                                        Parser.succeed desc
+
+                                                    Err newErr ->
+                                                        Parser.succeed
+                                                            (DescribeUnexpected (getId desc)
+                                                                { problem = Error.Custom newErr
+                                                                , range = range
+                                                                }
+                                                            )
+
+                                            Outcome.Almost (Recovered err a) ->
+                                                case fn a.data of
+                                                    Ok new ->
+                                                        Parser.succeed desc
+
+                                                    Err newErr ->
+                                                        Parser.succeed
+                                                            (DescribeUnexpected (getId desc)
+                                                                { problem = Error.Custom newErr
+                                                                , range = range
+                                                                }
+                                                            )
+
+                                            Outcome.Almost (Uncertain x) ->
+                                                Parser.succeed desc
+
+                                            Outcome.Failure f ->
+                                                Parser.succeed desc
+                                    )
+                        )
         , converter =
             \desc ->
                 case details.converter desc of
@@ -943,8 +953,8 @@ startWith fn startBlock endBlock =
                 case desc of
                     StartsWith details ->
                         Desc.mergeWithAttrs fn
-                            (Desc.renderBlock startBlock details.first.found)
-                            (Desc.renderBlock endBlock details.second.found)
+                            (Desc.renderBlock startBlock details.first)
+                            (Desc.renderBlock endBlock details.second)
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -966,12 +976,8 @@ startWith fn startBlock endBlock =
                         StartsWith
                             { range = range
                             , id = parentId
-                            , first =
-                                { found = begin
-                                }
-                            , second =
-                                { found = end
-                                }
+                            , first = begin
+                            , second = end
                             }
                     )
                     |= Parse.withRange
@@ -1005,17 +1011,7 @@ oneOf blocks =
         , expect = ExpectOneOf expectations
         , converter =
             \desc ->
-                case desc of
-                    OneOf details ->
-                        case details.child of
-                            Found rng childDesc ->
-                                Desc.findMatch childDesc blocks
-
-                            Unexpected unexpected ->
-                                uncertain unexpected
-
-                    _ ->
-                        Outcome.Failure NoMatch
+                Desc.findMatch desc blocks
         , parser =
             Parse.oneOf blocks expectations
         }
@@ -1054,7 +1050,7 @@ manyOf blocks =
                                             remain
                 in
                 case desc of
-                    ManyOf many ->
+                    Group many ->
                         getRendered many.id
                             (Outcome.Success { data = [], attrs = [] })
                             many.children
@@ -1073,7 +1069,7 @@ manyOf blocks =
                 ( newSeed
                 , Parser.succeed
                     (\( range, results ) ->
-                        ManyOf
+                        Group
                             { id = parentId
                             , range = range
                             , children = List.map resultToFound results
@@ -1244,7 +1240,7 @@ tree view contentBlock =
         , converter =
             \description ->
                 case description of
-                    DescribeTree details ->
+                    Group details ->
                         details.children
                             |> reduceRender Index.zero
                                 getItemIcon
@@ -1316,7 +1312,7 @@ tree view contentBlock =
                         in
                         Parser.map
                             (\( pos, builtTree ) ->
-                                DescribeTree
+                                Group
                                     { id = newId
                                     , children = builtTree
                                     , range = pos

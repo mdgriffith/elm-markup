@@ -205,55 +205,27 @@ replaceOption id i pos original new desc =
                 , seed = original.currentSeed
                 }
     in
-    case desc of
-        OneOf one ->
-            -- When we're replacing the OneOf, we actually want to replace it's contents.
-            let
-                newSize =
-                    getSize created.desc
+    if Desc.match desc new then
+        let
+            newSize =
+                getSize created.desc
 
-                existingSize =
-                    sizeFromRange (getFoundRange one.child)
-            in
-            case one.child of
-                Found range val ->
-                    EditMade
-                        (Just created.seed)
-                        (minusSize newSize existingSize
-                            |> sizeToPush
-                        )
-                        (OneOf { one | child = Found range created.desc })
+            existingSize =
+                getSize desc
+        in
+        EditMade
+            (Just created.seed)
+            (minusSize newSize existingSize
+                |> sizeToPush
+            )
+            created.desc
 
-                Unexpected unexpected ->
-                    EditMade
-                        (Just created.seed)
-                        (minusSize newSize existingSize
-                            |> sizeToPush
-                        )
-                        (OneOf { one | child = Found unexpected.range created.desc })
-
-        _ ->
-            if Desc.match desc new then
-                let
-                    newSize =
-                        getSize created.desc
-
-                    existingSize =
-                        getSize desc
-                in
-                EditMade
-                    (Just created.seed)
-                    (minusSize newSize existingSize
-                        |> sizeToPush
-                    )
-                    created.desc
-
-            else
-                ErrorMakingEdit
-                    (Error.DocumentDoesntAllow
-                        (Desc.humanReadableExpectations new)
-                        [ Desc.descriptionToString desc ]
-                    )
+    else
+        ErrorMakingEdit
+            (Error.DocumentDoesntAllow
+                (Desc.humanReadableExpectations new)
+                [ Desc.descriptionToString desc ]
+            )
 
 
 sizeToPush size =
@@ -266,7 +238,7 @@ sizeToPush size =
 
 makeDeleteBlock id index indentation pos desc =
     case desc of
-        ManyOf many ->
+        Group many ->
             let
                 cleaned =
                     removeByIndex index many.children
@@ -274,7 +246,7 @@ makeDeleteBlock id index indentation pos desc =
             EditMade
                 Nothing
                 cleaned.push
-                (ManyOf
+                (Group
                     { many
                         | children = List.reverse cleaned.items
                     }
@@ -300,7 +272,7 @@ update doc edit (Parsed original) =
                     editAtId id <|
                         \indentation pos desc ->
                             case desc of
-                                ManyOf many ->
+                                Group many ->
                                     let
                                         inserted =
                                             makeInsertAt
@@ -313,7 +285,7 @@ update doc edit (Parsed original) =
                                     EditMade
                                         (Just inserted.seed)
                                         inserted.push
-                                        (ManyOf
+                                        (Group
                                             { many
                                                 | children =
                                                     inserted.updated
@@ -606,30 +578,7 @@ makeEdit cursor desc =
                 otherwise ->
                     otherwise
 
-        OneOf details ->
-            case cursor.makeEdit cursor.indentation (foundStart details.child) desc of
-                NoIdFound ->
-                    -- dive further
-                    case makeFoundEdit (increaseIndent cursor) details.child of
-                        EditMade maybeSeed maybePush newFound ->
-                            EditMade maybeSeed
-                                maybePush
-                                (OneOf
-                                    { details
-                                        | child = expandFound maybePush newFound
-                                    }
-                                )
-
-                        NoIdFound ->
-                            NoIdFound
-
-                        ErrorMakingEdit err ->
-                            ErrorMakingEdit err
-
-                otherwise ->
-                    otherwise
-
-        ManyOf many ->
+        Group many ->
             case cursor.makeEdit cursor.indentation many.range.start desc of
                 NoIdFound ->
                     -- dive further
@@ -637,7 +586,7 @@ makeEdit cursor desc =
                         EditMade maybeSeed maybePush updatedChildren ->
                             EditMade maybeSeed
                                 maybePush
-                                (ManyOf
+                                (Group
                                     { many
                                         | children =
                                             updatedChildren
@@ -661,9 +610,9 @@ makeEdit cursor desc =
                     otherwise
 
         StartsWith details ->
-            case makeEdit cursor details.first.found of
+            case makeEdit cursor details.first of
                 NoIdFound ->
-                    case makeEdit cursor details.second.found of
+                    case makeEdit cursor details.second of
                         EditMade maybeSeed maybePush secondUpdated ->
                             EditMade maybeSeed
                                 maybePush
@@ -672,10 +621,7 @@ makeEdit cursor desc =
                                     , id = details.id
                                     , first = details.first
                                     , second =
-                                        details.second
-                                            |> (\snd ->
-                                                    { snd | found = secondUpdated }
-                                               )
+                                        secondUpdated
                                     }
                                 )
 
@@ -689,50 +635,16 @@ makeEdit cursor desc =
                             { range = expandRange maybePush details.range
                             , id = details.id
                             , second =
-                                { found =
-                                    case maybePush of
-                                        Nothing ->
-                                            details.second.found
+                                case maybePush of
+                                    Nothing ->
+                                        details.second
 
-                                        Just p ->
-                                            pushDescription p details.second.found
-                                }
+                                    Just p ->
+                                        pushDescription p details.second
                             , first =
-                                details.first
-                                    |> (\fst ->
-                                            { fst | found = firstUpdated }
-                                       )
+                                firstUpdated
                             }
                         )
-
-                otherwise ->
-                    otherwise
-
-        DescribeTree details ->
-            case cursor.makeEdit cursor.indentation details.range.start desc of
-                NoIdFound ->
-                    case editMany makeFoundEdit push cursor details.children of
-                        EditMade maybeSeed maybePush newChildren ->
-                            EditMade maybeSeed
-                                maybePush
-                                (DescribeTree
-                                    { details
-                                        | children = newChildren
-                                        , range =
-                                            case maybePush of
-                                                Nothing ->
-                                                    details.range
-
-                                                Just p ->
-                                                    pushRange p details.range
-                                    }
-                                )
-
-                        NoIdFound ->
-                            NoIdFound
-
-                        ErrorMakingEdit err ->
-                            ErrorMakingEdit err
 
                 otherwise ->
                     otherwise
@@ -784,6 +696,9 @@ makeEdit cursor desc =
 
         DescribeNothing _ ->
             NoIdFound
+
+        DescribeUnexpected id details ->
+            cursor.makeEdit cursor.indentation details.range.start desc
 
 
 
@@ -1113,14 +1028,8 @@ pushDescription to desc =
                             )
                 }
 
-        OneOf one ->
-            OneOf
-                { id = one.id
-                , child = pushFound to one.child
-                }
-
-        ManyOf many ->
-            ManyOf
+        Group many ->
+            Group
                 { id = many.id
                 , range = pushRange to many.range
                 , children = List.map (pushFound to) many.children
@@ -1131,11 +1040,9 @@ pushDescription to desc =
                 { range = pushRange to details.range
                 , id = details.id
                 , first =
-                    { found = pushDescription to details.first.found
-                    }
+                    pushDescription to details.first
                 , second =
-                    { found = pushDescription to details.second.found
-                    }
+                    pushDescription to details.second
                 }
 
         DescribeBoolean details ->
@@ -1165,16 +1072,6 @@ pushDescription to desc =
         DescribeString id range str ->
             DescribeString id (pushRange to range) str
 
-        DescribeTree myTree ->
-            DescribeTree
-                { myTree
-                    | range = pushRange to myTree.range
-                    , children =
-                        List.map
-                            (pushFound to)
-                            myTree.children
-                }
-
         DescribeItem item ->
             DescribeItem
                 { item
@@ -1183,6 +1080,13 @@ pushDescription to desc =
                         List.map
                             (pushFound to)
                             item.children
+                }
+
+        DescribeUnexpected id details ->
+            DescribeUnexpected id
+                { details
+                    | range =
+                        pushRange to details.range
                 }
 
 
