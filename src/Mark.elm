@@ -247,43 +247,38 @@ getUnexpecteds : Description -> List Error.UnexpectedDetails
 getUnexpecteds description =
     case description of
         DescribeBlock details ->
-            spelunkUnexpectedsFromFound details.found
+            getUnexpecteds details.found
 
         Record details ->
-            case details.found of
-                Found _ fields ->
-                    List.concatMap
-                        (Tuple.second >> spelunkUnexpectedsFromFound)
-                        fields
-
-                Unexpected unexpected ->
-                    [ unexpected ]
+            List.concatMap
+                (Tuple.second >> getUnexpecteds)
+                details.found
 
         Group many ->
-            List.concatMap spelunkUnexpectedsFromFound many.children
+            List.concatMap getUnexpecteds many.children
 
         StartsWith details ->
             getUnexpecteds details.first
                 ++ getUnexpecteds details.second
 
         DescribeItem details ->
-            List.concatMap spelunkUnexpectedsFromFound details.content
-                ++ List.concatMap spelunkUnexpectedsFromFound details.children
+            List.concatMap getUnexpecteds details.content
+                ++ List.concatMap getUnexpecteds details.children
 
         -- Primitives
         DescribeBoolean details ->
-            unexpectedFromFound details.found
+            []
 
         DescribeInteger details ->
-            unexpectedFromFound details.found
+            []
 
         DescribeFloat details ->
-            unexpectedFromFound details.found
+            []
 
         DescribeText details ->
             []
 
-        DescribeString rng _ str ->
+        DescribeString _ str ->
             []
 
         DescribeNothing _ ->
@@ -291,24 +286,6 @@ getUnexpecteds description =
 
         DescribeUnexpected _ details ->
             [ details ]
-
-
-spelunkUnexpectedsFromFound found =
-    case found of
-        Found _ desc ->
-            getUnexpecteds desc
-
-        Unexpected unexpected ->
-            [ unexpected ]
-
-
-unexpectedFromFound found =
-    case found of
-        Found _ _ ->
-            []
-
-        Unexpected unexpected ->
-            [ unexpected ]
 
 
 {-| -}
@@ -381,12 +358,7 @@ createDocument toDocumentId meta child =
             meta
         , converter =
             \(Parsed parsed) ->
-                case parsed.found of
-                    Found range childDesc ->
-                        Desc.renderBlock child childDesc
-
-                    Unexpected unexpected ->
-                        Outcome.Almost (Uncertain ( unexpected, [] ))
+                Desc.renderBlock child parsed.found
         , parser =
             Parser.getSource
                 |> Parser.andThen
@@ -413,7 +385,7 @@ createDocument toDocumentId meta child =
                                 Parsed
                                     { errors =
                                         List.map (Error.render source) (getUnexpecteds value)
-                                    , found = Found range value
+                                    , found = value
                                     , expected = getBlockExpectation child
                                     , initialSeed = seed
                                     , currentSeed = currentSeed
@@ -840,13 +812,8 @@ block name view child =
                 case desc of
                     DescribeBlock details ->
                         if details.name == name then
-                            case details.found of
-                                Found range found ->
-                                    renderBlock child found
-                                        |> mapSuccessAndRecovered view
-
-                                Unexpected unexpected ->
-                                    uncertain unexpected
+                            renderBlock child details.found
+                                |> mapSuccessAndRecovered view
 
                         else
                             -- This is not the block that was expected.
@@ -860,8 +827,11 @@ block name view child =
                     ( newSeed, childParser ) =
                         getParser context (Id.indent seed) child
 
-                    ( parentId, finalSeed ) =
+                    ( parentId, parentSeed ) =
                         Id.step seed
+
+                    ( errorId, finalSeed ) =
+                        Id.step parentSeed
                 in
                 ( finalSeed
                 , Parser.map
@@ -869,7 +839,7 @@ block name view child =
                         case result of
                             Ok details ->
                                 DescribeBlock
-                                    { found = Found details.range details.value
+                                    { found = details.value
                                     , name = name
                                     , id = parentId
                                     }
@@ -879,7 +849,7 @@ block name view child =
                                     { name = name
                                     , id = parentId
                                     , found =
-                                        Unexpected
+                                        DescribeUnexpected errorId
                                             { range = details.range
                                             , problem = details.error
                                             }
@@ -974,8 +944,7 @@ startWith fn startBlock endBlock =
                 , Parser.succeed
                     (\( range, ( begin, end ) ) ->
                         StartsWith
-                            { range = range
-                            , id = parentId
+                            { id = parentId
                             , first = begin
                             , second = end
                             }
@@ -1037,17 +1006,12 @@ manyOf blocks =
                                 mapSuccessAndRecovered List.reverse existingResult
 
                             top :: remain ->
-                                case top of
-                                    Unexpected unexpected ->
-                                        uncertain unexpected
-
-                                    Found range child ->
-                                        getRendered id
-                                            (Desc.mergeWithAttrs (::)
-                                                (Desc.findMatch child blocks)
-                                                existingResult
-                                            )
-                                            remain
+                                getRendered id
+                                    (Desc.mergeWithAttrs (::)
+                                        (Desc.findMatch top blocks)
+                                        existingResult
+                                    )
+                                    remain
                 in
                 case desc of
                     Group many ->
@@ -1068,24 +1032,21 @@ manyOf blocks =
                 in
                 ( newSeed
                 , Parser.succeed
-                    (\( range, results ) ->
+                    (\children ->
                         Group
                             { id = parentId
-                            , range = range
-                            , children = List.map resultToFound results
+                            , children = children
                             }
                     )
-                    |= Parse.withRange
-                        (Parse.withIndent
-                            (\indentation ->
-                                Parser.loop
-                                    { parsedSomething = False
-                                    , found = []
-                                    , seed =
-                                        indentedSeed
-                                    }
-                                    (Parse.manyOf indentation blocks)
-                            )
+                    |= Parse.withIndent
+                        (\indentation ->
+                            Parser.loop
+                                { parsedSomething = False
+                                , found = []
+                                , seed =
+                                    indentedSeed
+                                }
+                                (Parse.manyOf indentation blocks)
                         )
                 )
         }
@@ -1315,7 +1276,6 @@ tree view contentBlock =
                                 Group
                                     { id = newId
                                     , children = builtTree
-                                    , range = pos
                                     }
                             )
                             (Parse.withRange
@@ -1359,16 +1319,8 @@ parseTree baseIndent seed contentBlock itemParser =
                                     DescribeItem
                                         { id = startId
                                         , icon = details.icon
-                                        , range =
-                                            { start = details.start
-                                            , end = details.end
-                                            }
                                         , content =
-                                            [ Found
-                                                { start = details.start
-                                                , end = details.end
-                                                }
-                                                details.item
+                                            [ details.item
                                             ]
                                         , children = []
                                         }
@@ -1385,7 +1337,7 @@ parseTree baseIndent seed contentBlock itemParser =
 
 getItemIcon desc =
     case desc of
-        Found _ (DescribeItem item) ->
+        DescribeItem item ->
             item.icon
 
         _ ->
@@ -1397,11 +1349,11 @@ renderTreeNodeSmall :
     Block item
     -> Desc.Icon
     -> Index.Index
-    -> Found Description
+    -> Description
     -> Desc.BlockOutcome (Item item)
 renderTreeNodeSmall contentBlock icon index found =
     case found of
-        Found _ (DescribeItem item) ->
+        DescribeItem item ->
             let
                 ( newIndex, childrenIcon, renderedChildren ) =
                     reduceRender (Index.indent index)
@@ -1413,12 +1365,7 @@ renderTreeNodeSmall contentBlock icon index found =
                     reduceRender (Index.dedent newIndex)
                         (always Desc.Bullet)
                         (\icon_ i foundItem ->
-                            case foundItem of
-                                Found _ content ->
-                                    renderBlock contentBlock content
-
-                                Unexpected details ->
-                                    Desc.uncertain details
+                            renderBlock contentBlock foundItem
                         )
                         item.content
             in
@@ -1652,7 +1599,7 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
                 case details.fieldConverter desc annotationType of
                     Outcome.Success fields ->
                         case fields.data of
-                            ( pos, fieldDescriptions, rendered ) ->
+                            ( fieldDescriptions, rendered ) ->
                                 Outcome.Success
                                     { data = rendered
                                     , attrs = fields.attrs
@@ -1666,7 +1613,7 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
 
                     Outcome.Almost (Desc.Recovered e fields) ->
                         case fields.data of
-                            ( pos, fieldDescriptions, rendered ) ->
+                            ( fieldDescriptions, rendered ) ->
                                 Outcome.Almost
                                     (Desc.Recovered e
                                         { data = rendered
@@ -1681,10 +1628,14 @@ recordToInlineBlock (Desc.ProtoRecord details) annotationType =
 
                     ( newSeed, fields ) =
                         Id.thread (Id.indent seed) (List.foldl (\f ls -> f ParseInline :: ls) [] details.fields)
+
+                    ( failureId, finalSeed ) =
+                        Id.step newSeed
                 in
-                ( newSeed
+                ( finalSeed
                 , Parse.record Parse.InlineRecord
                     parentId
+                    failureId
                     details.name
                     expectations
                     fields
@@ -1754,7 +1705,7 @@ convertTextDescription id options comp cursor =
             length comp
     in
     case comp of
-        Styled range (Desc.Text styling str) ->
+        Styled (Desc.Text styling str) ->
             { outcome =
                 Desc.mergeWithAttrs (::)
                     (Outcome.Success
@@ -1807,17 +1758,7 @@ convertTextDescription id options comp cursor =
             case maybeMatched of
                 Nothing ->
                     { outcome =
-                        uncertain
-                            { range = details.range
-                            , problem =
-                                Error.UnknownInline
-                                    (List.map
-                                        (\inline ->
-                                            Desc.inlineExample details.kind (inline Desc.EmptyAnnotation)
-                                        )
-                                        options.inlines
-                                    )
-                            }
+                        Outcome.Failure NoMatch
                     , lastOffset = cursor.lastOffset + blockLength
                     }
 
@@ -1890,19 +1831,13 @@ annotation name view =
                 case desc of
                     Desc.Record details ->
                         if details.name == name then
-                            case details.found of
-                                Desc.Found pos fieldDescriptions ->
-                                    Outcome.Success
-                                        { data =
-                                            ( pos
-                                            , fieldDescriptions
-                                            , view (selectedText selected)
-                                            )
-                                        , attrs = []
-                                        }
-
-                                Desc.Unexpected unexpected ->
-                                    Desc.uncertain unexpected
+                            Outcome.Success
+                                { data =
+                                    ( details.found
+                                    , view (selectedText selected)
+                                    )
+                                , attrs = []
+                                }
 
                         else
                             Outcome.Failure NoMatch
@@ -1975,15 +1910,10 @@ verbatim name view =
                 case desc of
                     Desc.Record details ->
                         if details.name == name then
-                            case details.found of
-                                Desc.Found pos fieldDescriptions ->
-                                    Outcome.Success
-                                        { attrs = []
-                                        , data = ( pos, fieldDescriptions, view (selectedString selected) )
-                                        }
-
-                                Desc.Unexpected unexpected ->
-                                    Desc.uncertain unexpected
+                            Outcome.Success
+                                { attrs = []
+                                , data = ( details.found, view (selectedString selected) )
+                                }
 
                         else
                             Outcome.Failure NoMatch
@@ -2034,7 +1964,7 @@ string =
         , converter =
             \desc ->
                 case desc of
-                    DescribeString id range str ->
+                    DescribeString id str ->
                         Outcome.Success { data = String.trim str, attrs = [] }
 
                     _ ->
@@ -2051,9 +1981,6 @@ string =
                         Parser.succeed
                             (\start str end ->
                                 DescribeString id
-                                    { start = start
-                                    , end = end
-                                    }
                                     (String.trim str)
                             )
                             |= Parse.getPosition
@@ -2066,7 +1993,7 @@ string =
                     ParseBlock ->
                         Parser.map
                             (\( pos, str ) ->
-                                DescribeString id pos str
+                                DescribeString id str
                             )
                             (Parse.withRange
                                 (Parse.withIndent
@@ -2078,14 +2005,10 @@ string =
 
                     ParseInTree ->
                         Parser.map
-                            (\( pos, str ) ->
-                                DescribeString id pos str
-                            )
-                            (Parse.withRange
-                                (Parse.withIndent
-                                    (\indentation ->
-                                        Parser.loop "" (Parse.indentedString indentation)
-                                    )
+                            (DescribeString id)
+                            (Parse.withIndent
+                                (\indentation ->
+                                    Parser.loop "" (Parse.indentedString indentation)
                                 )
                             )
                 )
@@ -2106,7 +2029,10 @@ bool =
             \desc ->
                 case desc of
                     DescribeBoolean details ->
-                        foundToOutcome details.found
+                        Outcome.Success
+                            { data = details.found
+                            , attrs = []
+                            }
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -2119,21 +2045,18 @@ bool =
                 ( newSeed
                 , Parser.map
                     (\boolResult ->
-                        DescribeBoolean
-                            { id = id
-                            , found =
-                                case boolResult of
-                                    Err err ->
-                                        Unexpected
-                                            { range = err.range
-                                            , problem = Error.BadBool
-                                            }
+                        case boolResult of
+                            Err err ->
+                                DescribeUnexpected id
+                                    { range = err.range
+                                    , problem = Error.BadBool
+                                    }
 
-                                    Ok details ->
-                                        Found
-                                            details.range
-                                            details.value
-                            }
+                            Ok details ->
+                                DescribeBoolean
+                                    { id = id
+                                    , found = details.value
+                                    }
                     )
                     (Parse.withRangeResult
                         (Parser.oneOf
@@ -2149,16 +2072,6 @@ bool =
         }
 
 
-foundToOutcome : Found item -> Outcome.Outcome failure (Uncertain data) { data : item, attrs : List a }
-foundToOutcome found =
-    case found of
-        Found rng i ->
-            Outcome.Success { data = i, attrs = [] }
-
-        Unexpected unexpected ->
-            Outcome.Almost (Uncertain ( unexpected, [] ))
-
-
 {-| -}
 int : Block Int
 int =
@@ -2168,7 +2081,10 @@ int =
             \desc ->
                 case desc of
                     DescribeInteger details ->
-                        foundToOutcome details.found
+                        Outcome.Success
+                            { data = details.found
+                            , attrs = []
+                            }
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -2180,14 +2096,7 @@ int =
                         Id.step seed
                 in
                 ( newSeed
-                , Parser.map
-                    (\foundInt ->
-                        DescribeInteger
-                            { id = id
-                            , found = foundInt
-                            }
-                    )
-                    Parse.int
+                , Parse.int id
                 )
         }
 
@@ -2201,8 +2110,10 @@ float =
             \desc ->
                 case desc of
                     DescribeFloat details ->
-                        foundToOutcome details.found
-                            |> Desc.mapSuccessAndRecovered Tuple.second
+                        Outcome.Success
+                            { data = Tuple.second details.found
+                            , attrs = []
+                            }
 
                     _ ->
                         Outcome.Failure NoMatch
@@ -2214,12 +2125,7 @@ float =
                         Id.step seed
                 in
                 ( newSeed
-                , Parser.map
-                    (\fl ->
-                        DescribeFloat
-                            { id = id, found = fl }
-                    )
-                    Parse.float
+                , Parse.float id
                 )
         }
 
@@ -2326,12 +2232,7 @@ record name view =
                 case desc of
                     Desc.Record details ->
                         if details.name == name && ann == Desc.EmptyAnnotation then
-                            case details.found of
-                                Desc.Found pos fieldDescriptions ->
-                                    Outcome.Success { data = ( pos, fieldDescriptions, view ), attrs = [] }
-
-                                Desc.Unexpected unexpected ->
-                                    Desc.uncertain unexpected
+                            Outcome.Success { data = ( details.found, view ), attrs = [] }
 
                         else
                             Outcome.Failure NoMatch
@@ -2358,13 +2259,12 @@ field name value (Desc.ProtoRecord details) =
                 case details.fieldConverter desc ann of
                     Outcome.Success fields ->
                         case fields.data of
-                            ( pos, fieldDescriptions, rendered ) ->
+                            ( fieldDescriptions, rendered ) ->
                                 case getField newField fieldDescriptions of
                                     Just outcome ->
                                         mapSuccessAndRecovered
                                             (\myField ->
-                                                ( pos
-                                                , fieldDescriptions
+                                                ( fieldDescriptions
                                                 , rendered myField
                                                 )
                                             )
@@ -2373,18 +2273,17 @@ field name value (Desc.ProtoRecord details) =
                                     Nothing ->
                                         Desc.uncertain
                                             { problem = Error.MissingFields [ fieldName newField ]
-                                            , range = pos
+                                            , range = Debug.todo "HMMM"
                                             }
 
                     Outcome.Almost (Desc.Recovered e fields) ->
                         case fields.data of
-                            ( pos, fieldDescriptions, rendered ) ->
+                            ( fieldDescriptions, rendered ) ->
                                 case getField newField fieldDescriptions of
                                     Just outcome ->
                                         mapSuccessAndRecovered
                                             (\myField ->
-                                                ( pos
-                                                , fieldDescriptions
+                                                ( fieldDescriptions
                                                 , rendered myField
                                                 )
                                             )
@@ -2393,7 +2292,7 @@ field name value (Desc.ProtoRecord details) =
                                     Nothing ->
                                         Desc.uncertain
                                             { problem = Error.MissingFields [ fieldName newField ]
-                                            , range = pos
+                                            , range = Debug.todo "HMMM"
                                             }
 
                     Outcome.Failure fail ->
@@ -2414,7 +2313,7 @@ fieldName (Field name _) =
 -}
 getField :
     Field value
-    -> List ( String, Desc.Found Desc.Description )
+    -> List ( String, Desc.Description )
     -> Maybe (Desc.BlockOutcome value)
 getField (Field name fieldBlock) fields =
     List.foldl (matchField name fieldBlock) Nothing fields
@@ -2423,22 +2322,17 @@ getField (Field name fieldBlock) fields =
 matchField :
     String
     -> Block value
-    -> ( String, Desc.Found Desc.Description )
+    -> ( String, Desc.Description )
     -> Maybe (Desc.BlockOutcome value)
     -> Maybe (Desc.BlockOutcome value)
-matchField targetName targetBlock ( name, foundDescription ) existing =
+matchField targetName targetBlock ( name, description ) existing =
     case existing of
         Just _ ->
             existing
 
         Nothing ->
             if name == targetName then
-                case foundDescription of
-                    Desc.Found rng description ->
-                        Just (Desc.renderBlock targetBlock description)
-
-                    Desc.Unexpected unexpected ->
-                        Just (Desc.uncertain unexpected)
+                Just (Desc.renderBlock targetBlock description)
 
             else
                 existing
@@ -2461,7 +2355,7 @@ toBlock (Desc.ProtoRecord details) =
                 case details.fieldConverter desc Desc.EmptyAnnotation of
                     Outcome.Success fields ->
                         case fields.data of
-                            ( pos, fieldDescriptions, rendered ) ->
+                            ( fieldDescriptions, rendered ) ->
                                 Outcome.Success { data = rendered, attrs = fields.attrs }
 
                     Outcome.Failure fail ->
@@ -2472,7 +2366,7 @@ toBlock (Desc.ProtoRecord details) =
 
                     Outcome.Almost (Desc.Recovered e fields) ->
                         case fields.data of
-                            ( pos, fieldDescriptions, rendered ) ->
+                            ( fieldDescriptions, rendered ) ->
                                 Outcome.Almost
                                     (Desc.Recovered e
                                         { data = rendered
@@ -2488,10 +2382,14 @@ toBlock (Desc.ProtoRecord details) =
                     ( newSeed, fields ) =
                         Id.thread (Id.indent seed)
                             (List.foldl (\f ls -> f ParseBlock :: ls) [] details.fields)
+
+                    ( failureId, finalSeed ) =
+                        Id.step newSeed
                 in
-                ( newSeed
+                ( finalSeed
                 , Parse.record Parse.BlockRecord
                     parentId
+                    failureId
                     details.name
                     expectations
                     fields
@@ -2504,7 +2402,11 @@ type Field value
     = Field String (Block value)
 
 
-fieldParser : Field value -> Desc.ParseContext -> Id.Seed -> ( Id.Seed, ( String, Parser Context Problem ( String, Desc.Found Desc.Description ) ) )
+fieldParser :
+    Field value
+    -> Desc.ParseContext
+    -> Id.Seed
+    -> ( Id.Seed, ( String, Parser Context Problem ( String, Desc.Description ) ) )
 fieldParser (Field name myBlock) context seed =
     let
         ( newSeed, blockParser ) =
@@ -2523,23 +2425,22 @@ fieldExpectation (Field name fieldBlock) =
     ( name, Desc.getBlockExpectation fieldBlock )
 
 
-fieldContentParser : String -> Parser Error.Context Error.Problem Desc.Description -> Parser Error.Context Error.Problem ( String, Desc.Found Desc.Description )
+fieldContentParser : String -> Parser Error.Context Error.Problem Desc.Description -> Parser Error.Context Error.Problem ( String, Desc.Description )
 fieldContentParser name parser =
     Parse.withIndent
         (\indentation ->
             Parser.map
                 (\( pos, description ) ->
-                    ( name, Desc.Found pos description )
+                    ( name, description )
                 )
                 (Parse.withRange
-                    (Parser.succeed identity
-                        |= Parser.oneOf
-                            [ Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
-                            , Parser.succeed identity
-                                |. Parser.chompWhile (\c -> c == '\n')
-                                |. Parser.token (Parser.Token (String.repeat (indentation + 4) " ") (ExpectingIndentation indentation))
-                                |= Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
-                            ]
+                    (Parser.oneOf
+                        [ Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
+                        , Parser.succeed identity
+                            |. Parser.chompWhile (\c -> c == '\n')
+                            |. Parser.token (Parser.Token (String.repeat (indentation + 4) " ") (ExpectingIndentation indentation))
+                            |= Parser.withIndent (indentation + 4) (Parser.inContext (InRecordField name) parser)
+                        ]
                     )
                 )
         )

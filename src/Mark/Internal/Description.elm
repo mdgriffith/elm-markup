@@ -1,6 +1,6 @@
 module Mark.Internal.Description exposing
     ( render, compile
-    , Found(..), Icon(..)
+    , Icon(..)
     , Description(..), TextDescription(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..)
     , Parsed(..), descriptionToString, toString, mergeWith
@@ -10,16 +10,16 @@ module Mark.Internal.Description exposing
     , Uncertain(..), mapSuccessAndRecovered, renderBlock, getBlockExpectation, getParser, getParserNoBar
     , Block(..), BlockKind(..), Document(..)
     , boldStyle, italicStyle, strikeStyle
-    , resultToFound, getId, mapFound, textDescriptionRange, getSize, sizeFromRange, minusSize, textSize
+    , getId, getSize, sizeFromRange, minusSize
     , Record(..), Range, AnnotationType(..), recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , BlockOutcome, emptyRange, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, resetBlockStart, resetFoundStart
+    , BlockOutcome, emptyRange, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition
     )
 
 {-|
 
 @docs render, compile
 
-@docs Found, Icon
+@docs Icon
 
 @docs Description, TextDescription, Text, Style
 
@@ -39,7 +39,7 @@ module Mark.Internal.Description exposing
 
 @docs boldStyle, italicStyle, strikeStyle
 
-@docs resultToFound, getId, mapFound, textDescriptionRange, getSize, sizeFromRange, foundRange, minusSize, textSize
+@docs resultToDescription, getId, getSize, sizeFromRange, foundRange, minusSize
 
 @docs Record, Range, AnnotationType, recordName, ParseContext, blockKindToContext, blockKindToSelection, length, match, matchExpected
 
@@ -71,7 +71,7 @@ type alias WithAttr data =
 type Parsed
     = Parsed
         { errors : List Error.Rendered
-        , found : Found Description
+        , found : Description
         , expected : Expectation
         , initialSeed : Id.Seed
         , currentSeed : Id.Seed
@@ -87,31 +87,23 @@ type alias Attribute =
 
 
 {-| -}
-type Found item
-    = Found Range item
-    | Unexpected Error.UnexpectedDetails
-
-
-{-| -}
 type Description
     = DescribeBlock
         { id : Id
         , name : String
-        , found : Found Description
+        , found : Description
         }
     | Record
         { id : Id
         , name : String
-        , found : Found (List ( String, Found Description ))
+        , found : List ( String, Description )
         }
     | Group
         { id : Id
-        , range : Range
-        , children : List (Found Description)
+        , children : List Description
         }
     | StartsWith
-        { range : Range
-        , id : Id
+        { id : Id
         , first : Description
         , second : Description
         }
@@ -119,29 +111,27 @@ type Description
     | DescribeItem
         { id : Id
         , icon : Icon
-        , range : Range
-        , content : List (Found Description)
-        , children : List (Found Description)
+        , content : List Description
+        , children : List Description
         }
       -- Primitives
     | DescribeBoolean
         { id : Id
-        , found : Found Bool
+        , found : Bool
         }
     | DescribeInteger
         { id : Id
-        , found : Found Int
+        , found : Int
         }
     | DescribeFloat
         { id : Id
-        , found : Found ( String, Float )
+        , found : ( String, Float )
         }
     | DescribeText
         { id : Id
-        , range : Range
         , text : List TextDescription
         }
-    | DescribeString Id Range String
+    | DescribeString Id String
     | DescribeNothing Id
     | DescribeUnexpected Id Error.UnexpectedDetails
 
@@ -154,10 +144,9 @@ type AnnotationType
 
 {-| -}
 type TextDescription
-    = Styled Range Text
+    = Styled Text
     | InlineBlock
         { kind : AnnotationType
-        , range : Range
         , record : Description
         }
 
@@ -306,7 +295,7 @@ recordName desc =
 length : TextDescription -> Int
 length inlineEl =
     case inlineEl of
-        Styled _ txt ->
+        Styled txt ->
             textLength txt
 
         InlineBlock details ->
@@ -395,27 +384,6 @@ type NewInline
 
 
 {-| -}
-mapFound : (a -> b) -> Found a -> Found b
-mapFound fn found =
-    case found of
-        Found range item ->
-            Found range (fn item)
-
-        Unexpected unexp ->
-            Unexpected unexp
-
-
-getFoundSize : Found a -> Range
-getFoundSize found =
-    case found of
-        Found range _ ->
-            range
-
-        Unexpected unexp ->
-            unexp.range
-
-
-{-| -}
 uncertain : Error.UnexpectedDetails -> Outcome Error.AstError (Uncertain data) data
 uncertain err =
     Almost (Uncertain ( err, [] ))
@@ -463,13 +431,13 @@ type Record data
 
 
 type alias FieldConverter data =
-    ( Range, List ( String, Found Description ), data )
+    ( List ( String, Description ), data )
 
 
 type alias FieldParser =
     ParseContext
     -> Id.Seed
-    -> ( Id.Seed, ( String, Parser Error.Context Error.Problem ( String, Found Description ) ) )
+    -> ( Id.Seed, ( String, Parser Error.Context Error.Problem ( String, Description ) ) )
 
 
 emptyRange =
@@ -516,7 +484,7 @@ getId description =
         DescribeText details ->
             details.id
 
-        DescribeString id _ _ ->
+        DescribeString id _ ->
             id
 
         DescribeNothing id ->
@@ -536,79 +504,15 @@ minusSize one two =
     }
 
 
-textSize : List TextDescription -> { offset : Int, line : Int }
-textSize els =
-    case els of
-        [] ->
-            { offset = 0, line = 0 }
-
-        start :: remain ->
-            case List.head (List.reverse remain) of
-                Nothing ->
-                    sizeFromRange (textDescriptionRange start)
-
-                Just last ->
-                    minusSize
-                        (sizeFromRange (textDescriptionRange start))
-                        (sizeFromRange (textDescriptionRange last))
-
-
 getSize : Description -> { offset : Int, line : Int }
 getSize description =
-    case description of
-        DescribeBlock details ->
-            sizeFromRange (getFoundSize details.found)
-
-        Record details ->
-            sizeFromRange (getFoundSize details.found)
-
-        Group details ->
-            sizeFromRange details.range
-
-        StartsWith details ->
-            sizeFromRange details.range
-
-        DescribeItem item ->
-            sizeFromRange item.range
-
-        DescribeBoolean details ->
-            sizeFromRange (getFoundSize details.found)
-
-        DescribeInteger details ->
-            sizeFromRange (getFoundSize details.found)
-
-        DescribeFloat details ->
-            sizeFromRange (getFoundSize details.found)
-
-        DescribeText details ->
-            sizeFromRange details.range
-
-        DescribeString _ range _ ->
-            sizeFromRange range
-
-        DescribeNothing id ->
-            { offset = 0
-            , line = 0
-            }
-
-        DescribeUnexpected id details ->
-            sizeFromRange details.range
+    Debug.todo "remove this"
 
 
 sizeFromRange range =
     { offset = range.end.offset - range.start.offset
     , line = range.end.line - range.start.line
     }
-
-
-textDescriptionRange : TextDescription -> Range
-textDescriptionRange textDesc =
-    case textDesc of
-        Styled rng _ ->
-            rng
-
-        InlineBlock details ->
-            details.range
 
 
 renderBlock : Block data -> Description -> BlockOutcome data
@@ -653,29 +557,6 @@ getPosition =
         |= Parser.getPosition
 
 
-resetBlockStart : Position -> Description -> Description
-resetBlockStart pos d =
-    case d of
-        DescribeBlock block ->
-            DescribeBlock { block | found = resetFoundStart pos block.found }
-
-        Record record ->
-            Record { record | found = resetFoundStart pos record.found }
-
-        x ->
-            x
-
-
-resetFoundStart : Position -> Found x -> Found x
-resetFoundStart pos found =
-    case found of
-        Found range item ->
-            Found { range | start = pos } item
-
-        Unexpected err ->
-            found
-
-
 getParser : ParseContext -> Id.Seed -> Block data -> ( Id.Seed, Parser Error.Context Error.Problem Description )
 getParser context seed (Block details) =
     case details.kind of
@@ -690,8 +571,7 @@ getParser context seed (Block details) =
                             details.parser context seed
                     in
                     ( newSeed
-                    , Parser.succeed resetBlockStart
-                        |= getPosition
+                    , Parser.succeed identity
                         |. Parser.token (Parser.Token "|>" (Error.ExpectingBlockName name))
                         |. Parser.chompWhile (\c -> c == ' ')
                         |= blockParser
@@ -847,12 +727,7 @@ match description exp =
                     case exp of
                         ExpectBlock expectedName expectedChild ->
                             if expectedName == details.name then
-                                case details.found of
-                                    Found _ child ->
-                                        match child expectedChild
-
-                                    Unexpected _ ->
-                                        False
+                                match details.found expectedChild
 
                             else
                                 False
@@ -864,12 +739,7 @@ match description exp =
                     case exp of
                         ExpectRecord name fields ->
                             if record.name == name then
-                                case record.found of
-                                    Found _ foundFields ->
-                                        List.all (matchExpectedFields fields) foundFields
-
-                                    Unexpected _ ->
-                                        False
+                                List.all (matchExpectedFields fields) record.found
 
                             else
                                 False
@@ -882,7 +752,7 @@ match description exp =
                         ExpectManyOf choices ->
                             List.all
                                 (\child ->
-                                    List.any (matchChoice child) choices
+                                    List.any (match child) choices
                                 )
                                 many.children
 
@@ -901,12 +771,12 @@ match description exp =
                 DescribeItem item ->
                     List.all
                         (\content ->
-                            matchChoice content exp
+                            match content exp
                         )
                         item.content
                         && List.all
                             (\content ->
-                                matchChoice content exp
+                                match content exp
                             )
                             item.children
 
@@ -942,7 +812,7 @@ match description exp =
                         _ ->
                             False
 
-                DescribeString _ _ _ ->
+                DescribeString _ _ ->
                     case exp of
                         ExpectString _ ->
                             True
@@ -951,29 +821,14 @@ match description exp =
                             False
 
 
-matchChoice : Found Description -> Expectation -> Bool
-matchChoice found exp =
-    case found of
-        Found _ desc ->
-            match desc exp
-
-        Unexpected _ ->
-            False
-
-
-matchExpectedFields : List ( String, Expectation ) -> ( String, Found Description ) -> Bool
-matchExpectedFields valid ( targetFieldName, found ) =
-    case found of
-        Unexpected unexp ->
-            False
-
-        Found _ description ->
-            let
-                innerMatch ( validFieldName, validExpectation ) =
-                    (validFieldName == targetFieldName)
-                        && match description validExpectation
-            in
-            List.any innerMatch valid
+matchExpectedFields : List ( String, Expectation ) -> ( String, Description ) -> Bool
+matchExpectedFields valid ( targetFieldName, description ) =
+    let
+        innerMatch ( validFieldName, validExpectation ) =
+            (validFieldName == targetFieldName)
+                && match description validExpectation
+    in
+    List.any innerMatch valid
 
 
 {-| Is the first expectation a subset of the second?
@@ -1082,7 +937,7 @@ minusPosition end start =
 {-| -}
 toString : Parsed -> String
 toString (Parsed parsed) =
-    writeFound writeDescription
+    writeDescription
         parsed.found
         { indent = 0
         , position = { line = 1, column = 1, offset = 0 }
@@ -1223,13 +1078,12 @@ writeDescription description cursor =
             cursor
                 |> write ("|> " ++ details.name)
                 |> indent
-                |> writeFound writeDescription details.found
+                |> writeDescription details.found
                 |> dedent
 
         Record details ->
             cursor
-                |> writeFound
-                    (\fields curs ->
+                |> (\fields curs ->
                         curs
                             -- TODO: This seems to be necessary for the recordOfRecord test, but
                             -- makes things parsed normally fail...sooo
@@ -1239,13 +1093,13 @@ writeDescription description cursor =
                             |> (\c ->
                                     List.foldr writeField c fields
                                )
-                    )
+                   )
                     details.found
                 |> dedent
 
         Group many ->
             List.foldl
-                (writeFound writeDescription)
+                writeDescription
                 cursor
                 many.children
 
@@ -1255,17 +1109,16 @@ writeDescription description cursor =
                 |> writeDescription details.second
 
         DescribeBoolean details ->
-            writeFound (writeWith boolToString) details.found cursor
+            writeWith boolToString details.found cursor
 
         DescribeInteger details ->
-            writeFound (writeWith String.fromInt) details.found cursor
+            writeWith String.fromInt details.found cursor
 
         DescribeFloat details ->
-            writeFound (writeWith Tuple.first) details.found cursor
+            writeWith Tuple.first details.found cursor
 
         DescribeText txt ->
             cursor
-                |> advanceTo txt.range
                 |> (\c ->
                         txt.text
                             |> List.foldl
@@ -1274,11 +1127,11 @@ writeDescription description cursor =
                                 , styles = emptyStyles
                                 }
                             |> writeTextDescription
-                                (Styled emptyRange (Text emptyStyles ""))
+                                (Styled (Text emptyStyles ""))
                             |> .cursor
                    )
 
-        DescribeString id range str ->
+        DescribeString id str ->
             let
                 indented =
                     String.lines str
@@ -1295,7 +1148,6 @@ writeDescription description cursor =
                     List.length indented
             in
             cursor
-                |> advanceTo range
                 |> (\curs ->
                         List.foldl
                             (\line ( i, advancedCurs ) ->
@@ -1313,46 +1165,37 @@ writeDescription description cursor =
         DescribeItem item ->
             cursor
                 |> writeIcon item.icon
-                |> (\curs -> List.foldl (writeFound writeDescription) curs item.content)
-                |> (\curs -> List.foldl (writeFound writeDescription) curs item.children)
+                |> (\curs -> List.foldl writeDescription curs item.content)
+                |> (\curs -> List.foldl writeDescription curs item.children)
 
 
 textDescriptionToString existingStyles txt =
     case txt of
-        Styled range t ->
+        Styled t ->
             textToString existingStyles t
 
         InlineBlock details ->
             let
-                renderField ( name, foundDesc ) =
+                renderField ( name, desc ) =
                     name
                         ++ " = "
-                        ++ (case foundDesc of
-                                Found _ desc ->
-                                    descriptionToString desc
-
-                                _ ->
-                                    ""
-                           )
+                        ++ descriptionToString desc
 
                 inlineRecord =
                     case details.record of
                         Record recordDetails ->
                             case recordDetails.found of
-                                Found _ [] ->
+                                [] ->
                                     "{"
                                         ++ recordDetails.name
                                         ++ "}"
 
-                                Found _ fields ->
+                                fields ->
                                     "{"
                                         ++ recordDetails.name
                                         ++ "|"
                                         ++ String.join ", " (List.map renderField fields)
                                         ++ "}"
-
-                                Unexpected _ ->
-                                    ""
 
                         _ ->
                             ""
@@ -1473,41 +1316,21 @@ writeWith toStr a cursor =
     write (toStr a) cursor
 
 
-writeFound : (a -> PrintCursor -> PrintCursor) -> Found a -> PrintCursor -> PrintCursor
-writeFound fn found cursor =
-    case found of
-        Found range fnd ->
-            cursor
-                |> advanceTo range
-                |> fn fnd
-
-        Unexpected unexpected ->
-            cursor
-                |> advanceTo unexpected.range
-
-
-writeField : ( String, Found Description ) -> PrintCursor -> PrintCursor
-writeField ( name, foundVal ) cursor =
-    case foundVal of
-        Found rng fnd ->
-            -- The rng here refers to the field name and the `value` of the field
-            -- NOTE #1
-            -- For example
-            --     fieldName = supercoolvalue
-            --     ^------------------------^
-            --          range
-            let
-                fieldName =
-                    name ++ " ="
-            in
-            cursor
-                |> advanceTo rng
-                |> write fieldName
-                |> writeDescription fnd
-
-        Unexpected unexpected ->
-            cursor
-                |> advanceTo unexpected.range
+writeField : ( String, Description ) -> PrintCursor -> PrintCursor
+writeField ( name, description ) cursor =
+    -- The rng here refers to the field name and the `value` of the field
+    -- NOTE #1
+    -- For example
+    --     fieldName = supercoolvalue
+    --     ^------------------------^
+    --          range
+    let
+        fieldName =
+            name ++ " ="
+    in
+    cursor
+        |> write fieldName
+        |> writeDescription description
 
 
 
@@ -1515,22 +1338,16 @@ writeField ( name, foundVal ) cursor =
 
 
 createInline :
-    Position
-    -> List InlineExpectation
-    -> ( Position, List TextDescription )
-createInline start current =
+    List InlineExpectation
+    -> List TextDescription
+createInline current =
     List.foldl inlineExpectationToDesc
-        { position = start
-        , text = []
+        { text = []
         , styling = emptyStyles
         }
         current
         |> (\cursor ->
-                ( moveColumn
-                    (numberStyleChanges emptyStyles cursor.styling)
-                    cursor.position
-                , List.reverse cursor.text
-                )
+                List.reverse cursor.text
            )
 
 
@@ -1578,39 +1395,18 @@ moveText (Text styling str) existingStyling cursor =
 inlineExpectationToDesc exp cursor =
     case exp of
         ExpectText ((Text newStyling str) as txt) ->
-            let
-                end =
-                    moveText txt cursor.styling cursor.position
-            in
-            { position = end
-            , text =
+            { text =
                 Styled
-                    { start = cursor.position
-                    , end = end
-                    }
                     txt
                     :: cursor.text
             , styling = newStyling
             }
 
         ExpectInlineBlock details ->
-            let
-                end =
-                    cursor.position
-
-                -- |> moveColumn (String.length name + 5)
-                -- |> moveColumn (attributesLength attrs)
-                -- TODO: Change position!
-            in
-            { position = end
-            , styling = cursor.styling
+            { styling = cursor.styling
             , text =
                 InlineBlock
                     { kind = details.kind
-                    , range =
-                        { start = cursor.position
-                        , end = end
-                        }
                     , record =
                         DescribeNothing (Tuple.first (Id.step (Id.initialSeed "none")))
 
@@ -1633,13 +1429,10 @@ inlineExpectationToDesc exp cursor =
 -}
 create :
     { seed : Id.Seed
-    , indent : Int
-    , base : Position
     , expectation : Expectation
     }
     ->
-        { pos : Position
-        , desc : Description
+        { desc : Description
         , seed : Id.Seed
         }
 create current =
@@ -1648,29 +1441,19 @@ create current =
             let
                 new =
                     create
-                        { indent = current.indent + 1
-                        , base =
-                            current.base
-                                |> moveNewline
-                                |> moveColumn ((current.indent + 1) * 4)
-                        , expectation = childExpectation
+                        { expectation = childExpectation
                         , seed = current.seed
                         }
 
                 ( newId, newSeed ) =
                     Id.step new.seed
             in
-            { pos = new.pos
-            , desc =
+            { desc =
                 DescribeBlock
                     { name = name
                     , id = newId
                     , found =
-                        Found
-                            { start = current.base
-                            , end = new.pos
-                            }
-                            new.desc
+                        new.desc
                     }
             , seed = newSeed
             }
@@ -1679,9 +1462,8 @@ create current =
             let
                 new =
                     List.foldl
-                        (createField (current.indent + 1))
-                        { position = moveNewline current.base
-                        , fields = []
+                        createField
+                        { fields = []
                         , seed = current.seed
                         }
                         fields
@@ -1689,17 +1471,12 @@ create current =
                 ( newId, newSeed ) =
                     Id.step new.seed
             in
-            { pos = new.position
-            , desc =
+            { desc =
                 Record
                     { name = name
                     , id = newId
                     , found =
-                        Found
-                            { start = current.base
-                            , end = moveNewline new.position
-                            }
-                            new.fields
+                        new.fields
                     }
             , seed = newSeed
             }
@@ -1757,17 +1534,14 @@ create current =
                 -- QUESTION: what about an empty OneOf
                 new =
                     create
-                        { indent = current.indent + 1
-                        , base = current.base
-                        , expectation =
+                        { expectation =
                             Maybe.withDefault
                                 ExpectNothing
                                 (List.head choices)
                         , seed = newSeed
                         }
             in
-            { pos = new.pos
-            , desc =
+            { desc =
                 new.desc
             , seed = new.seed
             }
@@ -1783,44 +1557,29 @@ create current =
                 reseeded =
                     Id.indent childStart
 
-                ( finalSeed, lastPos, children ) =
+                ( finalSeed, children ) =
                     List.foldl
-                        (\choice ( seed, newBase, result ) ->
+                        (\choice ( seed, result ) ->
                             let
                                 new =
                                     create
-                                        { indent = current.indent
-                                        , base = newBase
-                                        , expectation = choice
+                                        { expectation = choice
                                         , seed = seed
                                         }
                             in
                             ( new.seed
-                            , new.pos
-                                |> moveNewline
-                                |> moveNewline
-                                |> moveColumn (current.indent * 4)
-                            , Found
-                                { start = newBase
-                                , end = new.pos
-                                }
-                                new.desc
+                            , new.desc
                                 :: result
                             )
                         )
-                        ( newSeed, current.base, [] )
+                        ( newSeed, [] )
                         choices
-                        |> (\( s, p, c ) -> ( s, p, List.reverse c ))
+                        |> Tuple.mapSecond List.reverse
             in
-            { pos = moveNewline lastPos
-            , seed = finalSeed
+            { seed = finalSeed
             , desc =
                 Group
                     { id = parentId
-                    , range =
-                        { start = current.base
-                        , end = lastPos
-                        }
                     , children = children
                     }
             }
@@ -1832,28 +1591,19 @@ create current =
 
                 first =
                     create
-                        { indent = current.indent
-                        , base = current.base
-                        , expectation = start
+                        { expectation = start
                         , seed = newSeed
                         }
 
                 second =
                     create
-                        { indent = current.indent
-                        , base = moveNewline first.pos
-                        , expectation = remaining
+                        { expectation = remaining
                         , seed = first.seed
                         }
             in
-            { pos = second.pos
-            , desc =
+            { desc =
                 StartsWith
                     { id = parentId
-                    , range =
-                        { start = current.base
-                        , end = second.pos
-                        }
                     , first = first.desc
                     , second = second.desc
                     }
@@ -1866,127 +1616,64 @@ create current =
                 boolString =
                     boolToString b
 
-                end =
-                    moveColumn (String.length boolString) current.base
-
-                range =
-                    { start = current.base
-                    , end = end
-                    }
-
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            { pos = end
-            , desc =
+            { desc =
                 DescribeBoolean
                     { id = newId
                     , found =
-                        Found range b
+                        b
                     }
             , seed = newSeed
             }
 
         ExpectInteger i ->
             let
-                end =
-                    moveColumn
-                        (String.length (String.fromInt i))
-                        current.base
-
-                pos =
-                    { start = current.base
-                    , end = end
-                    }
-
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            { pos = end
-            , desc =
+            { desc =
                 DescribeInteger
                     { id = newId
-                    , found = Found pos i
+                    , found = i
                     }
             , seed = newSeed
             }
 
         ExpectFloat f ->
             let
-                end =
-                    moveColumn
-                        (String.length (String.fromFloat f))
-                        current.base
-
-                pos =
-                    { start = current.base
-                    , end = end
-                    }
-
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            { pos = end
-            , desc =
+            { desc =
                 DescribeFloat
                     { id = newId
-                    , found = Found pos ( String.fromFloat f, f )
+                    , found = ( String.fromFloat f, f )
                     }
             , seed = newSeed
             }
 
         ExpectString str ->
             let
-                end =
-                    moveColumn (String.length str) current.base
-
-                walk line ( isStart, at ) =
-                    at
-                        |> (if isStart then
-                                identity
-
-                            else
-                                moveColumn ((current.indent + 1) * 4)
-                           )
-                        |> moveColumn (String.length line)
-                        |> moveNewline
-                        |> Tuple.pair False
-
-                lineDiff =
-                    str
-                        |> String.lines
-                        |> List.foldl walk ( True, current.base )
-                        |> Tuple.second
-
-                pos =
-                    { start = current.base
-                    , end = end
-                    }
-
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            { pos = end
-            , desc = DescribeString newId pos str
+            { desc = DescribeString newId str
             , seed = newSeed
             }
 
         ExpectTextBlock nodes ->
             let
-                ( end, newText ) =
-                    createInline current.base nodes
+                newText =
+                    createInline nodes
 
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            { pos = end
-            , desc =
+            { desc =
                 DescribeText
                     { id = newId
-                    , range =
-                        { start = current.base
-                        , end = end
-                        }
                     , text = newText
                     }
             , seed = newSeed
@@ -1997,8 +1684,7 @@ create current =
                 ( newId, newSeed ) =
                     Id.step current.seed
             in
-            { pos = current.base
-            , desc = DescribeNothing newId
+            { desc = DescribeNothing newId
             , seed = newSeed
             }
 
@@ -2012,7 +1698,7 @@ createTree :
         }
     ->
         { pos : Position
-        , desc : Found Description
+        , desc : Description
         , seed : Id.Seed
         }
 createTree expectations cursor =
@@ -2097,99 +1783,31 @@ createTree expectations cursor =
 
 
 type alias CreateFieldCursor =
-    { position : Position
-
-    -- We've already created these
-    , fields : List ( String, Found Description )
+    { fields : List ( String, Description )
     , seed : Id.Seed
     }
 
 
 {-| -}
 createField :
-    Int
-    -> ( String, Expectation )
+    ( String, Expectation )
     -> CreateFieldCursor
     -> CreateFieldCursor
-createField currentIndent ( name, exp ) current =
+createField ( name, exp ) current =
     let
-        -- SEE NOTE #1
-        -- This is the beginning of the field
-        --    fieldName = supercoolvalue
-        --   ^ right there
-        fieldValueStart =
-            current.position
-                |> moveColumn (currentIndent * 4)
-
-        -- If the field value is more than a line
         new =
             create
-                { indent = currentIndent + 1
-                , base =
-                    fieldValueStart
-                        -- Add a few characters to account for `field = `.
-                        |> moveColumn (String.length name + 3)
-                , expectation = exp
+                { expectation = exp
                 , seed = current.seed
                 }
-
-        height =
-            new.pos.line - current.position.line
-
-        fieldEnd =
-            moveNewline new.pos
     in
-    if height == 0 then
-        { position = fieldEnd
-        , fields =
-            ( name
-            , Found
-                { start =
-                    fieldValueStart
-                , end =
-                    fieldEnd
-                }
-                new.desc
-            )
-                :: current.fields
-        , seed = new.seed
-        }
-
-    else
-        let
-            -- If the field value is more than a line
-            multiline =
-                create
-                    { indent = currentIndent + 1
-                    , base =
-                        fieldValueStart
-                            -- account for just `fieldname =`
-                            |> moveColumn (String.length name + 2)
-                            |> moveNewline
-                            -- Indent one level further
-                            |> moveColumn ((currentIndent + 1) * 4)
-                    , expectation = exp
-                    , seed = current.seed
-                    }
-
-            finalEnd =
-                multiline.pos
-                    |> moveNewline
-        in
-        { position = finalEnd
-        , fields =
-            ( name
-            , Found
-                { start =
-                    fieldValueStart
-                , end =
-                    finalEnd
-                }
-                multiline.desc
-            )
-                :: current.fields
-        , seed = multiline.seed
-        }
+    { fields =
+        ( name
+        , new.desc
+        )
+            :: current.fields
+    , seed = new.seed
+    }
 
 
 {-| -}
@@ -2309,7 +1927,7 @@ Then our rendering function will still work.
 -}
 lookup : Id.Id -> Document meta block -> Parsed -> Outcome (List Error.Rendered) (Partial block) block
 lookup id (Document doc) (Parsed parsed) =
-    case findFound id parsed.found of
+    case find id parsed.found of
         Nothing ->
             Failure [ Error.compilerError ]
 
@@ -2338,34 +1956,19 @@ lookup id (Document doc) (Parsed parsed) =
                     Failure [ Error.compilerError ]
 
 
-firstFound : Id.Id -> List (Found Description) -> Maybe (Found Description)
+firstFound : Id.Id -> List Description -> Maybe Description
 firstFound id options =
     case options of
         [] ->
             Nothing
 
         top :: remain ->
-            case findFound id top of
+            case find id top of
                 Nothing ->
                     firstFound id remain
 
                 found ->
                     found
-
-
-findFound : Id.Id -> Found Description -> Maybe (Found Description)
-findFound id block =
-    case block of
-        Found rng desc ->
-            case find id desc of
-                Nothing ->
-                    Nothing
-
-                Just found ->
-                    Just (Found rng found)
-
-        Unexpected _ ->
-            Nothing
 
 
 find : Id.Id -> Description -> Maybe Description
@@ -2477,7 +2080,7 @@ find targetId desc =
             else
                 Nothing
 
-        DescribeString id range string ->
+        DescribeString id string ->
             if id == targetId then
                 Just desc
 
@@ -2749,15 +2352,3 @@ mergeListWithAttrs fn one two =
 
 mergeErrors ( h1, r1 ) ( h2, r2 ) =
     ( h1, r1 ++ h2 :: r2 )
-
-
-resultToFound result =
-    case result of
-        Ok ( range, desc ) ->
-            Found range desc
-
-        Err ( range, prob ) ->
-            Unexpected
-                { range = range
-                , problem = prob
-                }

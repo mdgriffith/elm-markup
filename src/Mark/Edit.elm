@@ -185,9 +185,9 @@ addStyles id start end styles =
     StyleText id start end (AddStyle styles)
 
 
-editAtId id fn indentation pos desc =
+editAtId id fn desc =
     if Desc.getId desc == id then
-        fn indentation pos desc
+        fn desc
 
     else
         NoIdFound
@@ -195,13 +195,11 @@ editAtId id fn indentation pos desc =
 
 {-| Set the content of the current block
 -}
-replaceOption id i pos original new desc =
+replaceOption id original new desc =
     let
         created =
             create
-                { indent = i
-                , base = pos
-                , expectation = new
+                { expectation = new
                 , seed = original.currentSeed
                 }
     in
@@ -215,9 +213,6 @@ replaceOption id i pos original new desc =
         in
         EditMade
             (Just created.seed)
-            (minusSize newSize existingSize
-                |> sizeToPush
-            )
             created.desc
 
     else
@@ -236,7 +231,7 @@ sizeToPush size =
         Just size
 
 
-makeDeleteBlock id index indentation pos desc =
+makeDeleteBlock id index desc =
     case desc of
         Group many ->
             let
@@ -245,7 +240,6 @@ makeDeleteBlock id index indentation pos desc =
             in
             EditMade
                 Nothing
-                cleaned.push
                 (Group
                     { many
                         | children = List.reverse cleaned.items
@@ -264,13 +258,13 @@ update doc edit (Parsed original) =
             case edit of
                 Replace id new ->
                     editAtId id <|
-                        \i pos desc ->
+                        \desc ->
                             -- if Desc.match desc new then
-                            replaceOption id i pos original new desc
+                            replaceOption id original new desc
 
                 InsertAt id index new ->
                     editAtId id <|
-                        \indentation pos desc ->
+                        \desc ->
                             case desc of
                                 Group many ->
                                     let
@@ -278,13 +272,11 @@ update doc edit (Parsed original) =
                                             makeInsertAt
                                                 original.currentSeed
                                                 index
-                                                indentation
                                                 many
                                                 new
                                     in
                                     EditMade
                                         (Just inserted.seed)
-                                        inserted.push
                                         (Group
                                             { many
                                                 | children =
@@ -302,7 +294,7 @@ update doc edit (Parsed original) =
 
                 StyleText id start end restyleAction ->
                     editAtId id
-                        (\indent pos desc ->
+                        (\desc ->
                             case desc of
                                 DescribeText details ->
                                     let
@@ -316,7 +308,6 @@ update doc edit (Parsed original) =
                                     in
                                     EditMade
                                         Nothing
-                                        (Just (pushNewTexts details.text newTexts))
                                         (DescribeText
                                             { details | text = newTexts }
                                         )
@@ -327,7 +318,7 @@ update doc edit (Parsed original) =
 
                 Annotate id start end wrapper ->
                     editAtId id
-                        (\indent pos desc ->
+                        (\desc ->
                             case desc of
                                 DescribeText details ->
                                     let
@@ -336,10 +327,6 @@ update doc edit (Parsed original) =
                                                 end
                                                 (\els ->
                                                     let
-                                                        textStart =
-                                                            getTextStart els
-                                                                |> Maybe.withDefault pos
-
                                                         wrapped =
                                                             case wrapper of
                                                                 Annotation name attrs ->
@@ -363,9 +350,8 @@ update doc edit (Parsed original) =
                                                                         , fields = attrs
                                                                         }
 
-                                                        ( end_, newText ) =
+                                                        newText =
                                                             createInline
-                                                                textStart
                                                                 [ wrapped ]
                                                     in
                                                     newText
@@ -376,7 +362,6 @@ update doc edit (Parsed original) =
                                     in
                                     EditMade
                                         Nothing
-                                        (Just (pushNewTexts details.text newTexts))
                                         (DescribeText { details | text = newTexts })
 
                                 _ ->
@@ -385,14 +370,12 @@ update doc edit (Parsed original) =
 
                 ReplaceSelection id start end newTextEls ->
                     editAtId id
-                        (\indent pos desc ->
+                        (\desc ->
                             case desc of
                                 DescribeText details ->
                                     let
                                         makeNewText selectedEls =
-                                            newTextEls
-                                                |> createInline (Maybe.withDefault pos (getTextStart selectedEls))
-                                                |> Tuple.second
+                                            createInline newTextEls
 
                                         newTexts =
                                             doTextEdit
@@ -405,7 +388,6 @@ update doc edit (Parsed original) =
                                     in
                                     EditMade
                                         Nothing
-                                        (Just (pushNewTexts details.text newTexts))
                                         (DescribeText { details | text = newTexts })
 
                                 _ ->
@@ -413,7 +395,7 @@ update doc edit (Parsed original) =
                         )
     in
     original.found
-        |> makeFoundEdit
+        |> makeEdit
             { makeEdit = editFn
             , indentation = 0
             }
@@ -428,7 +410,7 @@ prepareResults doc original edited =
         ErrorMakingEdit err ->
             Err [ Error.renderEditError err ]
 
-        EditMade maybeSeed maybePush newDescription ->
+        EditMade maybeSeed newDescription ->
             let
                 newParsed =
                     Parsed
@@ -454,30 +436,13 @@ prepareResults doc original edited =
                     Err errs
 
 
-pushNewTexts existing new =
-    minusSize
-        (textSize new)
-        (textSize existing)
-
-
-getTextStart els =
-    case els of
-        [] ->
-            Nothing
-
-        starter :: _ ->
-            Just (.start (textDescriptionRange starter))
-
-
 textString (Text _ str) =
     str
 
 
 type alias EditCursor =
-    -- An edit takes the indentation level
-    -- , the last reference position
-    -- and the current description
-    { makeEdit : Int -> Position -> Description -> EditOutcome Description
+    -- take the current item and return an edit
+    { makeEdit : Description -> EditOutcome Description
     , indentation : Int
     }
 
@@ -494,7 +459,7 @@ type alias Size =
 
 type EditOutcome desc
     = ErrorMakingEdit Error.EditErr
-    | EditMade (Maybe Id.Seed) Push desc
+    | EditMade (Maybe Id.Seed) desc
     | NoIdFound
 
 
@@ -503,22 +468,10 @@ mapEdit fn edit =
         ErrorMakingEdit err ->
             ErrorMakingEdit err
 
-        EditMade maybeSeed maybePush desc ->
-            EditMade maybeSeed maybePush (fn desc)
+        EditMade maybeSeed desc ->
+            EditMade maybeSeed (fn desc)
 
         NoIdFound ->
-            NoIdFound
-
-
-{-| -}
-makeFoundEdit : EditCursor -> Found Description -> EditOutcome (Found Description)
-makeFoundEdit cursor foundDesc =
-    case foundDesc of
-        Found range desc ->
-            makeEdit cursor desc
-                |> mapEdit (Found range)
-
-        Unexpected unexpected ->
             NoIdFound
 
 
@@ -527,13 +480,12 @@ makeEdit : EditCursor -> Description -> EditOutcome Description
 makeEdit cursor desc =
     case desc of
         DescribeBlock details ->
-            case cursor.makeEdit cursor.indentation (foundStart details.found) desc of
+            case cursor.makeEdit desc of
                 NoIdFound ->
                     -- dive further
-                    case makeFoundEdit (increaseIndent cursor) details.found of
-                        EditMade maybeSeed maybePush newFound ->
+                    case makeEdit (increaseIndent cursor) details.found of
+                        EditMade maybeSeed newFound ->
                             EditMade maybeSeed
-                                maybePush
                                 (DescribeBlock
                                     { details
                                         | found = newFound
@@ -550,53 +502,42 @@ makeEdit cursor desc =
                     otherwise
 
         Record details ->
-            case cursor.makeEdit (cursor.indentation + 1) (foundStart details.found) desc of
+            case cursor.makeEdit desc of
                 NoIdFound ->
-                    case details.found of
-                        Unexpected unexpected ->
+                    -- case details.found of
+                    --     Unexpected unexpected ->
+                    --         NoIdFound
+                    --     Found rng fields ->
+                    case editFields cursor details.found of
+                        EditMade maybeSeed updatedFields ->
+                            EditMade maybeSeed
+                                (Record
+                                    { details
+                                        | found =
+                                            updatedFields
+                                    }
+                                )
+
+                        NoIdFound ->
                             NoIdFound
 
-                        Found rng fields ->
-                            case editFields (increaseIndent (increaseIndent cursor)) fields of
-                                EditMade maybeSeed maybePush updatedFields ->
-                                    EditMade maybeSeed
-                                        maybePush
-                                        (Record
-                                            { details
-                                                | found =
-                                                    Found (expandRange maybePush rng)
-                                                        updatedFields
-                                            }
-                                        )
-
-                                NoIdFound ->
-                                    NoIdFound
-
-                                ErrorMakingEdit err ->
-                                    ErrorMakingEdit err
+                        ErrorMakingEdit err ->
+                            ErrorMakingEdit err
 
                 otherwise ->
                     otherwise
 
         Group many ->
-            case cursor.makeEdit cursor.indentation many.range.start desc of
+            case cursor.makeEdit desc of
                 NoIdFound ->
                     -- dive further
-                    case editMany makeFoundEdit push cursor many.children of
-                        EditMade maybeSeed maybePush updatedChildren ->
+                    case editMany makeEdit cursor many.children of
+                        EditMade maybeSeed updatedChildren ->
                             EditMade maybeSeed
-                                maybePush
                                 (Group
                                     { many
                                         | children =
                                             updatedChildren
-                                        , range =
-                                            case maybePush of
-                                                Nothing ->
-                                                    many.range
-
-                                                Just p ->
-                                                    pushRange p many.range
                                     }
                                 )
 
@@ -613,12 +554,10 @@ makeEdit cursor desc =
             case makeEdit cursor details.first of
                 NoIdFound ->
                     case makeEdit cursor details.second of
-                        EditMade maybeSeed maybePush secondUpdated ->
+                        EditMade maybeSeed secondUpdated ->
                             EditMade maybeSeed
-                                maybePush
                                 (StartsWith
-                                    { range = expandRange maybePush details.range
-                                    , id = details.id
+                                    { id = details.id
                                     , first = details.first
                                     , second =
                                         secondUpdated
@@ -628,19 +567,12 @@ makeEdit cursor desc =
                         otherwise ->
                             otherwise
 
-                EditMade maybeSeed maybePush firstUpdated ->
+                EditMade maybeSeed firstUpdated ->
                     EditMade maybeSeed
-                        maybePush
                         (StartsWith
-                            { range = expandRange maybePush details.range
-                            , id = details.id
+                            { id = details.id
                             , second =
-                                case maybePush of
-                                    Nothing ->
-                                        details.second
-
-                                    Just p ->
-                                        pushDescription p details.second
+                                details.second
                             , first =
                                 firstUpdated
                             }
@@ -650,22 +582,14 @@ makeEdit cursor desc =
                     otherwise
 
         DescribeItem details ->
-            case cursor.makeEdit cursor.indentation details.range.start desc of
+            case cursor.makeEdit desc of
                 NoIdFound ->
-                    case editMany makeFoundEdit push cursor details.children of
-                        EditMade maybeSeed maybePush newChildren ->
+                    case editMany makeEdit cursor details.children of
+                        EditMade maybeSeed newChildren ->
                             EditMade maybeSeed
-                                maybePush
                                 (DescribeItem
                                     { details
                                         | children = newChildren
-                                        , range =
-                                            case maybePush of
-                                                Nothing ->
-                                                    details.range
-
-                                                Just p ->
-                                                    pushRange p details.range
                                     }
                                 )
 
@@ -680,25 +604,25 @@ makeEdit cursor desc =
 
         -- Primitives
         DescribeBoolean details ->
-            cursor.makeEdit cursor.indentation (foundStart details.found) desc
+            cursor.makeEdit desc
 
         DescribeInteger found ->
-            cursor.makeEdit cursor.indentation (foundStart found.found) desc
+            cursor.makeEdit desc
 
         DescribeFloat found ->
-            cursor.makeEdit cursor.indentation (foundStart found.found) desc
+            cursor.makeEdit desc
 
         DescribeText txt ->
-            cursor.makeEdit cursor.indentation (.start txt.range) desc
+            cursor.makeEdit desc
 
-        DescribeString id range str ->
-            cursor.makeEdit cursor.indentation range.start desc
+        DescribeString id str ->
+            cursor.makeEdit desc
 
         DescribeNothing _ ->
             NoIdFound
 
         DescribeUnexpected id details ->
-            cursor.makeEdit cursor.indentation details.range.start desc
+            cursor.makeEdit desc
 
 
 
@@ -764,21 +688,16 @@ editFields cursor fields =
     let
         makeFieldEdit (( fieldName, foundField ) as field) ( editMade, pastFields ) =
             case editMade of
-                EditMade maybeSeed maybePush ls ->
-                    ( EditMade maybeSeed maybePush ls
+                EditMade maybeSeed ls ->
+                    ( EditMade maybeSeed ls
                     , ( fieldName
-                      , case maybePush of
-                            Nothing ->
-                                foundField
-
-                            Just to ->
-                                pushFound to foundField
+                      , foundField
                       )
                         :: pastFields
                     )
 
                 NoIdFound ->
-                    case makeFoundEdit cursor foundField of
+                    case makeEdit cursor foundField of
                         NoIdFound ->
                             ( NoIdFound
                             , field :: pastFields
@@ -789,8 +708,8 @@ editFields cursor fields =
                             , field :: pastFields
                             )
 
-                        EditMade maybeSeed maybePush newField ->
-                            ( EditMade maybeSeed maybePush []
+                        EditMade maybeSeed newField ->
+                            ( EditMade maybeSeed []
                             , ( fieldName, newField ) :: pastFields
                             )
 
@@ -803,22 +722,22 @@ editFields cursor fields =
         |> List.foldl makeFieldEdit ( NoIdFound, [] )
         |> (\( editMade, updatedList ) ->
                 case editMade of
-                    EditMade maybeSeed maybePush _ ->
-                        EditMade maybeSeed maybePush (List.reverse updatedList)
+                    EditMade maybeSeed _ ->
+                        EditMade maybeSeed (List.reverse updatedList)
 
                     otherwise ->
                         otherwise
            )
 
 
-editMany fn pusher cursor manyItems =
+editMany fn cursor manyItems =
     manyItems
         |> List.foldl
             (\node ( editMade, pastChildren ) ->
                 case editMade of
-                    EditMade maybeSeed maybePush _ ->
+                    EditMade maybeSeed _ ->
                         ( editMade
-                        , pusher maybePush node :: pastChildren
+                        , node :: pastChildren
                         )
 
                     ErrorMakingEdit err ->
@@ -828,8 +747,8 @@ editMany fn pusher cursor manyItems =
 
                     NoIdFound ->
                         case fn (increaseIndent (increaseIndent cursor)) node of
-                            EditMade maybeSeed maybePush newChild ->
-                                ( EditMade maybeSeed maybePush []
+                            EditMade maybeSeed newChild ->
+                                ( EditMade maybeSeed []
                                 , newChild :: pastChildren
                                 )
 
@@ -846,8 +765,8 @@ editMany fn pusher cursor manyItems =
             ( NoIdFound, [] )
         |> (\( editMade, updatedList ) ->
                 case editMade of
-                    EditMade maybeSeed maybePush _ ->
-                        EditMade maybeSeed maybePush (List.reverse updatedList)
+                    EditMade maybeSeed _ ->
+                        EditMade maybeSeed (List.reverse updatedList)
 
                     otherwise ->
                         otherwise
@@ -858,15 +777,6 @@ increaseIndent x =
     { x | indentation = x.indentation + 1 }
 
 
-foundStart found =
-    case found of
-        Found rng _ ->
-            rng.start
-
-        Unexpected unexpected ->
-            unexpected.range.start
-
-
 removeByIndex index list =
     {- We want to remove an item and push subsequent items based on
 
@@ -874,52 +784,19 @@ removeByIndex index list =
     List.foldl
         (\item cursor ->
             if cursor.index == index then
-                let
-                    range =
-                        getFoundRange item
-
-                    pushSize =
-                        range
-                            |> sizeFromRange
-                            -- we want to remove this, so invert the size.
-                            |> invertSize
-                            |> Just
-                in
                 { index = cursor.index + 1
                 , items = cursor.items
-
-                -- we also want to eliminate all space till the next item,
-                -- so we record the end of this item, and wait
-                -- till we see the start of the next to add it to the push
                 , recordPushGapTillNextItem =
-                    Just range.end
+                    Nothing
                 , push =
-                    pushSize
+                    Nothing
                 }
 
             else
-                let
-                    pushAmount =
-                        case cursor.recordPushGapTillNextItem of
-                            Nothing ->
-                                cursor.push
-
-                            Just previousEnd ->
-                                let
-                                    range =
-                                        getFoundRange item
-                                in
-                                { start = previousEnd, end = range.start }
-                                    |> sizeFromRange
-                                    |> invertSize
-                                    |> (\additionalSize ->
-                                            Maybe.map (addSizes additionalSize) cursor.push
-                                       )
-                in
                 { index = cursor.index + 1
-                , items = push pushAmount item :: cursor.items
+                , items = item :: cursor.items
                 , recordPushGapTillNextItem = Nothing
-                , push = pushAmount
+                , push = Nothing
                 }
         )
         { index = 0
@@ -942,19 +819,6 @@ invertSize size =
     }
 
 
-expandFound : Push -> Found a -> Found a
-expandFound maybePush found =
-    case found of
-        Found rng a ->
-            Found
-                (expandRange maybePush rng)
-                a
-
-        Unexpected unexp ->
-            Unexpected
-                { unexp | range = expandRange maybePush unexp.range }
-
-
 {-| -}
 expandRange : Push -> Range -> Range
 expandRange maybePush range =
@@ -970,124 +834,6 @@ expandRange maybePush range =
                     , column = range.end.column
                     }
             }
-
-
-push : Push -> Found Description -> Found Description
-push maybePush found =
-    case maybePush of
-        Nothing ->
-            found
-
-        Just to ->
-            pushFound to found
-
-
-pushFound : Size -> Found Description -> Found Description
-pushFound to found =
-    case found of
-        Found range item ->
-            Found (pushRange to range) (pushDescription to item)
-
-        Unexpected unexpected ->
-            Unexpected { unexpected | range = pushRange to unexpected.range }
-
-
-pushFoundRange to found =
-    case found of
-        Found range item ->
-            Found (pushRange to range) item
-
-        Unexpected unexpected ->
-            Unexpected { unexpected | range = pushRange to unexpected.range }
-
-
-pushDescription to desc =
-    case desc of
-        DescribeNothing _ ->
-            desc
-
-        DescribeBlock details ->
-            DescribeBlock
-                { id = details.id
-                , name = details.name
-                , found = pushFound to details.found
-                }
-
-        Record details ->
-            Record
-                { id = details.id
-                , name = details.name
-                , found =
-                    details.found
-                        |> pushFoundRange to
-                        |> mapFound
-                            (List.map
-                                (\( field, foundField ) ->
-                                    ( field, pushFound to foundField )
-                                )
-                            )
-                }
-
-        Group many ->
-            Group
-                { id = many.id
-                , range = pushRange to many.range
-                , children = List.map (pushFound to) many.children
-                }
-
-        StartsWith details ->
-            StartsWith
-                { range = pushRange to details.range
-                , id = details.id
-                , first =
-                    pushDescription to details.first
-                , second =
-                    pushDescription to details.second
-                }
-
-        DescribeBoolean details ->
-            DescribeBoolean
-                { details
-                    | found = pushFoundRange to details.found
-                }
-
-        DescribeInteger details ->
-            DescribeInteger
-                { details
-                    | found = pushFoundRange to details.found
-                }
-
-        DescribeFloat details ->
-            DescribeFloat
-                { details
-                    | found = pushFoundRange to details.found
-                }
-
-        DescribeText txt ->
-            DescribeText
-                { txt
-                    | range = pushRange to txt.range
-                }
-
-        DescribeString id range str ->
-            DescribeString id (pushRange to range) str
-
-        DescribeItem item ->
-            DescribeItem
-                { item
-                    | range = pushRange to item.range
-                    , children =
-                        List.map
-                            (pushFound to)
-                            item.children
-                }
-
-        DescribeUnexpected id details ->
-            DescribeUnexpected id
-                { details
-                    | range =
-                        pushRange to details.range
-                }
 
 
 pushRange to range =
@@ -1112,72 +858,40 @@ addNewline pos =
 makeInsertAt :
     Id.Seed
     -> Int
-    -> Int
     ->
-        { children : List (Found Description)
+        { children : List Description
         , id : Id
-        , range : Range
         }
     -> Expectation
     ->
-        { push : Push
-        , updated : List (Found Description)
+        { updated : List Description
         , seed : Id.Seed
         }
-makeInsertAt seed index indentation many expectation =
+makeInsertAt seed index many expectation =
     many.children
-        |> List.foldl (insertHelper seed index indentation expectation)
+        |> List.foldl (insertHelper seed index expectation)
             { index = 0
             , seed = seed
-            , position = many.range.start
             , inserted = False
             , list = []
-            , push = Nothing
             }
         |> (\found ->
                 if found.inserted then
-                    { push =
-                        Maybe.map
-                            (\p ->
-                                { offset = p.offset
-                                , line = p.line
-                                }
-                            )
-                            found.push
-                    , updated = List.reverse found.list
+                    { updated = List.reverse found.list
                     , seed = found.seed
                     }
 
                 else
                     let
-                        newStart =
-                            { offset = found.position.offset + 2
-                            , line = found.position.line + 2
-                            , column = (indentation * 4) + 1
-                            }
-
                         created =
                             create
-                                { indent = indentation
-                                , base = newStart
-                                , expectation = expectation
+                                { expectation = expectation
                                 , seed = seed
                                 }
                     in
-                    { push =
-                        Just
-                            (sizeFromRange
-                                { start = found.position
-                                , end = created.pos
-                                }
-                            )
-                    , updated =
+                    { updated =
                         List.reverse
-                            (Found
-                                { start = newStart
-                                , end = created.pos
-                                }
-                                created.desc
+                            (created.desc
                                 :: found.list
                             )
                     , seed = created.seed
@@ -1185,81 +899,30 @@ makeInsertAt seed index indentation many expectation =
            )
 
 
-insertHelper seed index indentation expectation item found =
+insertHelper seed index expectation item found =
     if found.index == index then
         let
-            newStart =
-                if index == 0 then
-                    { offset = found.position.offset
-                    , line = found.position.line
-                    , column = (indentation * 4) + 1
-                    }
-
-                else
-                    { offset = found.position.offset + 2
-                    , line = found.position.line + 2
-                    , column = (indentation * 4) + 1
-                    }
-
             created =
                 create
-                    { indent = indentation
-                    , base = newStart
-                    , expectation = expectation
+                    { expectation = expectation
                     , seed = seed
                     }
-
-            newFound =
-                Found
-                    { start = newStart
-                    , end = created.pos
-                    }
-                    created.desc
-
-            newDescSize =
-                minusPosition created.pos newStart
-                    -- A block doesn't account for it's own newline,
-                    -- so we have to add one here.
-                    |> addNewline
-
-            pushAmount =
-                Just (addNewline newDescSize)
-
-            pushed =
-                push pushAmount item
         in
         { index = found.index + 1
         , seed = created.seed
         , inserted = True
         , list =
-            pushed
-                :: newFound
+            item
+                :: created.desc
                 :: found.list
-        , push = pushAmount
-        , position = .end (getFoundRange pushed)
         }
 
     else
-        let
-            pushed =
-                push found.push item
-        in
         { index = found.index + 1
         , seed = found.seed
         , inserted = found.inserted
-        , list = pushed :: found.list
-        , push = found.push
-        , position = .end (getFoundRange pushed)
+        , list = item :: found.list
         }
-
-
-getFoundRange found =
-    case found of
-        Found rng _ ->
-            rng
-
-        Unexpected unexp ->
-            unexp.range
 
 
 
@@ -1341,7 +1004,7 @@ onlyText txt =
                 SelectString str ->
                     [ Text emptyStyles str ]
 
-        Styled _ t ->
+        Styled t ->
             [ t ]
 
 
@@ -1365,23 +1028,18 @@ mergeStyles inlineEl gathered =
 attemptMerge : TextDescription -> TextDescription -> Maybe TextDescription
 attemptMerge first second =
     case ( first, second ) of
-        ( Styled rngOne (Text stylingOne strOne), Styled rngTwo (Text stylingTwo strTwo) ) ->
+        ( Styled (Text stylingOne strOne), Styled (Text stylingTwo strTwo) ) ->
             if stylingOne == stylingTwo then
-                Just (Styled (mergeRanges rngOne rngTwo) (Text stylingOne (strOne ++ strTwo)))
+                Just (Styled (Text stylingOne (strOne ++ strTwo)))
 
             else
                 Nothing
 
         ( InlineBlock one, InlineBlock two ) ->
             let
-                matchingAttributes foundOne foundTwo =
-                    case ( foundOne, foundTwo ) of
-                        ( Found _ attr1, Found _ attr2 ) ->
-                            List.map Tuple.first attr1
-                                == List.map Tuple.first attr2
-
-                        _ ->
-                            False
+                matchingAttributes attr1 attr2 =
+                    List.map Tuple.first attr1
+                        == List.map Tuple.first attr2
 
                 mergeMatchingRecords r1 r2 newKind =
                     case ( r1, r2 ) of
@@ -1394,7 +1052,6 @@ attemptMerge first second =
                                 Just
                                     (InlineBlock
                                         { kind = newKind
-                                        , range = mergeRanges one.range two.range
                                         , record = one.record
                                         }
                                     )
@@ -1555,8 +1212,8 @@ doTextEdit anchor focus editFn textDescs cursor =
 applyStyles : Restyle -> TextDescription -> TextDescription
 applyStyles styling inlineEl =
     case inlineEl of
-        Styled range txt ->
-            Styled range (applyStylesToText styling txt)
+        Styled txt ->
+            Styled (applyStylesToText styling txt)
 
         InlineBlock details ->
             case details.kind of
@@ -1602,16 +1259,13 @@ _Reminder_ Indexes are based on the size of the rendered text.
 splitAt : Offset -> TextDescription -> ( TextDescription, TextDescription )
 splitAt offset inlineEl =
     case inlineEl of
-        Styled range txt ->
+        Styled txt ->
             let
-                ( leftRange, rightRange ) =
-                    splitRange offset range
-
                 ( leftText, rightText ) =
                     splitText offset txt
             in
-            ( Styled leftRange leftText
-            , Styled rightRange rightText
+            ( Styled leftText
+            , Styled rightText
             )
 
         InlineBlock details ->
@@ -1619,15 +1273,12 @@ splitAt offset inlineEl =
                 EmptyAnnotation ->
                     -- This shoudn't happen because we're expecting the offset
                     -- to be within the range, and a token has a length of 0
-                    ( Styled emptyRange (Text emptyStyles "")
+                    ( Styled (Text emptyStyles "")
                     , InlineBlock details
                     )
 
                 SelectString str ->
                     let
-                        ( leftRange, rightRange ) =
-                            splitRange offset details.range
-
                         leftString =
                             String.slice 0 offset str
 
@@ -1636,13 +1287,11 @@ splitAt offset inlineEl =
                     in
                     ( InlineBlock
                         { details
-                            | range = leftRange
-                            , kind = SelectString leftString
+                            | kind = SelectString leftString
                         }
                     , InlineBlock
                         { details
-                            | range = rightRange
-                            , kind = SelectString rightString
+                            | kind = SelectString rightString
                         }
                     )
 
@@ -1674,19 +1323,14 @@ splitAt offset inlineEl =
                                 , left = Text styling txt :: cursor.left
                                 , right = cursor.right
                                 }
-
-                        ( leftRange, rightRange ) =
-                            splitRange offset details.range
                     in
                     ( InlineBlock
                         { details
-                            | range = leftRange
-                            , kind = SelectText (List.reverse left)
+                            | kind = SelectText (List.reverse left)
                         }
                     , InlineBlock
                         { details
-                            | range = rightRange
-                            , kind = SelectText (List.reverse right)
+                            | kind = SelectText (List.reverse right)
                         }
                     )
 

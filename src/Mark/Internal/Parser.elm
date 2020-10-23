@@ -16,7 +16,6 @@ module Mark.Internal.Parser exposing
     , newline
     , newlineWith
     , oneOf
-    , parseInlineFields
     , peek
     , raggedIndentedStringAbove
     , record
@@ -60,16 +59,19 @@ type alias Range =
     }
 
 
-int : Parser Context Problem (Found Int)
-int =
+int : Id -> Parser Context Problem Description
+int id =
     Parser.map
         (\result ->
             case result of
                 Ok details ->
-                    Found details.range details.value
+                    DescribeInteger
+                        { id = id
+                        , found = details.value
+                        }
 
                 Err details ->
-                    Unexpected
+                    DescribeUnexpected id
                         { range = details.range
                         , problem = Error.BadInt
                         }
@@ -109,16 +111,19 @@ integer =
 
 {-| Parses a float and must end with whitespace, not additional characters.
 -}
-float : Parser Context Problem (Found ( String, Float ))
-float =
+float : Id -> Parser Context Problem Description
+float id =
     Parser.map
         (\result ->
             case result of
                 Ok details ->
-                    Found details.range details.value
+                    DescribeFloat
+                        { id = id
+                        , found = details.value
+                        }
 
                 Err details ->
-                    Unexpected
+                    DescribeUnexpected id
                         { range = details.range
                         , problem = Error.BadFloat
                         }
@@ -380,8 +385,7 @@ getFailableBlock context seed (Block details) =
 
 -}
 failableBlocks id blocks =
-    Parser.succeed resetBlockStart
-        |= getPosition
+    Parser.succeed identity
         |. Parser.token (Parser.Token "|>" BlockStart)
         |. Parser.chompWhile (\c -> c == ' ')
         |= Parser.oneOf
@@ -464,7 +468,6 @@ styledText options context seed startingPos inheritedStyles =
             (\( pos, textNodes ) ->
                 DescribeText
                     { id = newId
-                    , range = pos
                     , text = textNodes
                     }
             )
@@ -589,8 +592,6 @@ styledTextLoop options context meaningful found =
                                     |> addToTextCursor
                                         (InlineBlock
                                             { kind = EmptyAnnotation
-                                            , range =
-                                                range
                                             , record = desc
                                             }
                                         )
@@ -645,28 +646,24 @@ styledTextLoop options context meaningful found =
                                                 -- no attributes attached, so we capture as a verbatim string
                                                 case selection of
                                                     SelectString str ->
-                                                        Styled range (Text (getCurrentStyle found) str)
+                                                        Styled (Text (getCurrentStyle found) str)
 
                                                     SelectText txt ->
-                                                        Styled range (Text (getCurrentStyle found) "")
+                                                        Styled (Text (getCurrentStyle found) "")
 
                                                     EmptyAnnotation ->
-                                                        Styled range (Text (getCurrentStyle found) "")
+                                                        Styled (Text (getCurrentStyle found) "")
 
                                             Just (Err errs) ->
                                                 -- TODO: some sort of real error happend
                                                 InlineBlock
                                                     { kind = selection
-                                                    , range =
-                                                        range
                                                     , record = DescribeNothing (Tuple.first (Id.step (Id.initialSeed "ignore")))
                                                     }
 
                                             Just (Ok foundFields) ->
                                                 InlineBlock
                                                     { kind = selection
-                                                    , range =
-                                                        range
                                                     , record = foundFields
                                                     }
                                     )
@@ -865,7 +862,7 @@ simpleStyledTextTill replacements cursor =
 
 toText textDesc =
     case textDesc of
-        Styled _ txt ->
+        Styled txt ->
             Just txt
 
         _ ->
@@ -958,9 +955,6 @@ changeStyle ((TextCursor cursor) as full) ( styleToken, additional ) =
         TextCursor
             { found =
                 Styled
-                    { start = cursor.start
-                    , end = end
-                    }
                     cursor.current
                     :: cursor.found
             , start = end
@@ -1067,9 +1061,6 @@ commitText ((TextCursor cursor) as existingTextCursor) =
             TextCursor
                 { found =
                     Styled
-                        { start = cursor.start
-                        , end = end
-                        }
                         cursor.current
                         :: cursor.found
                 , start = end
@@ -1425,6 +1416,12 @@ onlyAnnotation (Block details) =
 
 
 {-| -}
+
+
+
+-- manyOf : Int -> List (Block a) ->
+
+
 manyOf indentation blocks cursor =
     Parser.oneOf
         [ Parser.end End
@@ -1444,11 +1441,7 @@ manyOf indentation blocks cursor =
             -- First thing already has indentation accounted for.
             makeBlocksParser blocks cursor.seed
                 |> Parser.map
-                    (\foundBlock ->
-                        let
-                            ( _, newSeed ) =
-                                Id.step cursor.seed
-                        in
+                    (\( newSeed, foundBlock ) ->
                         Parser.Loop
                             { parsedSomething = True
                             , found = foundBlock :: cursor.found
@@ -1459,11 +1452,7 @@ manyOf indentation blocks cursor =
           else
             Parser.oneOf
                 [ Parser.succeed
-                    (\foundBlock ->
-                        let
-                            ( _, newSeed ) =
-                                Id.step cursor.seed
-                        in
+                    (\( newSeed, foundBlock ) ->
                         Parser.Loop
                             { parsedSomething = True
                             , found = foundBlock :: cursor.found
@@ -1504,21 +1493,20 @@ makeBlocksParser blocks seed =
     let
         gatherParsers2 myBlock details =
             let
-                -- We don't care about the new seed because that's handled by the loop.
-                ( _, parser ) =
+                ( newSeed, parser ) =
                     getParserNoBar ParseBlock seed myBlock
             in
             case blockName myBlock of
                 Just name ->
                     { blockNames = name :: details.blockNames
-                    , childBlocks = Parser.map Ok parser :: details.childBlocks
+                    , childBlocks = Parser.map (Tuple.pair newSeed) parser :: details.childBlocks
                     , childValues = details.childValues
                     }
 
                 Nothing ->
                     { blockNames = details.blockNames
                     , childBlocks = details.childBlocks
-                    , childValues = Parser.map Ok (withRange parser) :: details.childValues
+                    , childValues = Parser.map (Tuple.pair newSeed) parser :: details.childValues
                     }
 
         children =
@@ -1530,31 +1518,32 @@ makeBlocksParser blocks seed =
                 blocks
 
         blockParser =
-            Parser.map
-                (\( pos, result ) ->
-                    Result.map (\desc -> ( pos, desc )) result
-                )
-                (withRange
-                    (Parser.succeed (\pos block -> Result.map (resetBlockStart pos) block)
-                        |= getPosition
-                        |. Parser.token (Parser.Token "|>" BlockStart)
-                        |. Parser.chompWhile (\c -> c == ' ')
-                        |= Parser.oneOf
-                            (List.reverse children.childBlocks
-                                ++ [ withIndent
-                                        (\indentation ->
-                                            Parser.succeed
-                                                (\( pos, foundWord ) ->
-                                                    Err ( pos, Error.UnknownBlock children.blockNames )
-                                                )
-                                                |= withRange word
-                                                |. newline
-                                                |. Parser.loop "" (raggedIndentedStringAbove indentation)
+            Parser.succeed identity
+                |. Parser.token (Parser.Token "|>" BlockStart)
+                |. Parser.chompWhile (\c -> c == ' ')
+                |= Parser.oneOf
+                    (List.reverse children.childBlocks
+                        ++ [ withIndent
+                                (\indentation ->
+                                    Parser.succeed
+                                        (\( pos, foundWord ) ->
+                                            let
+                                                ( newId, newSeed ) =
+                                                    Id.step seed
+                                            in
+                                            ( newSeed
+                                            , DescribeUnexpected newId
+                                                { problem = Error.UnknownBlock children.blockNames
+                                                , range = pos
+                                                }
+                                            )
                                         )
-                                   ]
-                            )
+                                        |= withRange word
+                                        |. newline
+                                        |. Parser.loop "" (raggedIndentedStringAbove indentation)
+                                )
+                           ]
                     )
-                )
     in
     Parser.oneOf
         (blockParser
@@ -1587,7 +1576,7 @@ peek name parser =
 
 
 type alias TreeCursor =
-    { captured : List (Found Description)
+    { captured : List Description
 
     -- stack is reverse ordered.  Things a the front are closer to leaves in the tree
     , stack :
@@ -1610,7 +1599,7 @@ fullTree :
     ParseContext
     -> Block thing
     -> ( NestedIndex, TreeCursor )
-    -> Parser Context Problem (Parser.Step ( NestedIndex, TreeCursor ) (List (Found Description)))
+    -> Parser Context Problem (Parser.Step ( NestedIndex, TreeCursor ) (List Description))
 fullTree context item ( indentation, existing ) =
     Parser.oneOf
         [ Parser.succeed (\pos -> Parser.Done (finalize existing pos))
@@ -1636,7 +1625,7 @@ fullTree context item ( indentation, existing ) =
         ]
 
 
-finalize : TreeCursor -> Position -> List (Found Description)
+finalize : TreeCursor -> Position -> List Description
 finalize cursor end =
     case collapseAll end cursor.stack of
         Just last ->
@@ -1681,7 +1670,7 @@ parseIndentedItem :
     -> NestedIndex
     -> TreeCursor
     -> Int
-    -> Parser Context Problem (Parser.Step ( NestedIndex, TreeCursor ) (List (Found Description)))
+    -> Parser Context Problem (Parser.Step ( NestedIndex, TreeCursor ) (List Description))
 parseIndentedItem context block indentation existing newIndent =
     let
         iconRequired =
@@ -1764,11 +1753,7 @@ parseIndentedItem context block indentation existing newIndent =
                                                             DescribeItem
                                                                 { topDetails
                                                                     | content =
-                                                                        Found
-                                                                            { start = start
-                                                                            , end = itemEnd
-                                                                            }
-                                                                            item
+                                                                        item
                                                                             :: topDetails.content
                                                                 }
                                                       }
@@ -1793,11 +1778,7 @@ parseIndentedItem context block indentation existing newIndent =
                                             , { existing
                                                 | previouslyAdded = AddedItem
                                                 , captured =
-                                                    Found
-                                                        { start = top.start
-                                                        , end = itemEnd
-                                                        }
-                                                        top.description
+                                                    top.description
                                                         :: existing.captured
                                                 , stack =
                                                     [ { start = start
@@ -1805,14 +1786,8 @@ parseIndentedItem context block indentation existing newIndent =
                                                             DescribeItem
                                                                 { id = itemId
                                                                 , icon = icon
-                                                                , range =
-                                                                    { start = start, end = itemEnd }
                                                                 , content =
-                                                                    [ Found
-                                                                        { start = start
-                                                                        , end = itemEnd
-                                                                        }
-                                                                        item
+                                                                    [ item
                                                                     ]
                                                                 , children = []
                                                                 }
@@ -1834,14 +1809,8 @@ parseIndentedItem context block indentation existing newIndent =
                                                         DescribeItem
                                                             { id = itemId
                                                             , icon = icon
-                                                            , range =
-                                                                { start = start, end = itemEnd }
                                                             , content =
-                                                                [ Found
-                                                                    { start = start
-                                                                    , end = itemEnd
-                                                                    }
-                                                                    item
+                                                                [ item
                                                                 ]
                                                             , children = []
                                                             }
@@ -1868,11 +1837,7 @@ parseIndentedItem context block indentation existing newIndent =
                                                         DescribeItem
                                                             { topDetails
                                                                 | content =
-                                                                    Found
-                                                                        { start = start
-                                                                        , end = itemEnd
-                                                                        }
-                                                                        item
+                                                                    item
                                                                         :: topDetails.content
                                                             }
                                                     }
@@ -1903,10 +1868,8 @@ parseIndentedItem context block indentation existing newIndent =
                                                                 DescribeItem
                                                                     { id = itemId
                                                                     , icon = icon
-                                                                    , range =
-                                                                        { start = start, end = itemEnd }
                                                                     , content =
-                                                                        [ Found { start = start, end = itemEnd } item
+                                                                        [ item
                                                                         ]
                                                                     , children = []
                                                                     }
@@ -1939,10 +1902,8 @@ parseIndentedItem context block indentation existing newIndent =
                                                                 DescribeItem
                                                                     { id = itemId
                                                                     , icon = icon
-                                                                    , range =
-                                                                        { start = start, end = itemEnd }
                                                                     , content =
-                                                                        [ Found { start = start, end = itemEnd } item
+                                                                        [ item
                                                                         ]
                                                                     , children = []
                                                                     }
@@ -1952,11 +1913,7 @@ parseIndentedItem context block indentation existing newIndent =
                                                                         DescribeItem
                                                                             { penDetails
                                                                                 | children =
-                                                                                    Found
-                                                                                        { start = top.start
-                                                                                        , end = itemEnd
-                                                                                        }
-                                                                                        top.description
+                                                                                    top.description
                                                                                         :: penDetails.children
                                                                             }
                                                                    }
@@ -1996,11 +1953,7 @@ parseIndentedItem context block indentation existing newIndent =
                                                         DescribeItem
                                                             { topDetails
                                                                 | content =
-                                                                    Found
-                                                                        { start = start
-                                                                        , end = itemEnd
-                                                                        }
-                                                                        item
+                                                                    item
                                                                         :: topDetails.content
                                                             }
                                                     }
@@ -2020,10 +1973,8 @@ parseIndentedItem context block indentation existing newIndent =
                                                         DescribeItem
                                                             { id = itemId
                                                             , icon = icon
-                                                            , range =
-                                                                { start = start, end = itemEnd }
                                                             , content =
-                                                                [ Found { start = start, end = itemEnd } item
+                                                                [ item
                                                                 ]
                                                             , children = []
                                                             }
@@ -2065,10 +2016,8 @@ parseIndentedItem context block indentation existing newIndent =
                                 DescribeItem
                                     { id = itemId
                                     , icon = Maybe.withDefault Bullet maybeIcon
-                                    , range =
-                                        { start = start, end = itemEnd }
                                     , content =
-                                        [ Found { start = start, end = itemEnd } item
+                                        [ item
                                         ]
                                     , children = []
                                     }
@@ -2111,7 +2060,7 @@ collapse :
             { start : Position
             , description : Description
             }
-        , Maybe (Found Description)
+        , Maybe Description
         )
 collapse end level stack =
     if level == 0 then
@@ -2125,12 +2074,7 @@ collapse end level stack =
             top :: [] ->
                 ( []
                 , Just
-                    (Found
-                        { start = top.start
-                        , end = end
-                        }
-                        top.description
-                    )
+                    top.description
                 )
 
             top :: penultimate :: remain ->
@@ -2142,11 +2086,7 @@ collapse end level stack =
                                 DescribeItem
                                     { pen
                                         | children =
-                                            Found
-                                                { start = top.start
-                                                , end = end
-                                                }
-                                                top.description
+                                            top.description
                                                 :: pen.children
                                     }
                              , start = penultimate.start
@@ -2158,14 +2098,14 @@ collapse end level stack =
                         ( stack, Nothing )
 
 
-collapseAll : Position -> List { start : Position, description : Description } -> Maybe (Found Description)
+collapseAll : Position -> List { start : Position, description : Description } -> Maybe Description
 collapseAll end stack =
     case stack of
         [] ->
             Nothing
 
         top :: [] ->
-            Just (Found { start = top.start, end = end } top.description)
+            Just top.description
 
         top :: penultimate :: remain ->
             case penultimate.description of
@@ -2176,7 +2116,7 @@ collapseAll end stack =
                                 { item
                                     | children =
                                         item.children
-                                            ++ [ Found { start = top.start, end = end } top.description ]
+                                            ++ [ top.description ]
                                 }
                          , start = penultimate.start
                          }
@@ -2195,11 +2135,12 @@ type RecordType
 record :
     RecordType
     -> Id
+    -> Id
     -> String
     -> Expectation
-    -> List ( String, Parser Context Problem ( String, Found Description ) )
+    -> List ( String, Parser Context Problem ( String, Description ) )
     -> Parser Context Problem Description
-record recordType id recordName expectations fields =
+record recordType id failureId recordName expectations fields =
     Parser.succeed
         (\result ->
             case result of
@@ -2208,18 +2149,13 @@ record recordType id recordName expectations fields =
                         { id = id
                         , name = recordName
                         , found =
-                            Found details.range details.value
+                            details.value
                         }
 
                 Err err ->
-                    Record
-                        { id = id
-                        , name = recordName
-                        , found =
-                            Unexpected
-                                { range = Maybe.withDefault err.range (Tuple.first err.error)
-                                , problem = Tuple.second err.error
-                                }
+                    DescribeUnexpected id
+                        { range = Maybe.withDefault err.range (Tuple.first err.error)
+                        , problem = Tuple.second err.error
                         }
         )
         |= withRangeResult
@@ -2246,7 +2182,7 @@ record recordType id recordName expectations fields =
                                                     { remaining = fields
                                                     , found = Ok []
                                                     }
-                                                    (parseInlineFields recordName (List.map Tuple.first fields))
+                                                    (parseInlineFields failureId recordName (List.map Tuple.first fields))
 
                                             BlockRecord ->
                                                 Parser.withIndent (indentation + 4)
@@ -2254,7 +2190,7 @@ record recordType id recordName expectations fields =
                                                         { remaining = fields
                                                         , found = Ok []
                                                         }
-                                                        (parseFields recordName (List.map Tuple.first fields))
+                                                        (parseFields failureId recordName (List.map Tuple.first fields))
                                                     )
                                        )
                            )
@@ -2274,9 +2210,9 @@ backtrackCharacters chars range =
 
 type alias RecordFields =
     { remaining :
-        List ( String, Parser Context Problem ( String, Found Description ) )
+        List ( String, Parser Context Problem ( String, Description ) )
     , found :
-        Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))
+        Result ( Maybe Range, Error.Error ) (List ( String, Description ))
     }
 
 
@@ -2310,11 +2246,12 @@ indentationString n =
 
 {-| -}
 parseFields :
-    String
+    Id
+    -> String
     -> List String
     -> RecordFields
-    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))))
-parseFields recordName fieldNames fields =
+    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Description ))))
+parseFields failureId recordName fieldNames fields =
     case fields.remaining of
         [] ->
             withIndent
@@ -2353,7 +2290,7 @@ parseFields recordName fieldNames fields =
                     withIndent
                         (\indentation ->
                             Parser.oneOf
-                                [ indentOrSkip indentation (captureField found recordName fields fieldNames)
+                                [ indentOrSkip indentation (captureField failureId found recordName fields fieldNames)
                                     |> Parser.map
                                         (\indentedField ->
                                             case indentedField of
@@ -2456,12 +2393,13 @@ indentOrSkip indentation successParser =
 
 
 captureField :
-    List ( String, Found Description )
+    Id
+    -> List ( String, Description )
     -> String
     -> RecordFields
     -> List String
     -> Parser Context Problem (Parser.Step RecordFields a)
-captureField found recordName fields fieldNames =
+captureField failureId found recordName fields fieldNames =
     Parser.map
         (\maybeField ->
             case maybeField of
@@ -2469,28 +2407,17 @@ captureField found recordName fields fieldNames =
                     Parser.Loop fields
 
                 Just ( fieldPos, ( foundFieldname, fieldValue ) ) ->
-                    case fieldValue of
-                        Found _ _ ->
-                            Parser.Loop
-                                { found = Ok (( foundFieldname, resetFoundStart fieldPos fieldValue ) :: found)
-                                , remaining =
-                                    List.filter
-                                        (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
-                                        fields.remaining
-                                }
-
-                        Unexpected unexpected ->
-                            Parser.Loop
-                                { found = Err ( Just unexpected.range, unexpected.problem )
-                                , remaining =
-                                    List.filter
-                                        (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
-                                        fields.remaining
-                                }
+                    Parser.Loop
+                        { found = Ok (( foundFieldname, fieldValue ) :: found)
+                        , remaining =
+                            List.filter
+                                (\( fieldParserName, _ ) -> fieldParserName /= foundFieldname)
+                                fields.remaining
+                        }
         )
         (Parser.oneOf
             (List.map (Parser.map Just << parseField) fields.remaining
-                ++ [ Parser.map Just (unexpectedField recordName fieldNames)
+                ++ [ Parser.map Just (unexpectedField failureId recordName fieldNames)
                    ]
             )
         )
@@ -2498,7 +2425,7 @@ captureField found recordName fields fieldNames =
 
 {-| Parse a field name
 -}
-parseField : ( String, Parser Context Problem ( String, Found Description ) ) -> Parser Context Problem ( Position, ( String, Found Description ) )
+parseField : ( String, Parser Context Problem ( String, Description ) ) -> Parser Context Problem ( Position, ( String, Description ) )
 parseField ( name, contentParser ) =
     Parser.succeed Tuple.pair
         |= getPosition
@@ -2509,15 +2436,15 @@ parseField ( name, contentParser ) =
         |= contentParser
 
 
-unexpectedField : String -> List String -> Parser Context Problem ( Position, ( String, Found item ) )
-unexpectedField recordName options =
+unexpectedField : Id -> String -> List String -> Parser Context Problem ( Position, ( String, Description ) )
+unexpectedField id recordName options =
     withIndent
         (\indentation ->
             Parser.map
                 (\{ range, value } ->
                     ( range.start
                     , ( value
-                      , Unexpected
+                      , DescribeUnexpected id
                             { range = range
                             , problem =
                                 Error.UnexpectedField
@@ -2550,11 +2477,12 @@ unexpectedField recordName options =
 
 {-| -}
 parseInlineFields :
-    String
+    Id
+    -> String
     -> List String
     -> RecordFields
-    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Found Description ))))
-parseInlineFields recordName fieldNames fields =
+    -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Description ))))
+parseInlineFields failureId recordName fieldNames fields =
     let
         hasMore =
             case fields.remaining of
@@ -2597,7 +2525,7 @@ parseInlineFields recordName fieldNames fields =
                     Parser.oneOf
                         [ Parser.succeed identity
                             |. Parser.chompWhile (\c -> c == ' ')
-                            |= captureField found recordName fields fieldNames
+                            |= captureField failureId found recordName fields fieldNames
                             |. Parser.chompWhile (\c -> c == ' ')
                             |. (if hasMore then
                                     Parser.token (Parser.Token "," (Expecting ","))
@@ -2710,30 +2638,22 @@ descending base prev =
             )
 
 
-reverseTree : Found Description -> Found Description
-reverseTree found =
-    case found of
-        Found range nest ->
-            case nest of
-                DescribeItem item ->
-                    Found range
-                        (DescribeItem
-                            { id = item.id
-                            , icon = item.icon
-                            , range = item.range
-                            , content = List.reverse item.content
-                            , children =
-                                List.foldl
-                                    (\cap captured ->
-                                        reverseTree cap :: captured
-                                    )
-                                    []
-                                    item.children
-                            }
+reverseTree : Description -> Description
+reverseTree nest =
+    case nest of
+        DescribeItem item ->
+            DescribeItem
+                { id = item.id
+                , icon = item.icon
+                , content = List.reverse item.content
+                , children =
+                    List.foldl
+                        (\cap captured ->
+                            reverseTree cap :: captured
                         )
-
-                _ ->
-                    found
+                        []
+                        item.children
+                }
 
         _ ->
-            found
+            nest
