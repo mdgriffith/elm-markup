@@ -27,25 +27,24 @@ suite =
                 Expect.true
                     "Parsed successfully"
                     (isSuccessful parsed)
-        , only <|
-            test "Mark.toString creates a valid, pretty printed version of the source" <|
-                \_ ->
-                    let
-                        parsed =
-                            Mark.parse
-                                document
-                                elmOptimizeLevelTwoTODOTiny
+        , test "Mark.toString creates a valid, pretty printed version of the source" <|
+            \_ ->
+                let
+                    parsed =
+                        Mark.parse
+                            document
+                            elmOptimizeLevelTwoTODOTiny
 
-                        stringified =
-                            case parsed of
-                                Mark.Success success ->
-                                    Mark.toString success
+                    stringified =
+                        case parsed of
+                            Mark.Success success ->
+                                Mark.toString success
 
-                                _ ->
-                                    ""
-                    in
-                    Expect.equal
-                        """|> Page
+                            _ ->
+                                ""
+                in
+                Expect.equal
+                    """|> Page
     author = Matthew Griffith
     title = Elm Optimize TODO
     icon = ?
@@ -66,7 +65,7 @@ suite =
 -- {x} elm-animator
 -- {x} elm-ui
     -- {x} Might run afoul of elm-benchmark using style-elements"""
-                        stringified
+                    stringified
         , test "parse just metadata" <|
             \_ ->
                 let
@@ -335,7 +334,7 @@ viewText styles string =
 
 externalLink =
     Mark.annotation "link"
-        (\texts url ->
+        (\id texts url ->
             Html.a [ Attr.href url ]
                 (List.map (applyTuple viewText) texts)
         )
@@ -344,7 +343,7 @@ externalLink =
 
 link =
     Mark.annotation "to"
-        (\texts maybeId ->
+        (\identifier texts maybeId ->
             case maybeId of
                 Nothing ->
                     Html.span []
@@ -361,7 +360,7 @@ link =
 
 unlinked =
     Mark.annotation "unlinked"
-        (\texts ->
+        (\id texts ->
             Html.span []
                 (List.map (applyTuple viewText) texts)
         )
@@ -390,7 +389,7 @@ applyTuple fn ( one, two ) =
 
 droppedCapital =
     Mark.verbatim "drop"
-        (\str ->
+        (\id str ->
             let
                 drop =
                     String.left 1 str

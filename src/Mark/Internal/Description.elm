@@ -347,7 +347,6 @@ type Expectation
     | ExpectTextBlock (List InlineExpectation)
     | ExpectString String
     | ExpectTree Expectation
-    | ExpectNothing
 
 
 {-| -}
@@ -945,9 +944,6 @@ match description exp =
             case description of
                 DescribeNothing _ ->
                     case exp of
-                        ExpectNothing ->
-                            True
-
                         _ ->
                             False
 
@@ -1742,8 +1738,16 @@ newInlineToText new cursor =
                 InlineBlock
                     { kind = details.kind
                     , record =
-                        DescribeNothing (Tuple.first (Id.step (Id.initialSeed "none")))
+                        Record
+                            { id = Id.Id "" []
+                            , name = details.name
+                            , found =
+                                List.map
+                                    (Tuple.mapSecond (.desc << create (Id.initialSeed "")))
+                                    details.fields
+                            }
 
+                    -- DescribeNothing (Tuple.first (Id.step (Id.initialSeed "none")))
                     -- TODO: MAKE CONVERSION TO DESCRIPTION!
                     -- List.map expectationToAttr attrs
                     }
@@ -2326,9 +2330,6 @@ render (Document blocks) ((Parsed parsedDetails) as parsed) =
 
 humanReadableExpectations expect =
     case expect of
-        ExpectNothing ->
-            ""
-
         ExpectBlock name exp ->
             "|> " ++ name
 

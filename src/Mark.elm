@@ -1820,7 +1820,7 @@ and rendered in elm-land via:
 
     link =
         Mark.annotation "link"
-            (\styles url ->
+            (\id styles url ->
                 Html.a
                     [ Html.Attributes.href url ]
                     (List.map renderStyles styles)
@@ -1828,7 +1828,7 @@ and rendered in elm-land via:
             |> Mark.field "url" Mark.string
 
 -}
-annotation : String -> (List ( Styles, String ) -> result) -> Record result
+annotation : String -> (Id -> List ( Styles, String ) -> result) -> Record result
 annotation name view =
     Desc.ProtoRecord
         { name = name
@@ -1842,7 +1842,7 @@ annotation name view =
                             Outcome.Success
                                 { data =
                                     ( details.found
-                                    , view (selectedText selected)
+                                    , view (getId desc) (selectedText selected)
                                     )
                                 , attrs = []
                                 }
@@ -1892,7 +1892,7 @@ Let's say we wanted to embed an inline piece of elm code. We could write
 
     inlineElm =
         Mark.verbatim "elm"
-            (\str ->
+            (\id str ->
                 Html.span
                     [ Html.Attributes.class "elm-code" ]
                     [ Html.text str ]
@@ -1907,7 +1907,7 @@ Which would capture the following
     Let's take a look at `http://elm-lang.com`.
 
 -}
-verbatim : String -> (String -> result) -> Record result
+verbatim : String -> (Id -> String -> result) -> Record result
 verbatim name view =
     Desc.ProtoRecord
         { name = name
@@ -1920,7 +1920,7 @@ verbatim name view =
                         if details.name == name then
                             Outcome.Success
                                 { attrs = []
-                                , data = ( details.found, view (selectedString selected) )
+                                , data = ( details.found, view (getId desc) (selectedString selected) )
                                 }
 
                         else

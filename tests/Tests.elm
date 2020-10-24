@@ -34,10 +34,10 @@ inlines =
                     }
                 ]
             , inlines =
-                [ Mark.annotation "highlight" identity
-                , Mark.verbatim "verb" (List.singleton << Tuple.pair emptyStyles)
+                [ Mark.annotation "highlight" (\id txt -> txt)
+                , Mark.verbatim "verb" (\id str -> [ Tuple.pair emptyStyles str ])
                 , Mark.verbatim "withColor"
-                    (\str color ->
+                    (\id str color ->
                         [ ( emptyStyles, str ++ color )
                         ]
                     )
@@ -83,13 +83,13 @@ inlineMultipleVerbatim =
                     }
                 ]
             , inlines =
-                [ Mark.annotation "highlight" (always [ "high" ])
+                [ Mark.annotation "highlight" (\id txts -> [ "high" ])
                 , Mark.verbatim "verb"
-                    (\str ->
+                    (\id str ->
                         [ str ]
                     )
                 , Mark.verbatim "verb2"
-                    (\str one two ->
+                    (\id str one two ->
                         [ str, one, two ]
                     )
                     |> Mark.field "one" Mark.string
@@ -117,7 +117,7 @@ inlineOrder =
                 ]
             , inlines =
                 [ Mark.annotation "order"
-                    (\txt one two ->
+                    (\id txt one two ->
                         Just ( one, two )
                     )
                     |> Mark.field "one" Mark.string
