@@ -172,7 +172,7 @@ indentedString : Int -> String -> Parser Context Problem (Parser.Step String Str
 indentedString indentation found =
     Parser.oneOf
         -- First line, indentation is already handled by the block constructor.
-        [ Parser.succeed (Parser.Done found)
+        [ Parser.succeed (Parser.Done (String.trimRight found))
             |. Parser.end End
         , Parser.succeed
             (\extra ->
@@ -207,7 +207,7 @@ indentedString indentation found =
                     (Parser.chompWhile
                         (\c -> c /= '\n')
                     )
-        , Parser.succeed (Parser.Done found)
+        , Parser.succeed (Parser.Done (String.trimRight found))
         ]
 
 
@@ -609,17 +609,14 @@ styledTextLoop options context meaningful found =
         -- Parse Selection
         -- depending on selection type, capture attributes if applicable.
         , Parser.succeed
-            (\start ( maybeNewCursor, newInlineBlock ) end ->
+            (\start ( newCursor, newInlineBlock ) end ->
                 let
                     resetCursor curs =
-                        case maybeNewCursor of
-                            Nothing ->
+                        case newCursor of
+                            TextCursor newCursorDetails ->
                                 curs
-
-                            Just (TextCursor newCursor) ->
-                                curs
-                                    |> resetBalancedReplacements newCursor.balancedReplacements
-                                    |> resetTextWith newCursor.current
+                                    |> resetBalancedReplacements newCursorDetails.balancedReplacements
+                                    |> resetTextWith newCursorDetails.current
                 in
                 found
                     |> commitText
@@ -635,65 +632,14 @@ styledTextLoop options context meaningful found =
             )
             |= getPosition
             |= (textSelection options.replacements found
-                    |> Parser.andThen
-                        (\( maybeNewCursor, selection ) ->
-                            Parser.map
-                                (\maybeAttrResult ->
-                                    ( maybeNewCursor
-                                    , \range ->
-                                        case maybeAttrResult of
-                                            Nothing ->
-                                                -- no attributes attached, so we capture as a verbatim string
-                                                case selection of
-                                                    SelectString str ->
-                                                        Styled (Text (getCurrentStyle found) str)
-
-                                                    SelectText txt ->
-                                                        Styled (Text (getCurrentStyle found) "")
-
-                                                    EmptyAnnotation ->
-                                                        Styled (Text (getCurrentStyle found) "")
-
-                                            Just (Err errs) ->
-                                                -- TODO: some sort of real error happend
-                                                InlineBlock
-                                                    { kind = selection
-                                                    , record = DescribeNothing (Tuple.first (Id.step (Id.initialSeed "ignore")))
-                                                    }
-
-                                            Just (Ok foundFields) ->
-                                                InlineBlock
-                                                    { kind = selection
-                                                    , record = foundFields
-                                                    }
-                                    )
-                                )
-                                (Parser.oneOf
-                                    [ Parser.map Just
-                                        (attrContainer
-                                            (case selection of
-                                                SelectString _ ->
-                                                    List.filter onlyVerbatim options.inlines
-
-                                                SelectText _ ->
-                                                    List.filter onlyAnnotation options.inlines
-
-                                                EmptyAnnotation ->
-                                                    -- TODO: parse only normal records
-                                                    []
-                                            )
-                                        )
-                                    , Parser.succeed Nothing
-                                    ]
-                                )
-                        )
+                    |> Parser.andThen (parseInlineAttributes options)
                )
             |= getPosition
         , -- chomp until a meaningful character
           Parser.succeed
             (\( new, final ) ->
-                if new == "" || final then
-                    case commitText (addText (String.trimRight new) found) of
+                if new == "" || final || endingWithEmptyLine new found then
+                    case commitAndFinalizeText (addText new found) of
                         TextCursor txt ->
                             Parser.Done (List.reverse txt.found)
 
@@ -705,6 +651,80 @@ styledTextLoop options context meaningful found =
                     |> Parser.andThen (finalizeString context)
                )
         ]
+
+
+endingWithEmptyLine : String -> TextCursor -> Bool
+endingWithEmptyLine new (TextCursor cursor) =
+    if String.endsWith "\n" new && String.isEmpty (String.trim new) then
+        case cursor.current of
+            Text _ str ->
+                String.endsWith "\n" str
+
+    else
+        False
+
+
+parseInlineAttributes :
+    { inlines : List (Block a)
+    , replacements : List Replacement
+    }
+    -> ( TextCursor, InlineSelection )
+    -> Parser Context Problem ( TextCursor, Range -> TextDescription )
+parseInlineAttributes options ( cursor, selection ) =
+    Parser.map
+        (\maybeAttrResult ->
+            ( cursor
+            , \range ->
+                case maybeAttrResult of
+                    Nothing ->
+                        -- no attributes attached, so we capture as a verbatim string
+                        case selection of
+                            SelectString str ->
+                                Styled (Text (getCurrentStyle cursor) str)
+
+                            SelectText txt ->
+                                Styled (Text (getCurrentStyle cursor) "")
+
+                            EmptyAnnotation ->
+                                Styled (Text (getCurrentStyle cursor) "")
+
+                    Just (Err errs) ->
+                        InlineBlock
+                            { kind = selection
+                            , record =
+                                DescribeUnexpected (Id.Id "fail" [])
+                                    { problem =
+                                        Error.UnknownInline
+                                            (List.filterMap (inlineExample selection) options.inlines)
+                                    , range = range
+                                    }
+                            }
+
+                    Just (Ok foundFields) ->
+                        InlineBlock
+                            { kind = selection
+                            , record = foundFields
+                            }
+            )
+        )
+        (Parser.oneOf
+            [ Parser.map Just
+                (attrContainer
+                    (case selection of
+                        SelectString _ ->
+                            List.filter onlyVerbatim options.inlines
+
+                        SelectText _ ->
+                            List.filter onlyAnnotation options.inlines
+
+                        EmptyAnnotation ->
+                            -- TODO: parse only normal records
+                            []
+                    )
+                )
+            , Parser.succeed Nothing
+            ]
+        )
 
 
 finalizeString context str =
@@ -786,26 +806,26 @@ almostReplacement replacements existing =
     List.map captureChar ('1' :: allFirstChars)
 
 
+textSelection : List Replacement -> TextCursor -> Parser Context Problem ( TextCursor, InlineSelection )
 textSelection replacements found =
     Parser.oneOf
-        [ Parser.succeed (\str -> ( Nothing, SelectString str ))
+        [ Parser.succeed (\str -> ( found, SelectString str ))
             |. Parser.token (Parser.Token "`" (Expecting "`"))
             |= Parser.getChompedString
                 (Parser.chompWhile (\c -> c /= '`' && c /= '\n'))
             |. Parser.chompWhile (\c -> c == '`')
-        , Parser.succeed
-            (\( txts, cursor ) ->
-                ( Just cursor, SelectText txts )
-            )
+        , Parser.succeed identity
             |. Parser.token (Parser.Token "[" (Expecting "["))
-            |= Parser.loop
-                (textCursor (getCurrentStyles found)
-                    { offset = 0
-                    , line = 1
-                    , column = 1
-                    }
+            |= Parser.map (Tuple.mapSecond SelectText)
+                (Parser.loop
+                    (textCursor (getCurrentStyles found)
+                        { offset = 0
+                        , line = 1
+                        , column = 1
+                        }
+                    )
+                    (simpleStyledTextTill replacements)
                 )
-                (simpleStyledTextTill replacements)
             |. Parser.token (Parser.Token "]" (Expecting "]"))
         ]
 
@@ -813,7 +833,7 @@ textSelection replacements found =
 simpleStyledTextTill :
     List Replacement
     -> TextCursor
-    -> Parser Context Problem (Parser.Step TextCursor ( List Text, TextCursor ))
+    -> Parser Context Problem (Parser.Step TextCursor ( TextCursor, List Text ))
 simpleStyledTextTill replacements cursor =
     -- options meaningful untilStrings found =
     Parser.oneOf
@@ -849,8 +869,8 @@ simpleStyledTextTill replacements cursor =
                                 in
                                 Parser.succeed
                                     (Parser.Done
-                                        ( List.reverse <| List.filterMap toText txt.found
-                                        , TextCursor txt
+                                        ( TextCursor txt
+                                        , List.reverse <| List.filterMap toText txt.found
                                         )
                                     )
 
@@ -1067,6 +1087,17 @@ commitText ((TextCursor cursor) as existingTextCursor) =
                 , current = Text styles ""
                 , balancedReplacements = cursor.balancedReplacements
                 }
+
+
+{-| Commit text, but also trim all right whitespace as we know we don't need it.
+-}
+commitAndFinalizeText (TextCursor cursor) =
+    case cursor.current of
+        Text styles str ->
+            commitText
+                (TextCursor
+                    { cursor | current = Text styles (String.trimRight str) }
+                )
 
 
 getCurrentStyle (TextCursor cursor) =
@@ -1565,6 +1596,31 @@ peek name parser =
             let
                 _ =
                     Debug.log name
+                        (String.slice start.offset end.offset src)
+            in
+            val
+        )
+        |= getPosition
+        |= parser
+        |= getPosition
+        |= Parser.getSource
+
+
+peekLoop : String -> Parser c p (Parser.Step one two) -> Parser c p (Parser.Step one two)
+peekLoop name parser =
+    Parser.succeed
+        (\start val end src ->
+            let
+                loop =
+                    case val of
+                        Parser.Loop _ ->
+                            " -> loop"
+
+                        Parser.Done _ ->
+                            " -> done"
+
+                _ =
+                    Debug.log (name ++ loop)
                         (String.slice start.offset end.offset src)
             in
             val

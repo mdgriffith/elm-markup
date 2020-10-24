@@ -27,25 +27,46 @@ suite =
                 Expect.true
                     "Parsed successfully"
                     (isSuccessful parsed)
-        , test "Mark.toString matches the source material" <|
-            \_ ->
-                let
-                    parsed =
-                        Mark.parse
-                            document
-                            elmOptimizeLevelTwoTODOTiny
+        , only <|
+            test "Mark.toString creates a valid, pretty printed version of the source" <|
+                \_ ->
+                    let
+                        parsed =
+                            Mark.parse
+                                document
+                                elmOptimizeLevelTwoTODOTiny
 
-                    stringified =
-                        case parsed of
-                            Mark.Success success ->
-                                Mark.toString success
+                        stringified =
+                            case parsed of
+                                Mark.Success success ->
+                                    Mark.toString success
 
-                            _ ->
-                                ""
-                in
-                Expect.equal
-                    elmOptimizeLevelTwoTODOTiny
-                    stringified
+                                _ ->
+                                    ""
+                    in
+                    Expect.equal
+                        """|> Page
+    author = Matthew Griffith
+    title = Elm Optimize TODO
+    icon = ?
+    description = Imported
+
+|> H2
+    Benchmarks
+
+-- {x} elm-markdown
+
+    With some additional content.  What should go here?
+
+    And here?
+
+    -- {x} Here, but runs into a transformation error
+        What is happening?
+
+-- {x} elm-animator
+-- {x} elm-ui
+    -- {x} Might run afoul of elm-benchmark using style-elements"""
+                        stringified
         , test "parse just metadata" <|
             \_ ->
                 let
@@ -84,9 +105,7 @@ isSuccessful outcome =
 
 
 elmOptimizeLevelTwoTODOTiny =
-    """
-
-|> Page
+    """|> Page
     author = Matthew Griffith
     title = Elm Optimize TODO
     icon = ?
@@ -97,7 +116,21 @@ elmOptimizeLevelTwoTODOTiny =
     Benchmarks
 
 
--- other {x} Script to run benchmark via webdriver."""
+-- {x} elm-markdown
+    
+    With some additional content.  What should go here?
+
+    And here?
+
+    -- {x} Here, but runs into a transformation error
+        What is happening?
+-- {x} elm-animator
+-- {x} elm-ui
+
+    -- {x} Might run afoul of elm-benchmark using style-elements
+
+
+"""
 
 
 elmOptimizeLevelTwoTODO =

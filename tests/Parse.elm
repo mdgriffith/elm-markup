@@ -67,17 +67,16 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id = Id.Id "none" [ 0 ]
-                            , range = { end = { column = 28, line = 1, offset = 27 }, start = { column = 1, line = 1, offset = 0 } }
                             , text =
-                                [ Description.Styled { end = { column = 12, line = 1, offset = 11 }, start = { column = 1, line = 1, offset = 0 } }
+                                [ Description.Styled
                                     (Description.Text emptyStyles "Here is my ")
-                                , Description.Styled { end = { column = 18, line = 1, offset = 17 }, start = { column = 12, line = 1, offset = 11 } }
+                                , Description.Styled
                                     (Description.Text italic "styled")
-                                , Description.Styled { end = { column = 19, line = 1, offset = 18 }, start = { column = 18, line = 1, offset = 17 } }
+                                , Description.Styled
                                     (Description.Text emptyStyles " ")
-                                , Description.Styled { end = { column = 23, line = 1, offset = 22 }, start = { column = 19, line = 1, offset = 18 } }
+                                , Description.Styled
                                     (Description.Text bold "text")
-                                , Description.Styled { end = { column = 24, line = 1, offset = 23 }, start = { column = 23, line = 1, offset = 22 } }
+                                , Description.Styled
                                     (Description.Text emptyStyles ".")
                                 ]
                             }
@@ -101,38 +100,14 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id = Id.Id "none" [ 0 ]
-                            , range =
-                                { end = { column = 29, line = 1, offset = 28 }
-                                , start = { column = 1, line = 1, offset = 0 }
-                                }
                             , text =
                                 [ Description.Styled
-                                    { end =
-                                        { column = 12
-                                        , line = 1
-                                        , offset = 11
-                                        }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
                                     (Description.Text { bold = False, italic = False, strike = False } "Here is my ")
                                 , Description.Styled
-                                    { end =
-                                        { column = 21
-                                        , line = 1
-                                        , offset = 20
-                                        }
-                                    , start = { column = 12, line = 1, offset = 11 }
-                                    }
                                     (Description.Text { bold = False, italic = True, strike = False } "styled / ")
                                 , Description.Styled
-                                    { end = { column = 25, line = 1, offset = 24 }
-                                    , start = { column = 21, line = 1, offset = 20 }
-                                    }
                                     (Description.Text { bold = True, italic = True, strike = False } "text")
                                 , Description.Styled
-                                    { end = { column = 26, line = 1, offset = 25 }
-                                    , start = { column = 25, line = 1, offset = 24 }
-                                    }
                                     (Description.Text { bold = False, italic = True, strike = False } ".")
                                 ]
                             }
@@ -156,15 +131,8 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id = Id.Id "none" [ 0 ]
-                            , range =
-                                { end = { column = 14, line = 1, offset = 13 }
-                                , start = { column = 1, line = 1, offset = 0 }
-                                }
                             , text =
                                 [ Description.Styled
-                                    { end = { column = 7, line = 1, offset = 6 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
                                     (Description.Text
                                         { bold = False
                                         , italic = False
@@ -173,9 +141,6 @@ text =
                                         "Hello "
                                     )
                                 , Description.Styled
-                                    { end = { column = 12, line = 1, offset = 11 }
-                                    , start = { column = 7, line = 1, offset = 6 }
-                                    }
                                     (Description.Text
                                         { bold = True
                                         , italic = False
@@ -205,15 +170,8 @@ text =
                     (Ok
                         (Description.DescribeText
                             { id = Id.Id "none" [ 0 ]
-                            , range =
-                                { end = { column = 16, line = 1, offset = 15 }
-                                , start = { column = 1, line = 1, offset = 0 }
-                                }
                             , text =
                                 [ Description.Styled
-                                    { end = { column = 7, line = 1, offset = 6 }
-                                    , start = { column = 1, line = 1, offset = 0 }
-                                    }
                                     (Description.Text
                                         { bold = False
                                         , italic = False
@@ -222,9 +180,6 @@ text =
                                         "Hello "
                                     )
                                 , Description.Styled
-                                    { end = { column = 12, line = 1, offset = 11 }
-                                    , start = { column = 7, line = 1, offset = 6 }
-                                    }
                                     (Description.Text
                                         { bold = True
                                         , italic = True
@@ -403,32 +358,16 @@ basicWithInlineResult =
         (Description.DescribeText
             { id =
                 Id.Id "none" [ 0 ]
-            , range = { end = { column = 71, line = 1, offset = 70 }, start = { column = 1, line = 1, offset = 0 } }
             , text =
                 [ Description.Styled
-                    { end = { column = 12, line = 1, offset = 11 }
-                    , start = { column = 1, line = 1, offset = 0 }
-                    }
                     (Description.Text emptyStyles "Here is my ")
                 , Description.Styled
-                    { end = { column = 18, line = 1, offset = 17 }
-                    , start = { column = 12, line = 1, offset = 11 }
-                    }
                     (Description.Text italic "styled")
                 , Description.Styled
-                    { end = { column = 19, line = 1, offset = 18 }
-                    , start = { column = 18, line = 1, offset = 17 }
-                    }
                     (Description.Text emptyStyles " ")
                 , Description.Styled
-                    { end = { column = 23, line = 1, offset = 22 }
-                    , start = { column = 19, line = 1, offset = 18 }
-                    }
                     (Description.Text bold "text")
                 , Description.Styled
-                    { end = { column = 32, line = 1, offset = 31 }
-                    , start = { column = 23, line = 1, offset = 22 }
-                    }
                     (Description.Text emptyStyles ".  And a ")
 
                 -- , Description.InlineAnnotation
@@ -450,9 +389,6 @@ basicWithInlineResult =
                 --     , text = [ Description.Text emptyStyles "some text" ]
                 --     }
                 , Description.Styled
-                    { end = { column = 71, line = 1, offset = 70 }
-                    , start = { column = 70, line = 1, offset = 69 }
-                    }
                     (Description.Text emptyStyles ".")
                 ]
             }
@@ -463,37 +399,18 @@ styleTransfer =
     Description.DescribeText
         { id =
             Id.Id "none" [ 0 ]
-        , range = { end = { column = 73, line = 1, offset = 72 }, start = { column = 1, line = 1, offset = 0 } }
         , text =
             [ Description.Styled
-                { end = { column = 12, line = 1, offset = 11 }
-                , start = { column = 1, line = 1, offset = 0 }
-                }
                 (Description.Text emptyStyles "Here is my ")
             , Description.Styled
-                { end = { column = 18, line = 1, offset = 17 }
-                , start = { column = 12, line = 1, offset = 11 }
-                }
                 (Description.Text italic "styled")
             , Description.Styled
-                { end = { column = 19, line = 1, offset = 18 }
-                , start = { column = 18, line = 1, offset = 17 }
-                }
                 (Description.Text emptyStyles " ")
             , Description.Styled
-                { end = { column = 23, line = 1, offset = 22 }
-                , start = { column = 19, line = 1, offset = 18 }
-                }
                 (Description.Text bold "text")
             , Description.Styled
-                { end = { column = 26, line = 1, offset = 25 }
-                , start = { column = 23, line = 1, offset = 22 }
-                }
                 (Description.Text emptyStyles ".  ")
             , Description.Styled
-                { end = { column = 32, line = 1, offset = 31 }
-                , start = { column = 26, line = 1, offset = 25 }
-                }
                 (Description.Text italic "And a ")
 
             -- , Description.InlineAnnotation
@@ -515,9 +432,6 @@ styleTransfer =
             --     , text = [ Description.Text italic "some text" ]
             --     }
             , Description.Styled
-                { end = { column = 73, line = 1, offset = 72 }
-                , start = { column = 72, line = 1, offset = 71 }
-                }
                 (Description.Text emptyStyles ".")
             ]
         }

@@ -1661,7 +1661,7 @@ renderText :
         -> Styles
         -> String
         -> rendered
-    , inlines : List (Desc.AnnotationType -> Block rendered)
+    , inlines : List (InlineSelection -> Block rendered)
     }
     -> Description
     -> BlockOutcome (List rendered)
@@ -1694,7 +1694,7 @@ convertTextDescription :
             -> Styles
             -> String
             -> rendered
-        , inlines : List (Desc.AnnotationType -> Block rendered)
+        , inlines : List (InlineSelection -> Block rendered)
         }
     -> TextDescription
     -> Cursor (List rendered)
@@ -1728,47 +1728,55 @@ convertTextDescription id options comp cursor =
             }
 
         InlineBlock details ->
-            let
-                recordName =
-                    Desc.recordName details.record
-                        |> Maybe.withDefault ""
+            case details.record of
+                DescribeUnexpected unexpId unexpDetails ->
+                    { outcome =
+                        Desc.uncertain unexpDetails
+                    , lastOffset = cursor.lastOffset + blockLength
+                    }
 
-                matchInlineName name almostInlineBlock maybeFound =
-                    case maybeFound of
-                        Nothing ->
-                            let
-                                (Block inlineDetails) =
-                                    almostInlineBlock details.kind
-                            in
-                            if matchKinds details inlineDetails.kind then
-                                Just inlineDetails
+                _ ->
+                    let
+                        recordName =
+                            Desc.recordName details.record
+                                |> Maybe.withDefault ""
 
-                            else
+                        matchInlineName name almostInlineBlock maybeFound =
+                            case maybeFound of
+                                Nothing ->
+                                    let
+                                        (Block inlineDetails) =
+                                            almostInlineBlock details.kind
+                                    in
+                                    if matchKinds details inlineDetails.kind then
+                                        Just inlineDetails
+
+                                    else
+                                        Nothing
+
+                                _ ->
+                                    maybeFound
+
+                        maybeMatched =
+                            List.foldl
+                                (matchInlineName recordName)
                                 Nothing
+                                options.inlines
+                    in
+                    case maybeMatched of
+                        Nothing ->
+                            { outcome =
+                                Outcome.Failure NoMatch
+                            , lastOffset = cursor.lastOffset + blockLength
+                            }
 
-                        _ ->
-                            maybeFound
-
-                maybeMatched =
-                    List.foldl
-                        (matchInlineName recordName)
-                        Nothing
-                        options.inlines
-            in
-            case maybeMatched of
-                Nothing ->
-                    { outcome =
-                        Outcome.Failure NoMatch
-                    , lastOffset = cursor.lastOffset + blockLength
-                    }
-
-                Just matched ->
-                    { outcome =
-                        Desc.mergeWithAttrs (::)
-                            (matched.converter details.record)
-                            cursor.outcome
-                    , lastOffset = cursor.lastOffset + blockLength
-                    }
+                        Just matched ->
+                            { outcome =
+                                Desc.mergeWithAttrs (::)
+                                    (matched.converter details.record)
+                                    cursor.outcome
+                            , lastOffset = cursor.lastOffset + blockLength
+                            }
 
 
 matchKinds inline blockKind =
@@ -1817,7 +1825,7 @@ and rendered in elm-land via:
                     [ Html.Attributes.href url ]
                     (List.map renderStyles styles)
             )
-            |> Record.field "url" Mark.string
+            |> Mark.field "url" Mark.string
 
 -}
 annotation : String -> (List ( Styles, String ) -> result) -> Record result

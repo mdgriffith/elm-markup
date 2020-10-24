@@ -1,7 +1,7 @@
 module Mark.New exposing
     ( Block
     , string, int, float, bool
-    , block, record, many, tree, Tree(..), Icon(..)
+    , block, record, many
     , Text, text, unstyled, bold, italics, strike, Styles, styled
     , annotation, verbatim
     )
@@ -42,7 +42,9 @@ And then insert our newly made circle using `Mark.Edit.insertAt`.
 
 # Blocks
 
-@docs block, record, many, tree, Tree, Icon
+@docs block, record, many
+
+@docs bullet, numbered
 
 
 # Text
@@ -75,100 +77,72 @@ import Parser.Advanced as Parser exposing ((|.), (|=), Parser)
 
 {-| -}
 type alias Block =
-    Expectation
+    Desc.New
 
 
 {-| -}
 block : String -> Block -> Block
 block =
-    ExpectBlock
+    NewBlock
 
 
 {-| -}
 record : String -> List ( String, Block ) -> Block
 record =
-    ExpectRecord
+    NewRecord
 
 
 {-| -}
 int : Int -> Block
 int =
-    ExpectInteger
+    NewInteger
 
 
 {-| -}
 string : String -> Block
 string =
-    ExpectString
+    NewString
 
 
 {-| -}
 float : Float -> Block
 float =
-    ExpectFloat
+    NewFloat
 
 
 {-| -}
 bool : Bool -> Block
 bool =
-    ExpectBoolean
+    NewBoolean
 
 
 {-| -}
 many : List Block -> Block
 many =
-    ExpectManyOf
+    NewGroup
 
 
 {-| -}
-type Tree
-    = Tree
-        { icon : Icon
-        , content : List Block
-        , children : List Tree
-        }
+bullet : List Block -> Block
+bullet content =
+    NewItem Desc.Bullet content
 
 
 {-| -}
-type Icon
-    = Bullet
-    | Number
-
-
-{-| -}
-tree : List Tree -> Block
-tree treeContents =
-    -- ExpectTree
-    --     (List.map convertToTreeExpectation treeContents)
-    Debug.todo "Expectation were doing double duty as expectations and founds.  Let's fix that for real."
-
-
-
--- {-| This is necessary to make the types work out, but would be nice to remove.
--- -}
--- convertToTreeExpectation (Tree details) =
---     TreeExpectation
---         { icon =
---             case details.icon of
---                 Bullet ->
---                     Desc.Bullet
---                 Number ->
---                     Desc.AutoNumber 1
---         , content = details.content
---         , children =
---             List.map convertToTreeExpectation details.children
---         }
+numbered : Int -> List Block -> Block
+numbered i content =
+    NewItem (Desc.AutoNumber i) content
 
 
 {-| -}
 type alias Text =
-    InlineExpectation
+    NewInline
 
 
 {-| -}
 text : List Text -> Block
 text =
-    ExpectTextBlock
+    NewTextBlock
 
 
 {-|
@@ -189,7 +163,7 @@ annotation :
     }
     -> Text
 annotation config =
-    ExpectInlineBlock
+    NewInlineBlock
         { name = config.name
         , kind = SelectText (List.map toText config.text)
         , fields = config.fields
@@ -209,51 +183,11 @@ verbatim :
     }
     -> Text
 verbatim config =
-    ExpectInlineBlock
+    NewInlineBlock
         { name = config.name
         , kind = SelectString config.text
         , fields = config.fields
         }
-
-
-
--- {-| -}
--- type alias Attribute =
---     AttrExpectation
--- {-| -}
--- attrString : String -> String -> Attribute
--- attrString =
---     ExpectAttrString
--- {-| -}
--- attrFloat : String -> Float -> Attribute
--- attrFloat name fl =
---     ExpectAttrFloat name ( String.fromFloat fl, fl )
--- {-| -}
--- attrInt : String -> Int -> Attribute
--- attrInt =
---     ExpectAttrInt
--- {-| -}
--- annotation : List Text -> String -> List Attribute -> Text
--- annotation content name attrs =
---     ExpectAnnotation name attrs (List.filterMap onlyText content)
--- onlyText txt =
---     case txt of
---         ExpectText t ->
---             Just t
---         _ ->
---             Nothing
--- {-| -}
--- token : String -> List Attribute -> Text
--- token =
---     ExpectToken
--- {-| -}
--- verbatim : String -> Text
--- verbatim =
---     ExpectVerbatim "" []
--- {-| -}
--- verbatimWith : String -> String -> List Attribute -> Text
--- verbatimWith content name attributes =
---     ExpectVerbatim name attributes content
 
 
 {-| -}
@@ -267,28 +201,28 @@ type alias Styles =
 {-| -}
 styled : Styles -> String -> Text
 styled styling str =
-    ExpectText (Text styling str)
+    NewText (Text styling str)
 
 
 {-| -}
 italics : String -> Text
 italics str =
-    ExpectText (Text italicStyle str)
+    NewText (Text italicStyle str)
 
 
 {-| -}
 bold : String -> Text
 bold str =
-    ExpectText (Text boldStyle str)
+    NewText (Text boldStyle str)
 
 
 {-| -}
 strike : String -> Text
 strike str =
-    ExpectText (Text strikeStyle str)
+    NewText (Text strikeStyle str)
 
 
 {-| -}
 unstyled : String -> Text
 unstyled str =
-    ExpectText (Text emptyStyles str)
+    NewText (Text emptyStyles str)

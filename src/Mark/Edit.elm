@@ -198,29 +198,11 @@ editAtId id fn desc =
 replaceOption id original new desc =
     let
         created =
-            create
-                { expectation = new
-                , seed = original.currentSeed
-                }
+            create original.currentSeed new
     in
-    if Desc.match desc new then
-        let
-            newSize =
-                getSize created.desc
-
-            existingSize =
-                getSize desc
-        in
-        EditMade
-            (Just created.seed)
-            created.desc
-
-    else
-        ErrorMakingEdit
-            (Error.DocumentDoesntAllow
-                (Desc.humanReadableExpectations new)
-                [ Desc.descriptionToString desc ]
-            )
+    EditMade
+        (Just created.seed)
+        created.desc
 
 
 sizeToPush size =
@@ -330,7 +312,7 @@ update doc edit (Parsed original) =
                                                         wrapped =
                                                             case wrapper of
                                                                 Annotation name attrs ->
-                                                                    ExpectInlineBlock
+                                                                    NewInlineBlock
                                                                         { name = name
                                                                         , kind =
                                                                             SelectText
@@ -339,7 +321,7 @@ update doc edit (Parsed original) =
                                                                         }
 
                                                                 Verbatim name attrs ->
-                                                                    ExpectInlineBlock
+                                                                    NewInlineBlock
                                                                         { name = name
                                                                         , kind =
                                                                             SelectString
@@ -862,14 +844,14 @@ makeInsertAt :
         { children : List Description
         , id : Id
         }
-    -> Expectation
+    -> New
     ->
         { updated : List Description
         , seed : Id.Seed
         }
-makeInsertAt seed index many expectation =
+makeInsertAt seed index many new =
     many.children
-        |> List.foldl (insertHelper seed index expectation)
+        |> List.foldl (insertHelper seed index new)
             { index = 0
             , seed = seed
             , inserted = False
@@ -884,10 +866,7 @@ makeInsertAt seed index many expectation =
                 else
                     let
                         created =
-                            create
-                                { expectation = expectation
-                                , seed = seed
-                                }
+                            create seed new
                     in
                     { updated =
                         List.reverse
@@ -899,14 +878,11 @@ makeInsertAt seed index many expectation =
            )
 
 
-insertHelper seed index expectation item found =
+insertHelper seed index new item found =
     if found.index == index then
         let
             created =
-                create
-                    { expectation = expectation
-                    , seed = seed
-                    }
+                create seed new
         in
         { index = found.index + 1
         , seed = created.seed

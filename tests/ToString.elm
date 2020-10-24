@@ -26,63 +26,43 @@ bold =
     }
 
 
-create exp =
+create new =
     .desc <|
-        Description.create
-            { indent = 0
-            , base = startingPoint
-            , expectation = exp
-            , seed = Id.initialSeed "none"
-            }
+        Description.create (Id.initialSeed "none") new
 
 
-createIndented exp =
+createIndented new =
     .desc <|
-        Description.create
-            { indent = 1
-            , base = startingPoint
-            , expectation = exp
-            , seed = Id.initialSeed "none"
-            }
+        Description.create (Id.initialSeed "none") new
 
 
 record =
-    Description.ExpectRecord "Circle"
+    Description.NewRecord "Circle"
         [ ( "x"
-          , Description.ExpectInteger 5
+          , Description.NewInteger 5
           )
         , ( "y"
-          , Description.ExpectInteger 5
+          , Description.NewInteger 5
           )
         , ( "radius"
-          , Description.ExpectInteger 5
+          , Description.NewInteger 5
           )
         , ( "color"
-          , Description.ExpectOneOf
-                [ Description.ExpectString "Red"
-                , Description.ExpectString "Black"
-                ]
+          , Description.NewString "Red"
           )
         ]
 
 
 recordOfRecord =
-    Description.ExpectRecord "Record"
+    Description.NewRecord "Record"
         [ ( "record"
-          , Description.ExpectRecord "Record"
+          , Description.NewRecord "Record"
                 [ ( "value"
-                  , Description.ExpectInteger 5
+                  , Description.NewInteger 5
                   )
                 ]
           )
         ]
-
-
-recordOfRecordString =
-    """|> Record
-    record =
-        |> Record
-            value = 5"""
 
 
 recordString =
@@ -90,34 +70,27 @@ recordString =
     x = 5
     y = 5
     radius = 5
-    color = Red"""
-
-
-indentedRecordString =
-    """|> Circle
-        x = 5
-        y = 5
-        radius = 5
-        color = Red"""
+    color = Red
+"""
 
 
 manyHellos () =
     create
-        (Description.ExpectManyOf
-            [ Description.ExpectString "hello"
-            , Description.ExpectString "hello"
-            , Description.ExpectString "hello"
+        (Description.NewGroup
+            [ Description.NewString "hello"
+            , Description.NewString "hello"
+            , Description.NewString "hello"
             ]
         )
 
 
 manyIndentedHellos () =
     create
-        (Description.ExpectBlock "Indented" <|
-            Description.ExpectManyOf
-                [ Description.ExpectString "hello"
-                , Description.ExpectString "hello"
-                , Description.ExpectString "hello"
+        (Description.NewBlock "Indented" <|
+            Description.NewGroup
+                [ Description.NewString "hello"
+                , Description.NewString "hello"
+                , Description.NewString "hello"
                 ]
         )
 
@@ -130,21 +103,21 @@ suite =
                 \_ ->
                     Expect.equal
                         (Description.descriptionToString
-                            (create (Description.ExpectInteger 5))
+                            (create (Description.NewInteger 5))
                         )
                         "5"
             , test "String" <|
                 \_ ->
                     Expect.equal
                         (Description.descriptionToString
-                            (create (Description.ExpectString "hello"))
+                            (create (Description.NewString "hello"))
                         )
                         "hello"
             , test "Exact" <|
                 \_ ->
                     Expect.equal
                         (Description.descriptionToString
-                            (create (Description.ExpectString "hello"))
+                            (create (Description.NewString "hello"))
                         )
                         "hello"
             , test "Record" <|
@@ -160,7 +133,11 @@ suite =
                         (Description.descriptionToString
                             (create recordOfRecord)
                         )
-                        recordOfRecordString
+                        """|> Record
+    record =
+        |> Record
+            value = 5
+"""
             , test "Many Strings" <|
                 \_ ->
                     Expect.equal
@@ -180,36 +157,6 @@ suite =
     hello
 
     hello"""
-            ]
-        , describe "Indented - toString"
-            [ test "Integer" <|
-                \_ ->
-                    Expect.equal
-                        (Description.descriptionToString
-                            (create (Description.ExpectInteger 5))
-                        )
-                        "5"
-            , test "String" <|
-                \_ ->
-                    Expect.equal
-                        (Description.descriptionToString
-                            (create (Description.ExpectString "hello"))
-                        )
-                        "hello"
-            , test "Exact" <|
-                \_ ->
-                    Expect.equal
-                        (Description.descriptionToString
-                            (create (Description.ExpectString "hello"))
-                        )
-                        "hello"
-            , test "Record" <|
-                \_ ->
-                    Expect.equal
-                        (Description.descriptionToString
-                            (createIndented record)
-                        )
-                        indentedRecordString
             ]
         ]
 
@@ -253,11 +200,7 @@ threeHellos =
         , initialSeed = Id.initialSeed "none"
         , currentSeed = Id.initialSeed "none"
         , found =
-            Description.Found
-                { start = startingPoint
-                , end = startingPoint
-                }
-                (manyHellos ())
+            manyHellos ()
         , expected =
             Description.ExpectManyOf
                 [ Description.ExpectString "hello"
@@ -287,12 +230,7 @@ edits =
                                     , initialSeed = Id.initialSeed "none"
                                     , currentSeed = Id.initialSeed "none"
                                     , found =
-                                        Description.Found
-                                            { start = startingPoint
-                                            , end =
-                                                { column = 1, line = 50, offset = 200 }
-                                            }
-                                            (manyIndentedHellos ())
+                                        manyIndentedHellos ()
                                     , expected =
                                         Description.ExpectBlock "Indented" <|
                                             Description.ExpectManyOf

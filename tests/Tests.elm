@@ -624,7 +624,7 @@ suite =
                             [ Error.UnknownInline
                                 [ "[my]{highlight}"
                                 , "`my`{verb}"
-                                , "`my`{withColor| color = value }"
+                                , "`my`{withColor| color = A String }"
                                 ]
                             ]
                         )
@@ -675,7 +675,13 @@ Then some text.
                 \_ ->
                     Expect.equal
                         (toResult nested simpleNestedDoc)
-                        (Ok [ [ Indexed 0 [], Indexed 1 [], Indexed 2 [] ] ])
+                        (Ok
+                            [ [ Indexed 0 []
+                              , Indexed 1 []
+                              , Indexed 2 []
+                              ]
+                            ]
+                        )
             , test "Simple list parsing, maintains order" <|
                 \_ ->
                     Expect.equal
