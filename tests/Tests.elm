@@ -765,6 +765,7 @@ Then some text.
             [ test "Misspelled Block" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Turst
     Here's some text content
@@ -775,6 +776,7 @@ Then some text.
             , test "Extra line between name and value" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     Here's my extra line
@@ -788,6 +790,7 @@ Then some text.
             , test "Paragraph with single newline" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     Here's my extra line
@@ -802,6 +805,7 @@ Then some text.
             , test "Single OneOf" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Monospace
     Here's my extra line
@@ -812,6 +816,7 @@ Then some text.
             , test "Mulitline Text" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Monospace
     Here's my extra line
@@ -822,6 +827,7 @@ Then some text.
             , test "Incorrect Indentation" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
   Only two spaces(should be four)
@@ -833,6 +839,7 @@ Then some text.
             , test "Start with Metadata" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Meta
     one = Test data
@@ -862,6 +869,7 @@ Each with their own /styling/.
             , test "Extra Newline to Start" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """
 |> Meta
@@ -879,6 +887,7 @@ Each with their own /styling/.
             , test "Nested section blocks" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """
 |> Test
@@ -961,12 +970,14 @@ Finally, a sentence
             [ test "Missing fields should error" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
     two = world
 """
 
+                        expectedProblem : Error.Error
                         expectedProblem =
                             Error.MissingFields [ "three" ]
                     in
@@ -975,6 +986,7 @@ Finally, a sentence
             , test "Extra lines between fields" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
@@ -988,6 +1000,7 @@ Finally, a sentence
             , test "Commas allowed in record fields" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello, world
@@ -1001,6 +1014,7 @@ Finally, a sentence
             , test "Extra line between two fields" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
@@ -1013,6 +1027,7 @@ Finally, a sentence
             , test "Records with many text as a field" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
@@ -1032,6 +1047,7 @@ Finally, a sentence
             , test "Records with many text as a field (starting on same line)" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
@@ -1052,6 +1068,7 @@ Finally, a sentence
             , test "Records with multiple lines in field" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
@@ -1077,6 +1094,7 @@ Finally, a sentence
             , test "Incorrect Indentation" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
   one = hello
@@ -1088,6 +1106,7 @@ Finally, a sentence
             , test "Incorrect Indentation v2" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
@@ -1099,6 +1118,7 @@ Finally, a sentence
             , test "Additional fields should error" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
@@ -1120,6 +1140,7 @@ Finally, a sentence
             , test "Order of fields in source shouldn't matter" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = hello
@@ -1127,6 +1148,7 @@ Finally, a sentence
     three = !
                         """
 
+                        doc2 : String
                         doc2 =
                             """|> Test
     two = world
@@ -1156,6 +1178,7 @@ Finally, a sentence
             , test "Floats are parsed as expected" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = 15.25
@@ -1168,6 +1191,7 @@ Finally, a sentence
             , test "Ints are parsed as expected" <|
                 \_ ->
                     let
+                        doc1 : String
                         doc1 =
                             """|> Test
     one = 15

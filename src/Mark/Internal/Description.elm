@@ -630,6 +630,7 @@ strikeStyle =
 inlineExample : InlineSelection -> Block a -> Maybe String
 inlineExample selection (Block details) =
     let
+        selectionText : String
         selectionText =
             selectionContentToString selection
     in
@@ -696,6 +697,7 @@ selectionContentToString selection =
 inlineExampleHelper : InlineSelection -> Block a -> String
 inlineExampleHelper kind (Block block) =
     let
+        containerAsString : String
         containerAsString =
             case block.expect of
                 ExpectRecord name [] ->
@@ -714,6 +716,7 @@ inlineExampleHelper kind (Block block) =
         renderField ( name, contentBlock ) =
             name ++ " = " ++ "value"
 
+        selection : String
         selection =
             case kind of
                 EmptyAnnotation ->
@@ -1316,6 +1319,7 @@ writeGroup group cursor =
 
         top :: remain ->
             let
+                compact : Bool
                 compact =
                     case top of
                         DescribeItem _ ->
@@ -1324,6 +1328,7 @@ writeGroup group cursor =
                         _ ->
                             False
 
+                writtenDescription : PrintCursor
                 writtenDescription =
                     writeDescription top
                         { indent = cursor.indent
@@ -1426,6 +1431,7 @@ writeDescription description cursor =
                                     String.repeat (cursor.indent * 4) " " ++ s
                             )
 
+                numLines : Int
                 numLines =
                     List.length indented
             in
@@ -1490,6 +1496,7 @@ textDescriptionToString existingStyles txt =
                         ++ " = "
                         ++ descriptionToString desc
 
+                inlineRecord : String
                 inlineRecord =
                     case details.record of
                         Record recordDetails ->
@@ -1568,6 +1575,7 @@ gatherText (Text styles txt) ( existingStyles, existingStr ) =
 -}
 startingCharacters one two =
     let
+        boldClosing : String
         boldClosing =
             if one.bold && not two.bold then
                 "*"
@@ -1575,6 +1583,7 @@ startingCharacters one two =
             else
                 ""
 
+        boldOpening : String
         boldOpening =
             if not one.bold && two.bold then
                 "*"
@@ -1582,6 +1591,7 @@ startingCharacters one two =
             else
                 ""
 
+        italicClosing : String
         italicClosing =
             if one.italic && not two.italic then
                 "/"
@@ -1589,6 +1599,7 @@ startingCharacters one two =
             else
                 ""
 
+        italicOpening : String
         italicOpening =
             if not one.italic && two.italic then
                 "/"
@@ -1596,6 +1607,7 @@ startingCharacters one two =
             else
                 ""
 
+        strikeClosing : String
         strikeClosing =
             if one.strike && not two.strike then
                 "~"
@@ -1603,6 +1615,7 @@ startingCharacters one two =
             else
                 ""
 
+        strikeOpening : String
         strikeOpening =
             if not one.strike && two.strike then
                 "~"
@@ -1633,6 +1646,7 @@ writeField ( name, description ) cursor =
                 |> indent
                 |> writeDescription description
 
+        lines : Int
         lines =
             List.length (String.lines writtenDescription.printed)
     in
@@ -1683,6 +1697,7 @@ createInline current =
 
 numberStyleChanges one two =
     let
+        boldNum : number
         boldNum =
             if one.bold /= two.bold then
                 1
@@ -1690,6 +1705,7 @@ numberStyleChanges one two =
             else
                 0
 
+        italicNum : number
         italicNum =
             if one.italic /= two.italic then
                 1
@@ -1697,6 +1713,7 @@ numberStyleChanges one two =
             else
                 0
 
+        strikeNum : number
         strikeNum =
             if one.strike /= two.strike then
                 1
@@ -1769,6 +1786,7 @@ create seed new =
                 ( blockId, newSeed ) =
                     Id.step seed
 
+                created : { desc : Description, seed : Seed }
                 created =
                     create newSeed child
             in
@@ -1810,6 +1828,7 @@ create seed new =
                 ( parentId, startSeed ) =
                     Id.step seed
 
+                childSeed : Seed
                 childSeed =
                     Id.indent startSeed
 
@@ -1817,6 +1836,7 @@ create seed new =
                     List.foldl
                         (\item ( currentSeed, result ) ->
                             let
+                                created : { desc : Description, seed : Seed }
                                 created =
                                     create currentSeed item
                             in
@@ -1844,6 +1864,7 @@ create seed new =
                 ( parentId, startSeed ) =
                     Id.step seed
 
+                childSeed : Seed
                 childSeed =
                     Id.indent startSeed
 
@@ -1851,6 +1872,7 @@ create seed new =
                     List.foldl
                         (\item ( currentSeed, result ) ->
                             let
+                                created : { desc : Description, seed : Seed }
                                 created =
                                     create currentSeed item
                             in
@@ -1875,9 +1897,11 @@ create seed new =
                 ( parentId, newSeed ) =
                     Id.step seed
 
+                first : { desc : Description, seed : Seed }
                 first =
                     create newSeed one
 
+                second : { desc : Description, seed : Seed }
                 second =
                     create first.seed two
             in
@@ -1942,6 +1966,7 @@ create seed new =
 
         NewTextBlock nodes ->
             let
+                newText : List TextDescription
                 newText =
                     createInline nodes
 
@@ -1970,6 +1995,7 @@ createField :
     -> CreateFieldCursor
 createField ( name, new ) current =
     let
+        created : { desc : Description, seed : Seed }
         created =
             create current.seed new
     in

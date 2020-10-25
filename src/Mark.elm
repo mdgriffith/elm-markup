@@ -361,6 +361,7 @@ createDocument toDocumentId meta child =
                 |> Parser.andThen
                     (\src ->
                         let
+                            docId : String
                             docId =
                                 case Parser.run meta src of
                                     Ok (Ok m) ->
@@ -371,6 +372,7 @@ createDocument toDocumentId meta child =
                                         -- it means the metadata is invalid
                                         ""
 
+                            seed : Seed
                             seed =
                                 Id.initialSeed docId
 
@@ -656,6 +658,7 @@ withId fn (Block details) =
         , converter =
             \desc ->
                 let
+                    id : Id
                     id =
                         Desc.getId desc
                 in
@@ -681,6 +684,7 @@ withAttr fn (Block details) =
         , converter =
             \desc ->
                 let
+                    id : Id
                     id =
                         Desc.getId desc
                 in
@@ -1024,6 +1028,7 @@ manyOf blocks =
                     ( parentId, newSeed ) =
                         Id.step seed
 
+                    indentedSeed : Seed
                     indentedSeed =
                         Id.indent seed
                 in
@@ -1189,6 +1194,7 @@ tree view contentBlock =
         blockExpectation =
             getBlockExpectation contentBlock
 
+        expectation : Expectation
         expectation =
             ExpectTree blockExpectation
     in
@@ -1258,6 +1264,7 @@ tree view contentBlock =
                     ( newId, newSeed ) =
                         Id.step seed
 
+                    indentedSeed : Seed
                     indentedSeed =
                         Id.indent seed
                 in
@@ -1584,6 +1591,7 @@ textWith options =
 
 recordToInlineBlock (Desc.ProtoRecord details) annotationType =
     let
+        expectations : Expectation
         expectations =
             Desc.ExpectRecord details.name
                 details.expectations
@@ -1698,6 +1706,7 @@ convertTextDescription :
     -> Cursor (List rendered)
 convertTextDescription id options comp cursor =
     let
+        blockLength : Int
         blockLength =
             length comp
     in
@@ -2348,6 +2357,7 @@ matchField targetName targetBlock ( name, description ) existing =
 toBlock : Record a -> Block a
 toBlock (Desc.ProtoRecord details) =
     let
+        expectations : Expectation
         expectations =
             Desc.ExpectRecord details.name
                 details.expectations
@@ -2391,7 +2401,7 @@ toBlock (Desc.ProtoRecord details) =
                     ( failureId, finalSeed ) =
                         Id.step newSeed
                 in
-                ( finalSeed
+                ( parentSeed
                 , Parse.record Parse.BlockRecord
                     parentId
                     failureId

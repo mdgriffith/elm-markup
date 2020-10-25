@@ -7,6 +7,7 @@ import Fuzz exposing (Fuzzer, int, list, string)
 import Html exposing (Html)
 import Html.Attributes as Attr
 import Mark
+import Mark.Error
 import Mark.Internal.Description as Description
 import Mark.Internal.Id as Id
 import Mark.Internal.Parser
@@ -19,6 +20,7 @@ suite =
         [ test "basic" <|
             \_ ->
                 let
+                    parsed : Mark.Outcome (List Mark.Error.Error) (Mark.Partial Mark.Parsed) Mark.Parsed
                     parsed =
                         Mark.parse
                             document
@@ -30,11 +32,13 @@ suite =
         , test "Mark.toString creates a valid, pretty printed version of the source" <|
             \_ ->
                 let
+                    parsed : Mark.Outcome (List Mark.Error.Error) (Mark.Partial Mark.Parsed) Mark.Parsed
                     parsed =
                         Mark.parse
                             document
                             elmOptimizeLevelTwoTODOTiny
 
+                    stringified : String
                     stringified =
                         case parsed of
                             Mark.Success success ->
@@ -391,9 +395,11 @@ droppedCapital =
     Mark.verbatim "drop"
         (\id str ->
             let
+                drop : String
                 drop =
                     String.left 1 str
 
+                lede : String
                 lede =
                     String.dropLeft 1 str
             in
@@ -523,6 +529,7 @@ It's easiest to render them using two separate functions: renderList and renderI
 renderList : Mark.Enumerated (Html msg) -> Html msg
 renderList (Mark.Enumerated enum) =
     let
+        group : List (Html.Attribute msg) -> List (Html msg) -> Html msg
         group =
             case enum.icon of
                 Mark.Bullet ->

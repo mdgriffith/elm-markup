@@ -6,6 +6,7 @@ import Expect exposing (Expectation)
 import Fuzz exposing (Fuzzer, int, list, string)
 import Mark
 import Mark.Edit
+import Mark.Error
 import Mark.Internal.Description as Description
 import Mark.Internal.Id as Id
 import Mark.New
@@ -217,6 +218,7 @@ edits =
             [ test "Indented - Insert at 2" <|
                 \_ ->
                     let
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             Mark.Edit.update
                                 manyHelloDoc
@@ -254,6 +256,7 @@ edits =
             , test "Insert at 2" <|
                 \_ ->
                     let
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
@@ -269,6 +272,7 @@ edits =
             , test "Insert at 1" <|
                 \_ ->
                     let
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
@@ -284,6 +288,7 @@ edits =
             , test "Insert at 0" <|
                 \_ ->
                     let
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
@@ -299,6 +304,7 @@ edits =
             , test "Insert at 3" <|
                 \_ ->
                     let
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
@@ -314,6 +320,7 @@ edits =
             , test "Delete at 0" <|
                 \_ ->
                     let
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
@@ -325,6 +332,7 @@ edits =
             , test "Delete at 1" <|
                 \_ ->
                     let
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
@@ -336,6 +344,7 @@ edits =
             , test "Delete at 2" <|
                 \_ ->
                     let
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
@@ -349,9 +358,11 @@ edits =
             [ test "Add Bold" <|
                 \_ ->
                     let
+                        parseOutcome : Mark.Outcome (List Mark.Error.Error) (Mark.Partial Mark.Parsed) Mark.Parsed
                         parseOutcome =
                             Mark.parse styledText "Hello World"
 
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             case parseOutcome of
                                 Mark.Success parsed ->
@@ -373,9 +384,11 @@ edits =
             , test "Clear Bold" <|
                 \_ ->
                     let
+                        parseOutcome : Mark.Outcome (List Mark.Error.Error) (Mark.Partial Mark.Parsed) Mark.Parsed
                         parseOutcome =
                             Mark.parse styledText "Hello *World*"
 
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             case parseOutcome of
                                 Mark.Success parsed ->
@@ -400,9 +413,11 @@ edits =
             , test "Clearing styles with over-sized ranges still works as you'd expect" <|
                 \_ ->
                     let
+                        parseOutcome : Mark.Outcome (List Mark.Error.Error) (Mark.Partial Mark.Parsed) Mark.Parsed
                         parseOutcome =
                             Mark.parse styledText "Hello *World*"
 
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             case parseOutcome of
                                 Mark.Success parsed ->
@@ -427,9 +442,11 @@ edits =
             , test "Add all styles" <|
                 \_ ->
                     let
+                        parseOutcome : Mark.Outcome (List Mark.Error.Error) (Mark.Partial Mark.Parsed) Mark.Parsed
                         parseOutcome =
                             Mark.parse styledText "Hello World"
 
+                        new : Result (List Mark.Error.Error) Description.Parsed
                         new =
                             case parseOutcome of
                                 Mark.Success parsed ->

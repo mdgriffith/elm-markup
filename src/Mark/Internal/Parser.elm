@@ -458,6 +458,7 @@ styledText options context seed startingPos inheritedStyles =
         meaningful =
             '1' :: '\\' :: '\n' :: stylingChars ++ replacementStartingChars options.replacements
 
+        indentedSeed : Seed
         indentedSeed =
             Id.indent seed
 
@@ -932,6 +933,7 @@ attrContainer (TextCursor cursor) recordBlocks =
                                 ( newSeed, recordParser ) =
                                     getParser ParseInline cursor.seed rec
 
+                                newCursor : TextCursor
                                 newCursor =
                                     TextCursor { cursor | seed = newSeed }
                             in
@@ -1072,6 +1074,7 @@ getStyles (Text styles _) =
 
 measure start textStr =
     let
+        len : Int
         len =
             String.length textStr
     in
@@ -1178,6 +1181,7 @@ replace replacements existing =
 
                 Balanced range ->
                     let
+                        balanceCache : List String
                         balanceCache =
                             case existing of
                                 TextCursor cursor ->
@@ -1361,9 +1365,11 @@ sliceRange range source =
     else
         -- multiline
         let
+            snippet : String
             snippet =
                 String.slice range.start.offset range.end.offset source
 
+            indented : String
             indented =
                 String.slice (range.start.offset + 1 - range.start.column)
                     range.start.offset
@@ -1626,6 +1632,7 @@ peekLoop name parser =
     Parser.succeed
         (\start val end src ->
             let
+                loop : String
                 loop =
                     case val of
                         Parser.Loop _ ->
@@ -1744,6 +1751,7 @@ parseIndentedItem :
     -> Parser Context Problem (Parser.Step ( NestedIndex, TreeCursor ) (List Description))
 parseIndentedItem context block indentation existing newIndent =
     let
+        iconRequired : Bool
         iconRequired =
             -- icon required if the indentation is at the base
             (indentation.base == newIndent)
@@ -1753,6 +1761,7 @@ parseIndentedItem context block indentation existing newIndent =
                         && topHasChildren existing.stack
                    )
 
+        newSeed : Seed
         newSeed =
             if newIndent > indentation.prev then
                 Id.indent indentation.seed
@@ -2066,6 +2075,7 @@ parseIndentedItem context block indentation existing newIndent =
                 -- multiple dedentations are allowed,
                 -- so we need to see how far we need to collapse
                 let
+                    level : Int
                     level =
                         case existing.previouslyAdded of
                             AddedItem ->
@@ -2558,6 +2568,7 @@ parseInlineFields :
     -> Parser Context Problem (Parser.Step RecordFields (Result ( Maybe Range, Error.Error ) (List ( String, Description ))))
 parseInlineFields failureId recordName fieldNames fields =
     let
+        hasMore : Bool
         hasMore =
             case fields.remaining of
                 [] ->

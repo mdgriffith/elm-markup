@@ -197,6 +197,7 @@ editAtId id fn desc =
 -}
 replaceOption id original new desc =
     let
+        created : { desc : Description, seed : Seed }
         created =
             create original.currentSeed new
     in
@@ -250,6 +251,7 @@ update doc edit (Parsed original) =
                             case desc of
                                 Group many ->
                                     let
+                                        inserted : { updated : List Description, seed : Seed }
                                         inserted =
                                             makeInsertAt
                                                 original.currentSeed
@@ -309,6 +311,7 @@ update doc edit (Parsed original) =
                                                 end
                                                 (\els ->
                                                     let
+                                                        wrapped : NewInline
                                                         wrapped =
                                                             case wrapper of
                                                                 Annotation name attrs ->
@@ -332,6 +335,7 @@ update doc edit (Parsed original) =
                                                                         , fields = attrs
                                                                         }
 
+                                                        newText : List TextDescription
                                                         newText =
                                                             createInline
                                                                 [ wrapped ]
@@ -394,6 +398,7 @@ prepareResults doc original edited =
 
         EditMade maybeSeed newDescription ->
             let
+                newParsed : Parsed
                 newParsed =
                     Parsed
                         { original
@@ -862,6 +867,7 @@ makeInsertAt seed index many new =
 
                 else
                     let
+                        created : { desc : Description, seed : Seed }
                         created =
                             create seed new
                     in
@@ -878,6 +884,7 @@ makeInsertAt seed index many new =
 insertHelper seed index new item found =
     if found.index == index then
         let
+            created : { desc : Description, seed : Seed }
             created =
                 create seed new
         in
@@ -1095,6 +1102,7 @@ doTextEdit anchor focus editFn textDescs cursor =
                 end =
                     max anchor focus
 
+                len : Int
                 len =
                     length current
             in
@@ -1252,9 +1260,11 @@ splitAt offset inlineEl =
 
                 SelectString str ->
                     let
+                        leftString : String
                         leftString =
                             String.slice 0 offset str
 
+                        rightString : String
                         rightString =
                             String.slice offset -1 str
                     in
