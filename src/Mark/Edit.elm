@@ -384,6 +384,21 @@ update doc edit (Parsed original) =
                                         Nothing
                                         (DescribeText { details | text = newTexts })
 
+                                DescribeString strId str ->
+                                    case newTextEls of
+                                        [] ->
+                                            -- deletes work on strings too
+                                            let
+                                                new =
+                                                    String.left start str ++ String.dropLeft end str
+                                            in
+                                            EditMade
+                                                Nothing
+                                                (DescribeString strId new)
+
+                                        _ ->
+                                            ErrorMakingEdit Error.InvalidTextEdit
+
                                 _ ->
                                     ErrorMakingEdit Error.InvalidTextEdit
                         )
