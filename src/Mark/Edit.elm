@@ -1,7 +1,7 @@
 module Mark.Edit exposing
     ( update, Id, Edit
     , Offset
-    , insertText, deleteText
+    , insertString, insertText, deleteText
     , Styles, restyle, addStyles, removeStyles
     , annotate, verbatim
     , replace, delete, insertAt
@@ -29,7 +29,7 @@ Here are edits you can make against [`Mark.text`](Mark#text) and [`Mark.textWith
 
 @docs Offset
 
-@docs insertText, deleteText
+@docs insertString, insertText, insertString, deleteText
 
 @docs Styles, restyle, addStyles, removeStyles
 
@@ -86,6 +86,7 @@ type Edit
       -- Text Editing
     | StyleText Id Offset Offset Restyle
     | Annotate Id Offset Offset Annotation
+    | ReplaceString Id Offset Offset String
     | ReplaceSelection Id Offset Offset (List Mark.New.Text)
 
 
@@ -101,6 +102,13 @@ deleteText id start end =
         start
         end
         []
+
+
+{-| This will work on both styled text and string datatypes.
+-}
+insertString : Id -> Offset -> String -> Edit
+insertString id at str =
+    ReplaceString id at at str
 
 
 {-| -}
@@ -375,6 +383,41 @@ update doc edit (Parsed original) =
                                     EditMade
                                         Nothing
                                         (DescribeText { details | text = newTexts })
+
+                                _ ->
+                                    ErrorMakingEdit Error.InvalidTextEdit
+                        )
+
+                ReplaceString id start end newString ->
+                    editAtId id
+                        (\desc ->
+                            case desc of
+                                DescribeText details ->
+                                    let
+                                        makeNewText selectedEls =
+                                            createInline [ NewText (Text emptyStyles newString) ]
+
+                                        newTexts =
+                                            doTextEdit
+                                                start
+                                                end
+                                                makeNewText
+                                                details.text
+                                                emptySelectionEdit
+                                                |> List.foldl mergeStyles []
+                                    in
+                                    EditMade
+                                        Nothing
+                                        (DescribeText { details | text = newTexts })
+
+                                DescribeString strId str ->
+                                    let
+                                        new =
+                                            String.left start str ++ newString ++ String.dropLeft end str
+                                    in
+                                    EditMade
+                                        Nothing
+                                        (DescribeString strId new)
 
                                 _ ->
                                     ErrorMakingEdit Error.InvalidTextEdit
