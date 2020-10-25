@@ -418,6 +418,7 @@ failableBlocks id blocks =
 type TextCursor
     = TextCursor
         { current : Text
+        , seed : Id.Seed
         , start : Position
         , found : List TextDescription
         , balancedReplacements : List String
@@ -433,9 +434,10 @@ type Replacement
         }
 
 
-textCursor inheritedStyles startingPos =
+textCursor inheritedStyles startingPos seed =
     TextCursor
         { current = Text inheritedStyles ""
+        , seed = seed
         , found = []
         , start = startingPos
         , balancedReplacements = []
@@ -453,27 +455,31 @@ styledText :
     -> Parser Context Problem Description
 styledText options context seed startingPos inheritedStyles =
     let
-        vacantText =
-            textCursor inheritedStyles startingPos
-
         meaningful =
             '1' :: '\\' :: '\n' :: stylingChars ++ replacementStartingChars options.replacements
 
-        -- Note #1 : We're conting on the caller of styled text to advance the seed for us.
-        ( newId, newSeed ) =
+        indentedSeed =
+            Id.indent seed
+
+        ( parentId, newSeed ) =
             Id.step seed
     in
     Parser.oneOf
         [ Parser.map
             (\( pos, textNodes ) ->
                 DescribeText
-                    { id = newId
+                    { id = parentId
                     , text = textNodes
                     }
             )
             (withRange
-                (Parser.loop vacantText
-                    (styledTextLoop options context meaningful)
+                (Parser.loop
+                    (textCursor inheritedStyles startingPos seed)
+                    (styledTextLoop
+                        options
+                        context
+                        meaningful
+                    )
                 )
             )
         ]
@@ -560,19 +566,19 @@ styledTextLoop :
     -> List Char
     -> TextCursor
     -> Parser Context Problem (Parser.Step TextCursor (List TextDescription))
-styledTextLoop options context meaningful found =
+styledTextLoop options context meaningful cursor =
     Parser.oneOf
-        [ Parser.oneOf (replace options.replacements found)
+        [ Parser.oneOf (replace options.replacements cursor)
             |> Parser.map Parser.Loop
 
         -- If a char matches the first character of a replacement,
         -- but didn't match the full replacement captured above,
         -- then stash that char.
-        , Parser.oneOf (almostReplacement options.replacements found)
+        , Parser.oneOf (almostReplacement options.replacements cursor)
             |> Parser.map Parser.Loop
         , Parser.succeed
             (\styling ->
-                Parser.Loop (changeStyle found styling)
+                Parser.Loop (changeStyle cursor styling)
             )
             |= styleTokens
         , case List.filter onlyStandalone options.inlines of
@@ -586,8 +592,8 @@ styledTextLoop options context meaningful found =
                                 }
                         in
                         case result of
-                            Ok desc ->
-                                found
+                            Ok ( newCursor, desc ) ->
+                                newCursor
                                     |> commitText
                                     |> addToTextCursor
                                         (InlineBlock
@@ -599,11 +605,11 @@ styledTextLoop options context meaningful found =
                                     |> Parser.Loop
 
                             Err err ->
-                                Parser.Loop (addText (sliceRange range src) found)
+                                Parser.Loop (addText (sliceRange range src) cursor)
                     )
                     |= Parser.getSource
                     |= getPosition
-                    |= attrContainer standalones
+                    |= attrContainer cursor standalones
                     |= getPosition
 
         -- Parse Selection
@@ -618,7 +624,7 @@ styledTextLoop options context meaningful found =
                                     |> resetBalancedReplacements newCursorDetails.balancedReplacements
                                     |> resetTextWith newCursorDetails.current
                 in
-                found
+                cursor
                     |> commitText
                     |> addToTextCursor
                         (newInlineBlock
@@ -631,20 +637,20 @@ styledTextLoop options context meaningful found =
                     |> Parser.Loop
             )
             |= getPosition
-            |= (textSelection options.replacements found
+            |= (textSelection options.replacements cursor
                     |> Parser.andThen (parseInlineAttributes options)
                )
             |= getPosition
         , -- chomp until a meaningful character
           Parser.succeed
             (\( new, final ) ->
-                if new == "" || final || endingWithEmptyLine new found then
-                    case commitAndFinalizeText (addText new found) of
+                if new == "" || final || endingWithEmptyLine new cursor then
+                    case commitAndFinalizeText (addText new cursor) of
                         TextCursor txt ->
                             Parser.Done (List.reverse txt.found)
 
                 else
-                    Parser.Loop (addText new found)
+                    Parser.Loop (addText new cursor)
             )
             |= (Parser.chompWhile (\c -> not (List.member c meaningful))
                     |> Parser.getChompedString
@@ -700,7 +706,7 @@ parseInlineAttributes options ( cursor, selection ) =
                                     }
                             }
 
-                    Just (Ok foundFields) ->
+                    Just (Ok ( newCursor, foundFields )) ->
                         InlineBlock
                             { kind = selection
                             , record = foundFields
@@ -709,7 +715,7 @@ parseInlineAttributes options ( cursor, selection ) =
         )
         (Parser.oneOf
             [ Parser.map Just
-                (attrContainer
+                (attrContainer cursor
                     (case selection of
                         SelectString _ ->
                             List.filter onlyVerbatim options.inlines
@@ -823,6 +829,9 @@ textSelection replacements found =
                         , line = 1
                         , column = 1
                         }
+                        -- we can't have annotations within annotations
+                        -- and annotations are the only thing in styled text that requires an id
+                        (Id.initialSeed "")
                     )
                     (simpleStyledTextTill replacements)
                 )
@@ -908,8 +917,8 @@ If the attributes aren't required (i.e. in a oneOf), then we want to skip to all
 If they are required, then we can fastforward to a specific condition and continue on.
 
 -}
-attrContainer : List (Block a) -> Tolerant.Parser Context Problem Description
-attrContainer recordBlocks =
+attrContainer : TextCursor -> List (Block a) -> Tolerant.Parser Context Problem ( TextCursor, Description )
+attrContainer (TextCursor cursor) recordBlocks =
     Tolerant.succeed identity
         |. Tolerant.try
             (Parser.chompIf (\c -> c == '{') (Expecting "{"))
@@ -917,14 +926,16 @@ attrContainer recordBlocks =
         |> Tolerant.keep
             (Tolerant.oneOf (ExpectingInlineName "")
                 (recordBlocks
-                    -- NOTE: We're throwing away IDs here, maybe we dont want to do that?
                     |> List.map
                         (\rec ->
                             let
-                                recordParser =
-                                    getParser ParseInline (Id.initialSeed "ignore") rec
+                                ( newSeed, recordParser ) =
+                                    getParser ParseInline cursor.seed rec
+
+                                newCursor =
+                                    TextCursor { cursor | seed = newSeed }
                             in
-                            Tolerant.try (Tuple.second recordParser)
+                            Tolerant.try (Parser.map (Tuple.pair newCursor) recordParser)
                         )
                 )
             )
@@ -964,6 +975,7 @@ changeStyle ((TextCursor cursor) as full) ( styleToken, additional ) =
             { found = cursor.found
             , current = newText
             , start = cursor.start
+            , seed = cursor.seed
             , balancedReplacements = cursor.balancedReplacements
             }
 
@@ -979,6 +991,7 @@ changeStyle ((TextCursor cursor) as full) ( styleToken, additional ) =
                     :: cursor.found
             , start = end
             , current = newText
+            , seed = cursor.seed
             , balancedReplacements = cursor.balancedReplacements
             }
 
@@ -1044,6 +1057,7 @@ advanceTo target (TextCursor cursor) =
         { found = cursor.found
         , current = cursor.current
         , start = target
+        , seed = cursor.seed
         , balancedReplacements = cursor.balancedReplacements
         }
 
@@ -1083,6 +1097,7 @@ commitText ((TextCursor cursor) as existingTextCursor) =
                     Styled
                         cursor.current
                         :: cursor.found
+                , seed = cursor.seed
                 , start = end
                 , current = Text styles ""
                 , balancedReplacements = cursor.balancedReplacements
@@ -2041,7 +2056,10 @@ parseIndentedItem context block indentation existing newIndent =
                                             )
 
                             _ ->
-                                Debug.todo "THIS SHOULD NEVER HAPPEN"
+                                Parser.Loop
+                                    ( newIndex
+                                    , existing
+                                    )
 
             else
                 -- Dedented

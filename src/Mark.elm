@@ -167,14 +167,14 @@ moveParsedToResult result =
 
 
 {-| -}
-render : Document meta data -> Parsed -> Outcome (List Mark.Error.Error) (Partial (List data)) (List data)
+render : Document meta data -> Parsed -> Outcome (List Mark.Error.Error) (Partial ( meta, List data )) ( meta, List data )
 render doc ((Parsed parsedDetails) as parsed) =
     Desc.render doc parsed
         |> rewrapOutcome
 
 
 {-| -}
-compile : Document meta data -> String -> Outcome (List Mark.Error.Error) (Partial (List data)) (List data)
+compile : Document meta data -> String -> Outcome (List Mark.Error.Error) (Partial ( meta, List data )) ( meta, List data )
 compile doc source =
     Desc.compile doc source
         |> flattenErrors
@@ -281,9 +281,6 @@ getUnexpecteds description =
         DescribeString _ str ->
             []
 
-        DescribeNothing _ ->
-            []
-
         DescribeUnexpected _ details ->
             [ details ]
 
@@ -342,13 +339,13 @@ document :
 document blocks =
     createDocument (\_ -> "none")
         (Parser.succeed (Ok ()))
-        (manyOf blocks)
+        (map (Tuple.pair ()) (manyOf blocks))
 
 
 createDocument :
     (meta -> String)
     -> Parser Error.Context Error.Problem (Result Error.UnexpectedDetails meta)
-    -> Block (List data)
+    -> Block ( meta, List data )
     -> Document meta data
 createDocument toDocumentId meta child =
     Document
@@ -442,7 +439,7 @@ documentWith config =
     createDocument config.id
         (getMetadataParser metadataBlock)
         (startWith
-            (\m blocks -> blocks)
+            Tuple.pair
             metadataBlock
             (manyOf config.blocks)
         )
@@ -2281,7 +2278,7 @@ field name value (Desc.ProtoRecord details) =
                                     Nothing ->
                                         Desc.uncertain
                                             { problem = Error.MissingFields [ fieldName newField ]
-                                            , range = Debug.todo "HMMM"
+                                            , range = Desc.emptyRange
                                             }
 
                     Outcome.Almost (Desc.Recovered e fields) ->
@@ -2300,7 +2297,7 @@ field name value (Desc.ProtoRecord details) =
                                     Nothing ->
                                         Desc.uncertain
                                             { problem = Error.MissingFields [ fieldName newField ]
-                                            , range = Debug.todo "HMMM"
+                                            , range = Desc.emptyRange
                                             }
 
                     Outcome.Failure fail ->

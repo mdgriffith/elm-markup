@@ -465,7 +465,7 @@ flattenErrors result =
 
 toResult doc src =
     case flattenErrors (Mark.Internal.Description.compile doc src) of
-        Mark.Internal.Outcome.Success success ->
+        Mark.Internal.Outcome.Success ( _, success ) ->
             Ok success
 
         Mark.Internal.Outcome.Failure errs ->
@@ -1135,8 +1135,8 @@ Finally, a sentence
                         """
 
                         parsed =
-                            ( Mark.compile recordDoc doc1
-                            , Mark.compile recordDoc doc2
+                            ( compile recordDoc doc1
+                            , compile recordDoc doc2
                             )
                     in
                     Expect.all
@@ -1163,7 +1163,7 @@ Finally, a sentence
     three = 2
                         """
                     in
-                    Expect.equal (Mark.compile floatDoc doc1)
+                    Expect.equal (compile floatDoc doc1)
                         (Mark.Success [ { one = 15.25, two = -1, three = 2 } ])
             , test "Ints are parsed as expected" <|
                 \_ ->
@@ -1175,7 +1175,22 @@ Finally, a sentence
     three = 2
                         """
                     in
-                    Expect.equal (Mark.compile intDoc doc1)
+                    Expect.equal (compile intDoc doc1)
                         (Mark.Success [ { one = 15, two = -1, three = 2 } ])
             ]
         ]
+
+
+compile doc src =
+    case Mark.compile doc src of
+        Mark.Success ( _, data ) ->
+            Mark.Success data
+
+        Mark.Almost partial ->
+            Mark.Almost
+                { errors = partial.errors
+                , results = Tuple.second partial.result
+                }
+
+        Mark.Failure fail ->
+            Mark.Failure fail

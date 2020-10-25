@@ -600,9 +600,6 @@ makeEdit cursor desc =
         DescribeString id str ->
             cursor.makeEdit desc
 
-        DescribeNothing _ ->
-            NoIdFound
-
         DescribeUnexpected id details ->
             cursor.makeEdit desc
 

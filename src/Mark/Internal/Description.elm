@@ -58,7 +58,7 @@ type Document meta data
         { expect : Expectation
         , metadata : Parser Error.Context Error.Problem (Result Error.UnexpectedDetails meta)
         , parser : Parser Error.Context Error.Problem Parsed
-        , converter : Parsed -> BlockOutcome (List data)
+        , converter : Parsed -> BlockOutcome ( meta, List data )
         }
 
 
@@ -85,6 +85,16 @@ type alias Attribute =
     , value : String
     , block : Id.Id
     }
+
+
+
+{- SEARCH -}
+
+
+{-| -}
+search : String -> String -> Parsed -> List { name : String, value : String, block : Id.Id }
+search name val (Parsed parsed) =
+    []
 
 
 {-| -}
@@ -133,7 +143,6 @@ type Description
         , text : List TextDescription
         }
     | DescribeString Id String
-    | DescribeNothing Id
     | DescribeUnexpected Id Error.UnexpectedDetails
 
 
@@ -487,11 +496,8 @@ getId description =
         DescribeString id _ ->
             id
 
-        DescribeNothing id ->
-            id
-
         DescribeUnexpected id details ->
-            id
+            Id.Id "never" []
 
 
 sizeFromRange range =
@@ -942,11 +948,6 @@ match description exp =
 
         _ ->
             case description of
-                DescribeNothing _ ->
-                    case exp of
-                        _ ->
-                            False
-
                 DescribeUnexpected _ details ->
                     -- Not totally sure if this is right :/
                     True
@@ -1357,9 +1358,6 @@ writeGroup group cursor =
 writeDescription : Description -> PrintCursor -> PrintCursor
 writeDescription description cursor =
     case description of
-        DescribeNothing _ ->
-            cursor
-
         DescribeUnexpected _ details ->
             -- TODO: What do we expect here?
             cursor
@@ -1738,6 +1736,7 @@ newInlineToText new cursor =
                 InlineBlock
                     { kind = details.kind
                     , record =
+                        -- TODO: Thread ids through here!!
                         Record
                             { id = Id.Id "" []
                             , name = details.name
@@ -1746,10 +1745,6 @@ newInlineToText new cursor =
                                     (Tuple.mapSecond (.desc << create (Id.initialSeed "")))
                                     details.fields
                             }
-
-                    -- DescribeNothing (Tuple.first (Id.step (Id.initialSeed "none")))
-                    -- TODO: MAKE CONVERSION TO DESCRIPTION!
-                    -- List.map expectationToAttr attrs
                     }
                     :: cursor.text
             }
@@ -2000,22 +1995,22 @@ errorsToList ( fst, remain ) =
 
 {-| -}
 compile :
-    Document metadata data
+    Document meta data
     -> String
     ->
         Result
             (Outcome (List Error.Rendered)
                 { errors : List Error.Rendered
-                , result : List data
+                , result : ( meta, List data )
                 }
-                (List data)
+                ( meta, List data )
             )
             ( Parsed
             , Outcome (List Error.Rendered)
                 { errors : List Error.Rendered
-                , result : List data
+                , result : ( meta, List data )
                 }
-                (List data)
+                ( meta, List data )
             )
 compile (Document blocks) source =
     case Parser.run blocks.parser source of
@@ -2112,7 +2107,7 @@ lookup id (Document doc) (Parsed parsed) =
             case doc.converter (Parsed { parsed | found = found }) of
                 Success rendered ->
                     case rendered.data of
-                        top :: _ ->
+                        ( _, top :: _ ) ->
                             Success top
 
                         _ ->
@@ -2264,13 +2259,6 @@ find targetId desc =
             else
                 Nothing
 
-        DescribeNothing id ->
-            if id == targetId then
-                Just desc
-
-            else
-                Nothing
-
 
 {-| Render is a little odd.
 
@@ -2282,7 +2270,7 @@ Render can't add additional errors.
 render :
     Document meta data
     -> Parsed
-    -> Outcome (List Error.Rendered) { errors : List Error.Rendered, result : List data } (List data)
+    -> Outcome (List Error.Rendered) { errors : List Error.Rendered, result : ( meta, List data ) } ( meta, List data )
 render (Document blocks) ((Parsed parsedDetails) as parsed) =
     case parsedDetails.errors of
         [] ->

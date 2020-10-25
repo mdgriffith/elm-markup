@@ -180,7 +180,7 @@ getProblem renderedError =
 
 toResult doc src =
     case Mark.compile doc src of
-        Mark.Success success ->
+        Mark.Success ( _, success ) ->
             Ok success
 
         Mark.Failure errs ->
