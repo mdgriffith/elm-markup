@@ -634,7 +634,7 @@ makeEdit cursor desc =
                             EditMade maybeSeed
                                 (DescribeItem
                                     { details
-                                        | children = newContent
+                                        | content = newContent
                                     }
                                 )
 
