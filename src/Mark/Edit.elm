@@ -629,17 +629,30 @@ makeEdit cursor desc =
         DescribeItem details ->
             case cursor.makeEdit desc of
                 NoIdFound ->
-                    case editMany makeEdit cursor details.children of
-                        EditMade maybeSeed newChildren ->
+                    case editMany makeEdit cursor details.content of
+                        EditMade maybeSeed newContent ->
                             EditMade maybeSeed
                                 (DescribeItem
                                     { details
-                                        | children = newChildren
+                                        | children = newContent
                                     }
                                 )
 
                         NoIdFound ->
-                            NoIdFound
+                            case editMany makeEdit cursor details.children of
+                                EditMade maybeSeed newChildren ->
+                                    EditMade maybeSeed
+                                        (DescribeItem
+                                            { details
+                                                | children = newChildren
+                                            }
+                                        )
+
+                                NoIdFound ->
+                                    NoIdFound
+
+                                ErrorMakingEdit err ->
+                                    ErrorMakingEdit err
 
                         ErrorMakingEdit err ->
                             ErrorMakingEdit err
