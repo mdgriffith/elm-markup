@@ -290,9 +290,15 @@ update doc edit (Parsed original) =
                             case desc of
                                 DescribeText details ->
                                     let
+                                        realStart =
+                                            min start end
+
+                                        realEnd =
+                                            max start end
+
                                         newTexts =
-                                            doTextEdit start
-                                                end
+                                            doTextEdit realStart
+                                                realEnd
                                                 (List.map (applyStyles restyleAction))
                                                 details.text
                                                 emptySelectionEdit
@@ -314,9 +320,15 @@ update doc edit (Parsed original) =
                             case desc of
                                 DescribeText details ->
                                     let
+                                        realStart =
+                                            min start end
+
+                                        realEnd =
+                                            max start end
+
                                         newTexts =
-                                            doTextEdit start
-                                                end
+                                            doTextEdit realStart
+                                                realEnd
                                                 (\els ->
                                                     let
                                                         wrapped : NewInline
@@ -365,6 +377,13 @@ update doc edit (Parsed original) =
                 ReplaceSelection id start end newTextEls ->
                     editAtId id
                         (\desc ->
+                            let
+                                realStart =
+                                    min start end
+
+                                realEnd =
+                                    max start end
+                            in
                             case desc of
                                 DescribeText details ->
                                     let
@@ -373,8 +392,8 @@ update doc edit (Parsed original) =
 
                                         newTexts =
                                             doTextEdit
-                                                start
-                                                end
+                                                realStart
+                                                realEnd
                                                 makeNewText
                                                 details.text
                                                 emptySelectionEdit
@@ -390,7 +409,7 @@ update doc edit (Parsed original) =
                                             -- deletes work on strings too
                                             let
                                                 new =
-                                                    String.left start str ++ String.dropLeft end str
+                                                    String.left realStart str ++ String.dropLeft realEnd str
                                             in
                                             EditMade
                                                 Nothing
@@ -406,6 +425,13 @@ update doc edit (Parsed original) =
                 ReplaceString id start end newString ->
                     editAtId id
                         (\desc ->
+                            let
+                                realStart =
+                                    min start end
+
+                                realEnd =
+                                    max start end
+                            in
                             case desc of
                                 DescribeText details ->
                                     let
@@ -414,8 +440,8 @@ update doc edit (Parsed original) =
 
                                         newTexts =
                                             doTextEdit
-                                                start
-                                                end
+                                                realStart
+                                                realEnd
                                                 makeNewText
                                                 details.text
                                                 emptySelectionEdit
@@ -428,7 +454,9 @@ update doc edit (Parsed original) =
                                 DescribeString strId str ->
                                     let
                                         new =
-                                            String.left start str ++ newString ++ String.dropLeft end str
+                                            String.left realStart str
+                                                ++ newString
+                                                ++ String.dropLeft realEnd str
                                     in
                                     EditMade
                                         Nothing
