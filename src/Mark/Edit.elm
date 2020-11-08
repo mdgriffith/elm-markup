@@ -4,7 +4,7 @@ module Mark.Edit exposing
     , insertString, insertText, deleteText
     , Styles, restyle, addStyles, removeStyles
     , annotate, verbatim
-    , replace, delete, insertAt
+    , replace, delete, insertAfter
     )
 
 {-| This module allows you to make **edits** to `Parsed`, that intermediate data structure we talked about in [`Mark`](Mark).
@@ -38,7 +38,7 @@ Here are edits you can make against [`Mark.text`](Mark#text) and [`Mark.textWith
 
 # General Edits
 
-@docs replace, delete, insertAt
+@docs replace, delete, insertAfter
 
 -}
 
@@ -82,6 +82,7 @@ type Edit
       -- Indexes overflow, so if it's too large, it just puts it at the end.
       -- Indexes that are below 0 and clamped to 0
     | InsertAt Id Int Mark.New.Block
+    | InsertAfter Id (List Mark.New.Block)
     | Delete Id Int
       -- Text Editing
     | StyleText Id Offset Offset Restyle
@@ -136,6 +137,13 @@ delete =
 insertAt : Id -> Int -> Mark.New.Block -> Edit
 insertAt =
     InsertAt
+
+
+{-| Insert a block at an index within a `Mark.manyOf`.
+-}
+insertAfter : Id -> List Mark.New.Block -> Edit
+insertAfter =
+    InsertAfter
 
 
 {-| Put the current text selection within an `annotation` with some attributes.
@@ -222,6 +230,7 @@ sizeToPush size =
         Just size
 
 
+makeDeleteBlock : Id -> number -> Description -> EditOutcome Description
 makeDeleteBlock id index desc =
     case desc of
         Group many ->
@@ -252,6 +261,15 @@ update doc edit (Parsed original) =
                         \desc ->
                             -- if Desc.match desc new then
                             replaceOption id original new desc
+
+                InsertAfter id new ->
+                    editAtId id <|
+                        \desc ->
+                            let
+                                created =
+                                    createMany original.currentSeed new
+                            in
+                            AddNext (Just created.seed) created.new
 
                 InsertAt id index new ->
                     editAtId id <|
@@ -474,6 +492,11 @@ update doc edit (Parsed original) =
         |> prepareResults doc original
 
 
+prepareResults :
+    Document meta data
+    -> ParsedDetails
+    -> EditOutcome Description
+    -> Result (List Error.Rendered) Parsed
 prepareResults doc original edited =
     case edited of
         NoIdFound ->
@@ -481,6 +504,9 @@ prepareResults doc original edited =
 
         ErrorMakingEdit err ->
             Err [ Error.renderEditError err ]
+
+        AddNext maybeSeed new ->
+            Err [ Error.renderEditError Error.InvalidInsert ]
 
         EditMade maybeSeed newDescription ->
             let
@@ -509,12 +535,14 @@ prepareResults doc original edited =
                     Err errs
 
 
+textString : Text -> String
 textString (Text _ str) =
     str
 
 
 type alias EditCursor =
     -- take the current item and return an edit
+    -- pass in previous id if there is one.
     { makeEdit : Description -> EditOutcome Description
     , indentation : Int
     }
@@ -533,19 +561,10 @@ type alias Size =
 type EditOutcome desc
     = ErrorMakingEdit Error.EditErr
     | EditMade (Maybe Id.Seed) desc
+      -- AddNext only needs to be handled in editMany
+      -- if it shows up in other places, it's an error
+    | AddNext (Maybe Id.Seed) (List desc)
     | NoIdFound
-
-
-mapEdit fn edit =
-    case edit of
-        ErrorMakingEdit err ->
-            ErrorMakingEdit err
-
-        EditMade maybeSeed desc ->
-            EditMade maybeSeed (fn desc)
-
-        NoIdFound ->
-            NoIdFound
 
 
 {-| -}
@@ -565,6 +584,9 @@ makeEdit cursor desc =
                                     }
                                 )
 
+                        AddNext maybeSeed new ->
+                            ErrorMakingEdit Error.InvalidInsert
+
                         NoIdFound ->
                             NoIdFound
 
@@ -577,10 +599,6 @@ makeEdit cursor desc =
         Record details ->
             case cursor.makeEdit desc of
                 NoIdFound ->
-                    -- case details.found of
-                    --     Unexpected unexpected ->
-                    --         NoIdFound
-                    --     Found rng fields ->
                     case editFields cursor details.found of
                         EditMade maybeSeed updatedFields ->
                             EditMade maybeSeed
@@ -593,6 +611,9 @@ makeEdit cursor desc =
 
                         NoIdFound ->
                             NoIdFound
+
+                        AddNext maybeSeed new ->
+                            ErrorMakingEdit Error.InvalidInsert
 
                         ErrorMakingEdit err ->
                             ErrorMakingEdit err
@@ -616,6 +637,9 @@ makeEdit cursor desc =
 
                         NoIdFound ->
                             NoIdFound
+
+                        AddNext maybeSeed new ->
+                            ErrorMakingEdit Error.InvalidInsert
 
                         ErrorMakingEdit err ->
                             ErrorMakingEdit err
@@ -666,6 +690,9 @@ makeEdit cursor desc =
                                     }
                                 )
 
+                        AddNext maybeSeed new ->
+                            ErrorMakingEdit Error.InvalidInsert
+
                         NoIdFound ->
                             case editMany makeEdit cursor details.children of
                                 EditMade maybeSeed newChildren ->
@@ -675,6 +702,9 @@ makeEdit cursor desc =
                                                 | children = newChildren
                                             }
                                         )
+
+                                AddNext maybeSeed new ->
+                                    ErrorMakingEdit Error.InvalidInsert
 
                                 NoIdFound ->
                                     NoIdFound
@@ -708,65 +738,7 @@ makeEdit cursor desc =
             cursor.makeEdit desc
 
 
-
--- editListNested cursor lsNested =
---     let
---         indentedCursor =
---             increaseIndent cursor
---     in
---     lsNested
---         |> List.foldl
---             (\foundChild ( editMade, pastChildren ) ->
---                 case editMade of
---                     EditMade maybeSeed maybePush _ ->
---                         ( editMade
---                         , pushNested maybePush foundChild :: pastChildren
---                         )
---                     ErrorMakingEdit err ->
---                         ( ErrorMakingEdit err
---                         , foundChild :: pastChildren
---                         )
---                     NoIdFound ->
---                         case editNested indentedCursor foundChild of
---                             NoIdFound ->
---                                 ( NoIdFound
---                                 , foundChild :: pastChildren
---                                 )
---                             ErrorMakingEdit err ->
---                                 ( ErrorMakingEdit err
---                                 , foundChild :: pastChildren
---                                 )
---                             EditMade maybeSeed maybePush newChild ->
---                                 ( EditMade maybeSeed maybePush []
---                                 , newChild :: pastChildren
---                                 )
---             )
---             ( NoIdFound, [] )
---         |> (\( editMade, updatedList ) ->
---                 case editMade of
---                     EditMade maybeSeed maybePush _ ->
---                         EditMade maybeSeed maybePush (List.reverse updatedList)
---                     otherwise ->
---                         otherwise
---            )
--- editNested cursor (Nested nestedDetails) =
---     let
---         -- TODO: This code doesn't look like it's hooked up!
---         _ =
---             editMany makeEdit
---                 (\maybePush desc ->
---                     case maybePush of
---                         Nothing ->
---                             desc
---                         Just p ->
---                             pushDescription p desc
---                 )
---                 cursor
---                 nestedDetails.content
---     in
---     editListNested cursor nestedDetails.children
-
-
+editFields : EditCursor -> List ( String, Description ) -> EditOutcome (List ( String, Description ))
 editFields cursor fields =
     let
         makeFieldEdit (( fieldName, foundField ) as field) ( editMade, pastFields ) =
@@ -779,10 +751,20 @@ editFields cursor fields =
                         :: pastFields
                     )
 
+                AddNext maybeSeed new ->
+                    ( ErrorMakingEdit Error.InvalidInsert
+                    , field :: pastFields
+                    )
+
                 NoIdFound ->
                     case makeEdit cursor foundField of
                         NoIdFound ->
                             ( NoIdFound
+                            , field :: pastFields
+                            )
+
+                        AddNext maybeSeed new ->
+                            ( ErrorMakingEdit Error.InvalidInsert
                             , field :: pastFields
                             )
 
@@ -813,6 +795,11 @@ editFields cursor fields =
            )
 
 
+editMany :
+    (EditCursor -> Description -> EditOutcome Description)
+    -> EditCursor
+    -> List Description
+    -> EditOutcome (List Description)
 editMany fn cursor manyItems =
     manyItems
         |> List.foldl
@@ -820,6 +807,13 @@ editMany fn cursor manyItems =
                 case editMade of
                     EditMade maybeSeed _ ->
                         ( editMade
+                        , node :: pastChildren
+                        )
+
+                    AddNext maybeSeed new ->
+                        -- This branch should never take place because the below case statement
+                        -- with the fn is the one that actually handles it.
+                        ( EditMade maybeSeed []
                         , node :: pastChildren
                         )
 
@@ -833,6 +827,11 @@ editMany fn cursor manyItems =
                             EditMade maybeSeed newChild ->
                                 ( EditMade maybeSeed []
                                 , newChild :: pastChildren
+                                )
+
+                            AddNext maybeSeed new ->
+                                ( EditMade maybeSeed []
+                                , new ++ node :: pastChildren
                                 )
 
                             NoIdFound ->
