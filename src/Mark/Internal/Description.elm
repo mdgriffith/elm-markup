@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , getId, sizeFromRange
     , Record(..), Range, recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , BlockOutcome, InlineSelection(..), New(..), NewInline(..), emptyRange, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, valid
+    , BlockOutcome, InlineSelection(..), New(..), NewInline(..), ParsedDetails, createMany, emptyRange, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, valid
     )
 
 {-|
@@ -70,14 +70,17 @@ type alias WithAttr data =
 
 {-| -}
 type Parsed
-    = Parsed
-        { errors : List Error.Rendered
-        , found : Description
-        , expected : Expectation
-        , initialSeed : Id.Seed
-        , currentSeed : Id.Seed
-        , attributes : List Attribute
-        }
+    = Parsed ParsedDetails
+
+
+type alias ParsedDetails =
+    { errors : List Error.Rendered
+    , found : Description
+    , expected : Expectation
+    , initialSeed : Id.Seed
+    , currentSeed : Id.Seed
+    , attributes : List Attribute
+    }
 
 
 type alias Attribute =
@@ -1765,6 +1768,42 @@ newInlineToText new cursor =
                     }
                     :: cursor.text
             }
+
+
+{-| NOTE, this returns items in reversed order!
+-}
+createMany :
+    Id.Seed
+    -> List New
+    ->
+        { new : List Description
+        , seed : Id.Seed
+        }
+createMany seed manyNew =
+    createManyHelper seed manyNew []
+
+
+createManyHelper :
+    Id.Seed
+    -> List New
+    -> List Description
+    ->
+        { new : List Description
+        , seed : Id.Seed
+        }
+createManyHelper seed manyNew existing =
+    case manyNew of
+        [] ->
+            { new = []
+            , seed = seed
+            }
+
+        top :: remaining ->
+            let
+                created =
+                    create seed top
+            in
+            createManyHelper created.seed remaining (created.desc :: existing)
 
 
 {-| This function does no validation, it only creates a new Description.
