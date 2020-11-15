@@ -1,5 +1,5 @@
 module Mark.Internal.Description exposing
-    ( render, compile, toNewText
+    ( render, compile
     , Icon(..)
     , Description(..), TextDescription(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..)
@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , getId, sizeFromRange
     , Record(..), Range, recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , BlockOutcome, InlineSelection(..), New(..), NewInline(..), ParsedDetails, createMany, emptyRange, findMany, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, toNew, valid
+    , BlockOutcome, InlineSelection(..), New(..), NewInline(..), ParsedDetails, createMany, emptyRange, findMany, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, toNew, toNewText, valid
     )
 
 {-|
@@ -2396,6 +2396,8 @@ find targetId desc =
 {-| Subtle destinction between this and `find`.
 
 This will NOT reconstruct the full hierarchy, but return the exact blocks asked for.
+
+This also won't verify that all ids in the document were found, it'll just return the stuff it finds.
 
 -}
 findMany : List Id.Id -> Description -> List Description

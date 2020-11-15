@@ -1359,7 +1359,7 @@ applyStylesToText styling (Text styles str) =
 slice : Offset -> Offset -> List TextDescription -> List TextDescription
 slice start end texts =
     sliceHelper 0 start end texts []
-        |> List.reverse
+        |> List.foldl mergeStyles []
 
 
 within : Offset -> Offset -> Int -> Int -> Bool
@@ -1387,29 +1387,48 @@ sliceHelper index start end toSplit captured =
                 -- add to captured
                 sliceHelper (index + len) start end remaining (top :: captured)
 
-            else if isSplitting start index len then
-                -- split and add right
-                let
-                    ( _, right ) =
-                        splitAt start top
-                in
-                sliceHelper (index + len) start end remaining (right :: captured)
-
-            else if isSplitting end index len then
-                -- split and add left
-                let
-                    ( left, _ ) =
-                        splitAt start top
-                in
-                sliceHelper (index + len) start end remaining (left :: captured)
-
             else
-                case captured of
-                    [] ->
-                        sliceHelper (index + len) start end remaining captured
+                let
+                    containsStart =
+                        isSplitting start index len
 
-                    _ ->
-                        captured
+                    containsEnd =
+                        isSplitting end index len
+                in
+                if containsStart && containsEnd then
+                    -- split and add right
+                    let
+                        ( _, right ) =
+                            splitAt start top
+
+                        ( left, _ ) =
+                            splitAt end top
+                    in
+                    sliceHelper (index + len) start end remaining (left :: right :: captured)
+
+                else if containsStart then
+                    -- split and add right
+                    let
+                        ( _, right ) =
+                            splitAt start top
+                    in
+                    sliceHelper (index + len) start end remaining (right :: captured)
+
+                else if containsEnd then
+                    -- split and add left
+                    let
+                        ( left, _ ) =
+                            splitAt end top
+                    in
+                    sliceHelper (index + len) start end remaining (left :: captured)
+
+                else
+                    case captured of
+                        [] ->
+                            sliceHelper (index + len) start end remaining captured
+
+                        _ ->
+                            captured
 
 
 {-| Splits the current element based on an index.
