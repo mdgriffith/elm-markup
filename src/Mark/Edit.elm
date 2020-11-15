@@ -155,6 +155,9 @@ delete =
 
 
 {-| Insert a block at the first position.
+
+The id needed here is of the _parent_.
+
 -}
 insertFirst : Id -> Mark.New.Block -> Edit
 insertFirst id new =
