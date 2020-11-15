@@ -5,6 +5,7 @@ module Mark.Edit exposing
     , Styles, restyle, addStyles, removeStyles
     , annotate, verbatim
     , replace, delete, insertAfter
+    , copy, copyText
     )
 
 {-| This module allows you to make **edits** to `Parsed`, that intermediate data structure we talked about in [`Mark`](Mark).
@@ -39,6 +40,11 @@ Here are edits you can make against [`Mark.text`](Mark#text) and [`Mark.textWith
 # General Edits
 
 @docs replace, delete, insertAfter
+
+
+# Reading
+
+@docs copy, copyText
 
 -}
 
@@ -1171,6 +1177,7 @@ emptySelectionEdit =
     }
 
 
+{-| -}
 doTextEdit :
     Offset
     -> Offset
@@ -1328,6 +1335,64 @@ applyStylesToText styling (Text styles str) =
                 str
 
 
+{-| Return the text descriptions between the two offsets, splittin if necessary.
+-}
+slice : Offset -> Offset -> List TextDescription -> List TextDescription
+slice start end texts =
+    sliceHelper 0 start end texts []
+        |> List.reverse
+
+
+within : Offset -> Offset -> Int -> Int -> Bool
+within start end current len =
+    current >= start && current + len <= end
+
+
+isSplitting : Offset -> Int -> Int -> Bool
+isSplitting offset current len =
+    current <= offset && current + len >= offset
+
+
+sliceHelper : Int -> Offset -> Offset -> List TextDescription -> List TextDescription -> List TextDescription
+sliceHelper index start end toSplit captured =
+    case toSplit of
+        [] ->
+            captured
+
+        top :: remaining ->
+            let
+                len =
+                    length top
+            in
+            if within start end index len then
+                -- add to captured
+                sliceHelper (index + len) start end remaining (top :: captured)
+
+            else if isSplitting start index len then
+                -- split and add right
+                let
+                    ( _, right ) =
+                        splitAt start top
+                in
+                sliceHelper (index + len) start end remaining (right :: captured)
+
+            else if isSplitting end index len then
+                -- split and add left
+                let
+                    ( left, _ ) =
+                        splitAt start top
+                in
+                sliceHelper (index + len) start end remaining (left :: captured)
+
+            else
+                case captured of
+                    [] ->
+                        sliceHelper (index + len) start end remaining captured
+
+                    _ ->
+                        captured
+
+
 {-| Splits the current element based on an index.
 
 This function should only be called when the offset is definitely contained within the element provided, not on the edges.
@@ -1448,3 +1513,39 @@ emptyRange =
         , column = 1
         }
     }
+
+
+
+{- READING -}
+
+
+{-| -}
+copy : List Id -> Parsed -> List Mark.New.Block
+copy ids (Desc.Parsed parsed) =
+    let
+        blocks =
+            Desc.findMany ids parsed.found
+    in
+    List.map Desc.toNew blocks
+
+
+{-| -}
+copyText : Id -> Offset -> Offset -> Parsed -> List Mark.New.Text
+copyText id anchor focus (Desc.Parsed parsed) =
+    let
+        start =
+            min anchor focus
+
+        end =
+            max anchor focus
+    in
+    case Desc.findMany [ id ] parsed.found of
+        [] ->
+            []
+
+        (Desc.DescribeText details) :: [] ->
+            slice start end details.text
+                |> List.map Desc.toNewText
+
+        _ ->
+            []

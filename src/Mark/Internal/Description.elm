@@ -1,5 +1,5 @@
 module Mark.Internal.Description exposing
-    ( render, compile
+    ( render, compile, toNewText
     , Icon(..)
     , Description(..), TextDescription(..), Text(..), Style(..)
     , Expectation(..), InlineExpectation(..)
@@ -12,7 +12,7 @@ module Mark.Internal.Description exposing
     , boldStyle, italicStyle, strikeStyle
     , getId, sizeFromRange
     , Record(..), Range, recordName, ParseContext(..), blockKindToContext, blockKindToSelection, length, match, matchExpected
-    , BlockOutcome, InlineSelection(..), New(..), NewInline(..), ParsedDetails, createMany, emptyRange, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, valid
+    , BlockOutcome, InlineSelection(..), New(..), NewInline(..), ParsedDetails, createMany, emptyRange, findMany, findMatch, lookup, matchBlock, mergeListWithAttrs, mergeWithAttrs, minusPosition, toNew, valid
     )
 
 {-|
@@ -1770,6 +1770,74 @@ newInlineToText new cursor =
             }
 
 
+toNew : Description -> New
+toNew desc =
+    case desc of
+        DescribeBlock details ->
+            NewBlock details.name (toNew details.found)
+
+        Record details ->
+            NewRecord details.name
+                (List.map (Tuple.mapSecond toNew) details.found)
+
+        Group details ->
+            NewGroup (List.map toNew details.children)
+
+        StartsWith details ->
+            NewStartsWith
+                (toNew details.first)
+                (toNew details.second)
+
+        DescribeItem details ->
+            NewItem details.icon
+                (List.map toNew details.children)
+
+        -- Primitives
+        DescribeBoolean details ->
+            NewBoolean details.found
+
+        DescribeInteger details ->
+            NewInteger details.found
+
+        DescribeFloat details ->
+            NewFloat (Tuple.second details.found)
+
+        DescribeText details ->
+            NewTextBlock (List.map toNewText details.text)
+
+        DescribeString id str ->
+            NewString str
+
+        DescribeUnexpected id err ->
+            NewString ""
+
+
+toNewText : TextDescription -> NewInline
+toNewText textDesc =
+    case textDesc of
+        Styled text ->
+            NewText text
+
+        InlineBlock details ->
+            case details.record of
+                Record rec ->
+                    NewInlineBlock
+                        { name = rec.name
+                        , kind = details.kind
+                        , fields =
+                            List.map (Tuple.mapSecond toNew) rec.found
+                        }
+
+                _ ->
+                    -- NOTE, we need to maketext descriptions closer
+                    -- to the `NewInlineBlock` modeling
+                    NewInlineBlock
+                        { name = "INCORRECT"
+                        , kind = details.kind
+                        , fields = []
+                        }
+
+
 {-| NOTE, this returns items in reversed order!
 -}
 createMany :
@@ -2323,6 +2391,96 @@ find targetId desc =
 
             else
                 Nothing
+
+
+{-| Subtle destinction between this and `find`.
+
+This will NOT reconstruct the full hierarchy, but return the exact blocks asked for.
+
+-}
+findMany : List Id.Id -> Description -> List Description
+findMany ids desc =
+    findManyHelper ids desc []
+
+
+findManyHelper ids desc found =
+    case desc of
+        DescribeUnexpected id details ->
+            if List.member id ids then
+                desc :: found
+
+            else
+                found
+
+        DescribeBlock details ->
+            if List.member details.id ids then
+                desc :: found
+
+            else
+                found
+
+        Record details ->
+            if List.member details.id ids then
+                desc :: found
+
+            else
+                found
+
+        Group details ->
+            if List.member details.id ids then
+                desc :: found
+
+            else
+                List.foldl (findManyHelper ids) found details.children
+
+        StartsWith details ->
+            if List.member details.id ids then
+                desc :: found
+
+            else
+                findManyHelper ids details.first found
+                    |> findManyHelper ids details.second
+
+        DescribeItem details ->
+            case List.foldl (findManyHelper ids) found details.content of
+                foundContent ->
+                    List.foldl (findManyHelper ids) foundContent details.children
+
+        -- Primitives
+        DescribeBoolean details ->
+            if List.member details.id ids then
+                desc :: found
+
+            else
+                found
+
+        DescribeInteger details ->
+            if List.member details.id ids then
+                desc :: found
+
+            else
+                found
+
+        DescribeFloat details ->
+            if List.member details.id ids then
+                desc :: found
+
+            else
+                found
+
+        DescribeText details ->
+            if List.member details.id ids then
+                desc :: found
+
+            else
+                found
+
+        DescribeString id string ->
+            if List.member id ids then
+                desc :: found
+
+            else
+                found
 
 
 {-| Render is a little odd.
