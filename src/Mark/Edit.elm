@@ -4,7 +4,7 @@ module Mark.Edit exposing
     , insertString, insertText, deleteText
     , Styles, restyle, addStyles, removeStyles
     , annotate, verbatim
-    , replace, delete, insertAfter
+    , replace, delete, insertAfter, insertFirst
     , copy, copyText
     )
 
@@ -39,7 +39,7 @@ Here are edits you can make against [`Mark.text`](Mark#text) and [`Mark.textWith
 
 # General Edits
 
-@docs replace, delete, insertAfter
+@docs replace, delete, insertAfter, insertFirst
 
 
 # Reading
@@ -138,11 +138,27 @@ delete =
     Delete
 
 
-{-| Insert a block at an index within a `Mark.manyOf`.
+
+{-
+   I don't think we need insertAt anymore.
+   The only situation is possibly needing it for inserting something in the very first position.
+   Though when does that come up?
+   I think
+
+   {-| Insert a block at an index within a `Mark.manyOf`.
+   -}
+   insertAt : Id -> Int -> Mark.New.Block -> Edit
+   insertAt =
+       InsertAt
+
 -}
-insertAt : Id -> Int -> Mark.New.Block -> Edit
-insertAt =
-    InsertAt
+
+
+{-| Insert a block at the first position.
+-}
+insertFirst : Id -> Mark.New.Block -> Edit
+insertFirst id new =
+    InsertAt id 0 new
 
 
 {-| Insert a block at an index within a `Mark.manyOf`.
