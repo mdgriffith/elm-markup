@@ -89,7 +89,7 @@ type Edit
       -- Indexes that are below 0 and clamped to 0
     | InsertAt Id Int Mark.New.Block
     | InsertAfter Id (List Mark.New.Block)
-    | Delete Id Int
+    | Delete (List Id)
       -- Text Editing
     | StyleText Id Offset Offset Restyle
     | Annotate Id Offset Offset Annotation
@@ -131,9 +131,12 @@ replace =
     Replace
 
 
-{-| Delete a block at an index within a `Mark.manyOf`.
+{-| Delete blocks.
+
+This may fail if the block cannot be deleted(such as a field in a record).
+
 -}
-delete : Id -> Int -> Edit
+delete : List Id -> Edit
 delete =
     Delete
 
@@ -255,24 +258,35 @@ sizeToPush size =
         Just size
 
 
-makeDeleteBlock : Id -> number -> Description -> EditOutcome Description
-makeDeleteBlock id index desc =
+deleteBlocks : List Id -> Description -> EditOutcome Description
+deleteBlocks ids desc =
     case desc of
         Group many ->
             let
-                cleaned =
-                    removeByIndex index many.children
+                newChildren =
+                    List.filter
+                        (\child ->
+                            not (List.member (Desc.getId child) ids)
+                        )
+                        many.children
             in
-            EditMade
-                Nothing
-                (Group
-                    { many
-                        | children = List.reverse cleaned.items
-                    }
-                )
+            if List.length newChildren == List.length many.children then
+                NoIdFound
+
+            else
+                EditMade
+                    Nothing
+                    (Group
+                        { many
+                            | children = newChildren
+                        }
+                    )
+
+        StartsWith details ->
+            NoIdFound
 
         _ ->
-            ErrorMakingEdit Error.InvalidDelete
+            NoIdFound
 
 
 {-| -}
@@ -323,9 +337,8 @@ update doc edit (Parsed original) =
                                     -- inserts= by index only works for `manyOf`
                                     ErrorMakingEdit Error.InvalidInsert
 
-                Delete id index ->
-                    editAtId id
-                        (makeDeleteBlock id index)
+                Delete ids ->
+                    deleteBlocks ids
 
                 StyleText id start end restyleAction ->
                     editAtId id
@@ -882,36 +895,6 @@ editMany fn cursor manyItems =
 
 increaseIndent x =
     { x | indentation = x.indentation + 1 }
-
-
-removeByIndex index list =
-    {- We want to remove an item and push subsequent items based on
-
-    -}
-    List.foldl
-        (\item cursor ->
-            if cursor.index == index then
-                { index = cursor.index + 1
-                , items = cursor.items
-                , recordPushGapTillNextItem =
-                    Nothing
-                , push =
-                    Nothing
-                }
-
-            else
-                { index = cursor.index + 1
-                , items = item :: cursor.items
-                , recordPushGapTillNextItem = Nothing
-                , push = Nothing
-                }
-        )
-        { index = 0
-        , items = []
-        , recordPushGapTillNextItem = Nothing
-        , push = Nothing
-        }
-        list
 
 
 addSizes one two =
