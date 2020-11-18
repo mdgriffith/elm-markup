@@ -222,10 +222,9 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyHelloDoc
-                                (Mark.Edit.insertAt
-                                    (Id.Id "none" [ 0 ])
-                                    2
-                                    (Mark.New.string "world")
+                                (Mark.Edit.insertAfter
+                                    (Id.Id "none" [ 0, 2 ])
+                                    [ Mark.New.string "world" ]
                                 )
                                 (Description.Parsed
                                     { errors = []
@@ -260,10 +259,9 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.insertAt
-                                    (Id.Id "none" [ 0 ])
-                                    2
-                                    (Mark.New.string "world")
+                                (Mark.Edit.insertAfter
+                                    (Id.Id "none" [ 1, 1 ])
+                                    [ Mark.New.string "world" ]
                                 )
                                 threeHellos
                     in
@@ -276,31 +274,14 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.insertAt
-                                    (Id.Id "none" [ 0 ])
-                                    1
-                                    (Mark.New.string "world")
+                                (Mark.Edit.insertAfter
+                                    (Id.Id "none" [ 0, 1 ])
+                                    [ Mark.New.string "world" ]
                                 )
                                 threeHellos
                     in
                     Expect.equal (Result.map Description.toString new)
                         (Ok "hello\n\nworld\n\nhello\n\nhello")
-            , test "Insert at 0" <|
-                \_ ->
-                    let
-                        new : Result (List Mark.Error.Error) Description.Parsed
-                        new =
-                            Mark.Edit.update
-                                manyTextDocNoBlock
-                                (Mark.Edit.insertAt
-                                    (Id.Id "none" [ 0 ])
-                                    0
-                                    (Mark.New.string "world")
-                                )
-                                threeHellos
-                    in
-                    Expect.equal (Result.map Description.toString new)
-                        (Ok "world\n\nhello\n\nhello\n\nhello")
             , test "Insert at 3" <|
                 \_ ->
                     let
@@ -308,10 +289,9 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.insertAt
-                                    (Id.Id "none" [ 0 ])
-                                    3
-                                    (Mark.New.string "world")
+                                (Mark.Edit.insertAfter
+                                    (Id.Id "none" [ 2, 1 ])
+                                    [ Mark.New.string "world" ]
                                 )
                                 threeHellos
                     in
@@ -324,7 +304,7 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.delete (Id.Id "none" [ 0 ]) 0)
+                                (Mark.Edit.delete [ Id.Id "none" [ 0, 1 ] ])
                                 threeHellos
                     in
                     Expect.equal (Result.map Description.toString new)
@@ -336,7 +316,7 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.delete (Id.Id "none" [ 0 ]) 1)
+                                (Mark.Edit.delete [ Id.Id "none" [ 1, 1 ] ])
                                 threeHellos
                     in
                     Expect.equal (Result.map Description.toString new)
@@ -348,7 +328,7 @@ edits =
                         new =
                             Mark.Edit.update
                                 manyTextDocNoBlock
-                                (Mark.Edit.delete (Id.Id "none" [ 0 ]) 2)
+                                (Mark.Edit.delete [ Id.Id "none" [ 2, 1 ] ])
                                 threeHellos
                     in
                     Expect.equal (Result.map Description.toString new)

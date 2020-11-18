@@ -1310,6 +1310,7 @@ writeIcon icon cursor =
                 |> write (String.fromInt i ++ ".")
 
 
+writeGroup : List Description -> PrintCursor -> PrintCursor
 writeGroup group cursor =
     case group of
         [] ->
@@ -1362,6 +1363,16 @@ writeGroup group cursor =
             writeGroup remain newCursor
 
 
+isGroup : Description -> Bool
+isGroup desc =
+    case desc of
+        Group _ ->
+            True
+
+        _ ->
+            False
+
+
 {-| -}
 writeDescription : Description -> PrintCursor -> PrintCursor
 writeDescription description cursor =
@@ -1374,7 +1385,14 @@ writeDescription description cursor =
             cursor
                 |> write ("|> " ++ details.name ++ "\n")
                 |> indent
-                |> writeIndent
+                -- we have this exception because groups are containers
+                -- but do NOT have a containing block to handle indentation
+                |> (if isGroup details.found then
+                        identity
+
+                    else
+                        writeIndent
+                   )
                 |> writeDescription details.found
                 |> dedent
 
@@ -1658,7 +1676,20 @@ writeField ( name, description ) cursor =
         |> write
             (name ++ " =")
         |> indent
-        |> indentIfMultiline (lines > 1)
+        |> (\curs ->
+                if isGroup description then
+                    curs
+                        |> write "\n"
+
+                else if lines > 1 then
+                    curs
+                        |> write "\n"
+                        |> writeIndent
+
+                else
+                    curs
+                        |> write " "
+           )
         |> write writtenDescription.printed
         |> (\c ->
                 if String.endsWith "\n" c.printed then
@@ -1670,6 +1701,7 @@ writeField ( name, description ) cursor =
         |> dedent
 
 
+indentIfMultiline : Bool -> PrintCursor -> PrintCursor
 indentIfMultiline isMultiline cursor =
     if isMultiline then
         cursor
@@ -1862,7 +1894,7 @@ createManyHelper :
 createManyHelper seed manyNew existing =
     case manyNew of
         [] ->
-            { new = []
+            { new = List.reverse existing
             , seed = seed
             }
 
