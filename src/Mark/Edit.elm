@@ -1378,6 +1378,13 @@ sliceHelper index start end toSplit captured =
                     containsEnd =
                         isSplitting end index len
                 in
+                -- we add 1 to the end because we want the slice to be inclusive.
+                -- e.g. if we want to copy the letter 'a', which starts at the 4 offset,
+                -- then the offsets 4 4 seem reasonable.
+                -- 4 5 seems like it should copy two characters
+                -- this is basically the difference between offsets referring
+                -- to literal charcters vs the space between characters.
+                -- space between characters seems slightly harder to think about.
                 if containsStart && containsEnd then
                     -- split and add right
                     let
@@ -1385,7 +1392,7 @@ sliceHelper index start end toSplit captured =
                             splitAt start top
 
                         ( focus, _ ) =
-                            splitAt (end - start) right
+                            splitAt (end + 1 - start) right
                     in
                     sliceHelper (index + len) start end remaining (focus :: captured)
 
@@ -1401,7 +1408,7 @@ sliceHelper index start end toSplit captured =
                     -- split and add left
                     let
                         ( left, _ ) =
-                            splitAt end top
+                            splitAt (end + 1) top
                     in
                     sliceHelper (index + len) start end remaining (left :: captured)
 
