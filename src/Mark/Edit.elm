@@ -1384,10 +1384,10 @@ sliceHelper index start end toSplit captured =
                         ( _, right ) =
                             splitAt start top
 
-                        ( left, _ ) =
-                            splitAt end top
+                        ( focus, _ ) =
+                            splitAt (end - start) right
                     in
-                    sliceHelper (index + len) start end remaining (left :: right :: captured)
+                    sliceHelper (index + len) start end remaining (focus :: captured)
 
                 else if containsStart then
                     -- split and add right
