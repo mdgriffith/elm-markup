@@ -1088,7 +1088,7 @@ matchExpected subExp expected =
             List.all (matchExpectedOptions twoOptions) oneOptions
 
         ( ExpectManyOf oneOptions, ExpectManyOf twoOptions ) ->
-            List.all (matchExpectedOptions twoOptions) oneOptions
+            List.all (matchExpectedOptions oneOptions) twoOptions
 
         ( ExpectStartsWith oneStart oneRemain, ExpectStartsWith twoStart twoRemain ) ->
             matchExpected oneStart twoStart
