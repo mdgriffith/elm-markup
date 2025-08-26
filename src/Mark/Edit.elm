@@ -815,7 +815,7 @@ editListNested cursor lsNested =
 
                             EditMade maybeSeed maybePush newChild ->
                                 ( EditMade maybeSeed maybePush []
-                                , newChild :: pastChildren
+                                , newChild ++ pastChildren
                                 )
             )
             ( NoIdFound, [] )
